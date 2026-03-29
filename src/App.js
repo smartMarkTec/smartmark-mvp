@@ -6,6 +6,7 @@ import Pricing from "./pages/Pricing";
 import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 import Confirmation from "./pages/Confirmation";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
@@ -61,6 +62,7 @@ function App() {
       <Route path="/form" element={<FormPage />} />
       <Route path="/setup" element={<CampaignSetup />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
       <Route path="/confirmation" element={<Confirmation />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="*" element={<NotFound />} />

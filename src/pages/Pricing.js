@@ -117,33 +117,35 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(10px)",
   };
 
-  const startCheckout = async (plan) => {
-    if (!plan?.planKey || loadingPlan) return;
+const startCheckout = async (plan) => {
+  if (!plan?.planKey || loadingPlan) return;
 
-    setLoadingPlan(plan.planKey);
+  setLoadingPlan(plan.planKey);
 
+  try {
     try {
-      try {
-        trackEvent("pricing_cta_click", {
-          page: "pricing",
-          plan: plan.name,
-          planKey: plan.planKey,
-        });
-      } catch {}
-
-      navigate("/form", {
-        state: {
-          selectedPlan: plan.planKey,
-          selectedPlanName: plan.name,
-          fromPricing: true,
-        },
+      trackEvent("pricing_cta_click", {
+        page: "pricing",
+        plan: plan.name,
+        planKey: plan.planKey,
       });
-    } catch (err) {
-      console.error("Pricing -> form redirect failed:", err);
-      alert("Something went wrong. Please try again.");
-      setLoadingPlan("");
-    }
-  };
+    } catch {}
+
+    localStorage.setItem("sm_selected_plan", plan.planKey);
+
+    navigate("/signup", {
+      state: {
+        selectedPlan: plan.planKey,
+        selectedPlanName: plan.name,
+        fromPricing: true,
+      },
+    });
+  } catch (err) {
+    console.error("Pricing -> signup redirect failed:", err);
+    alert("Something went wrong. Please try again.");
+    setLoadingPlan("");
+  }
+};
 
   return (
     <div
@@ -486,25 +488,40 @@ const Pricing = () => {
                 </div>
 
                 <button
-                  disabled
-                  style={{
-                    width: "100%",
-                    marginTop: 24,
-                    padding: "0.95rem 1.1rem",
-                    borderRadius: 999,
-                    border: "none",
-                    background: "rgba(93,89,234,0.10)",
-                    color: "rgba(16,20,38,0.60)",
-                    fontSize: 15,
-                    fontWeight: 900,
-                    cursor: "not-allowed",
-                    boxShadow: "none",
-                    transition: "opacity .2s ease",
-                    opacity: 0.75,
-                  }}
-                >
-                  Coming Soon
-                </button>
+  onClick={() => startCheckout(plan)}
+  disabled={!!loadingPlan}
+  style={{
+    width: "100%",
+    marginTop: 24,
+    padding: "0.95rem 1.1rem",
+    borderRadius: 999,
+    border: "none",
+    background: BTN,
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: 900,
+    cursor: loadingPlan ? "not-allowed" : "pointer",
+    boxShadow: "0 12px 28px rgba(76,99,255,0.22)",
+    transition: "transform .15s ease, box-shadow .2s ease, opacity .2s ease",
+    opacity: loadingPlan && loadingPlan !== plan.planKey ? 0.7 : 1,
+  }}
+  onMouseEnter={(e) => {
+    if (!loadingPlan) {
+      e.currentTarget.style.background = BTN_HOVER;
+      e.currentTarget.style.transform = "translateY(-2px)";
+      e.currentTarget.style.boxShadow =
+        "0 16px 34px rgba(76,99,255,0.28)";
+    }
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background = BTN;
+    e.currentTarget.style.transform = "translateY(0)";
+    e.currentTarget.style.boxShadow =
+      "0 12px 28px rgba(76,99,255,0.22)";
+  }}
+>
+  {loadingPlan === plan.planKey ? "Continuing..." : plan.cta}
+</button>
 
                 <div
                   style={{

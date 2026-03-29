@@ -2313,7 +2313,33 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
-const [selectedPlan, setSelectedPlan] = useState("starter");
+const [selectedPlan, setSelectedPlan] = useState(() => {
+  return (
+    String(location.state?.selectedPlan || "").trim().toLowerCase() ||
+    String(localStorage.getItem("sm_selected_plan") || "").trim().toLowerCase() ||
+    "starter"
+  );
+});
+
+useEffect(() => {
+  const nextPlan =
+    String(location.state?.selectedPlan || "").trim().toLowerCase() ||
+    String(localStorage.getItem("sm_selected_plan") || "").trim().toLowerCase() ||
+    "starter";
+
+  setSelectedPlan(nextPlan);
+  localStorage.setItem("sm_selected_plan", nextPlan);
+
+  if (location.state?.loginUser) {
+    setLoginUser(String(location.state.loginUser || "").trim().toLowerCase());
+  }
+
+  if (location.state?.loginPass) {
+    setLoginPass(String(location.state.loginPass || ""));
+  }
+  // eslint-disable-next-line
+}, [location.state]);
+
 const [billingLoading, setBillingLoading] = useState(false);
 const [billingInfo, setBillingInfo] = useState({
   checked: false,
@@ -3699,7 +3725,11 @@ const handleSubscribeToPlan = async () => {
   setBillingLoading(true);
 
   try {
-    if (TEMP_BILLING_BYPASS) {
+       if (TEMP_BILLING_BYPASS) {
+      const currentEmail =
+        String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() ||
+        String(loginUser || "").trim().toLowerCase();
+
       const res = await stripeFetch(`/api/stripe/create-checkout-session`, {
         method: "POST",
         headers: {
@@ -3707,9 +3737,7 @@ const handleSubscribeToPlan = async () => {
         },
         body: JSON.stringify({
           plan: selectedPlan,
-          email: /\S+@\S+\.\S+/.test(String(loginUser || "").trim())
-            ? String(loginUser || "").trim()
-            : undefined,
+          email: /\S+@\S+\.\S+/.test(currentEmail) ? currentEmail : undefined,
         }),
       });
 
@@ -5404,57 +5432,77 @@ const getSavedCreatives = (campaignId) => {
               </div>
             </div>
 
-            {!getUserFromStorage() && (
-              <div
-                style={{
-                  border: "1px solid #dbe4ff",
-                  borderRadius: 14,
-                  padding: 14,
-                  background: "#f7f9ff",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                  Login
-                </div>
+  {!getUserFromStorage() && (
+  <div
+    style={{
+      border: "1px solid #dbe4ff",
+      borderRadius: 14,
+      padding: 14,
+      background: "#f7f9ff",
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}
+  >
+    <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+      Create your account first
+    </div>
 
-                <input
-                  type="text"
-                  value={loginUser}
-                  onChange={(e) => setLoginUser(e.target.value)}
-                  placeholder="Username"
-                  style={{
-                    padding: "11px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #dbe4ff",
-                    background: "#ffffff",
-                    color: "#111827",
-                    fontWeight: 700,
-                    fontSize: 13,
-                    outline: "none",
-                  }}
-                />
+    <div
+      style={{
+        color: "#667085",
+        fontWeight: 700,
+        fontSize: 13,
+        lineHeight: 1.6,
+      }}
+    >
+      Before launching, create your Smartemark account and continue with your selected plan.
+    </div>
 
-                <input
-                  type="password"
-                  value={loginPass}
-                  onChange={(e) => setLoginPass(e.target.value)}
-                  placeholder="Password"
-                  style={{
-                    padding: "11px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #dbe4ff",
-                    background: "#ffffff",
-                    color: "#111827",
-                    fontWeight: 700,
-                    fontSize: 13,
-                    outline: "none",
-                  }}
-                />
-              </div>
-            )}
+    <button
+      type="button"
+      onClick={() =>
+        navigate("/signup", {
+          state: {
+            selectedPlan,
+            fromSetup: true,
+          },
+        })
+      }
+      style={{
+        width: "100%",
+        border: "none",
+        borderRadius: 12,
+        padding: "12px 14px",
+        background: "#5b5cf0",
+        color: "#ffffff",
+        fontWeight: 900,
+        fontSize: 13,
+        cursor: "pointer",
+      }}
+    >
+      Create Account
+    </button>
+
+    <button
+      type="button"
+      onClick={() => navigate("/login")}
+      style={{
+        width: "100%",
+        borderRadius: 12,
+        padding: "12px 14px",
+        background: "#ffffff",
+        color: "#111827",
+        border: "1px solid #dbe4ff",
+        fontWeight: 900,
+        fontSize: 13,
+        cursor: "pointer",
+      }}
+    >
+      I already have an account
+    </button>
+  </div>
+)}
 
             <button
               onClick={handleLaunch}
