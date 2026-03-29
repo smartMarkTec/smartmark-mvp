@@ -1,4 +1,3 @@
-// server/routes/stripe.js
 "use strict";
 
 const express = require("express");
@@ -14,11 +13,12 @@ if (!stripeSecretKey) {
 
 const stripe = new Stripe(stripeSecretKey || "");
 
-const PRICE_MAP = {
-  starter: "price_1TCY6cAazBFzIoI1zr5yRAxu",
-  pro: "price_1TCY78AazBFzIoI1FR7x7jG4",
-  operator: "price_1TCY7bAazBFzIoI1lwe7fxwy",
-};
+/* ------------------------------------------------------------------ */
+/*                              CONFIG                                */
+/* ------------------------------------------------------------------ */
+
+const COOKIE_NAME = "sm_sid";
+const SID_HEADER = "x-sm-sid";
 
 const PLAN_NAME_MAP = {
   starter: "Starter",
@@ -26,13 +26,67 @@ const PLAN_NAME_MAP = {
   operator: "Operator",
 };
 
-const COOKIE_NAME = "sm_sid";
-const SID_HEADER = "x-sm-sid";
+const PUBLIC_PRICE_MAP = {
+  starter: process.env.STRIPE_PRICE_STARTER || "",
+  pro: process.env.STRIPE_PRICE_PRO || "",
+  operator: process.env.STRIPE_PRICE_OPERATOR || "",
+};
 
-const PRICE_TO_PLAN = Object.entries(PRICE_MAP).reduce((acc, [plan, priceId]) => {
-  acc[priceId] = plan;
-  return acc;
-}, {});
+const FOUNDER_PRICE_MAP = {
+  starter: process.env.STRIPE_PRICE_STARTER_FOUNDER || "",
+  pro: process.env.STRIPE_PRICE_PRO_FOUNDER || "",
+  operator: process.env.STRIPE_PRICE_OPERATOR_FOUNDER || "",
+};
+
+function normalizePlanKey(raw) {
+  return String(raw || "").trim().toLowerCase();
+}
+
+function normalizeFounderFlag(value) {
+  if (typeof value === "boolean") return value;
+  const s = String(value || "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "founder";
+}
+
+function getClientUrl(req) {
+  return (
+    process.env.CLIENT_URL ||
+    req.headers.origin ||
+    "http://localhost:3000"
+  );
+}
+
+function getPriceMap(founder = false) {
+  return founder ? FOUNDER_PRICE_MAP : PUBLIC_PRICE_MAP;
+}
+
+function getPriceId(planKey, founder = false) {
+  const map = getPriceMap(founder);
+  return String(map[planKey] || "").trim();
+}
+
+function buildPriceToPlanLookup() {
+  const out = {};
+
+  for (const [planKey, priceId] of Object.entries(PUBLIC_PRICE_MAP)) {
+    if (priceId) out[priceId] = { planKey, founder: false };
+  }
+
+  for (const [planKey, priceId] of Object.entries(FOUNDER_PRICE_MAP)) {
+    if (priceId) out[priceId] = { planKey, founder: true };
+  }
+
+  return out;
+}
+
+function derivePlanMetaFromPriceId(priceId) {
+  const lookup = buildPriceToPlanLookup();
+  return lookup[String(priceId || "").trim()] || { planKey: "", founder: false };
+}
+
+/* ------------------------------------------------------------------ */
+/*                              DB HELPERS                            */
+/* ------------------------------------------------------------------ */
 
 async function ensureDbShape() {
   await db.read();
@@ -67,10 +121,6 @@ async function getSessionUser(req) {
   return { sid, sess, user };
 }
 
-function derivePlanKeyFromPriceId(priceId) {
-  return PRICE_TO_PLAN[String(priceId || "").trim()] || "";
-}
-
 async function setUserBillingByIdentity({
   username = "",
   email = "",
@@ -81,7 +131,7 @@ async function setUserBillingByIdentity({
   const u = String(username || "").trim();
   const e = String(email || "").trim().toLowerCase();
 
-  let user =
+  const user =
     db.data.users.find((x) => String(x.username || "").trim() === u) ||
     db.data.users.find((x) => String(x.email || "").trim().toLowerCase() === e);
 
@@ -116,7 +166,7 @@ async function markSubscriptionFromStripe({
   status = "",
   currentPeriodEnd = null,
 }) {
-  const planKey = derivePlanKeyFromPriceId(priceId);
+  const { planKey, founder } = derivePlanMetaFromPriceId(priceId);
 
   return await setUserBillingByIdentity({
     username,
@@ -127,6 +177,8 @@ async function markSubscriptionFromStripe({
       stripeSubscriptionId: subscriptionId || "",
       stripePriceId: priceId || "",
       planKey: planKey || "",
+      founder: !!founder,
+      planName: planKey ? PLAN_NAME_MAP[planKey] : "",
       status: String(status || "").trim(),
       hasAccess: ["active", "trialing"].includes(String(status || "").trim().toLowerCase()),
       currentPeriodEnd: currentPeriodEnd || null,
@@ -134,13 +186,28 @@ async function markSubscriptionFromStripe({
   });
 }
 
+/* ------------------------------------------------------------------ */
+/*                              ROUTES                                */
+/* ------------------------------------------------------------------ */
+
 router.get("/health", (_req, res) => {
   res.json({
     ok: true,
     hasSecretKey: !!process.env.STRIPE_SECRET_KEY,
     hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
     clientUrl: process.env.CLIENT_URL || null,
-    plans: Object.keys(PRICE_MAP),
+    prices: {
+      public: {
+        starter: !!PUBLIC_PRICE_MAP.starter,
+        pro: !!PUBLIC_PRICE_MAP.pro,
+        operator: !!PUBLIC_PRICE_MAP.operator,
+      },
+      founder: {
+        starter: !!FOUNDER_PRICE_MAP.starter,
+        pro: !!FOUNDER_PRICE_MAP.pro,
+        operator: !!FOUNDER_PRICE_MAP.operator,
+      },
+    },
   });
 });
 
@@ -154,38 +221,48 @@ router.post("/create-checkout-session", async (req, res) => {
       });
     }
 
-    const rawPlan = String(req.body?.plan || "").trim().toLowerCase();
+    const planKey = normalizePlanKey(req.body?.plan);
+    const founder = normalizeFounderFlag(req.body?.founder);
     const email = String(req.body?.email || "").trim() || undefined;
 
-    if (!rawPlan || !PRICE_MAP[rawPlan]) {
+    if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
         error: "Invalid plan. Use starter, pro, or operator.",
       });
     }
 
-    const clientUrl =
-      process.env.CLIENT_URL ||
-      req.headers.origin ||
-      "http://localhost:3000";
+    const priceId = getPriceId(planKey, founder);
+    if (!priceId) {
+      return res.status(400).json({
+        ok: false,
+        error: `Missing Stripe price for ${planKey}${founder ? " founder" : ""}.`,
+      });
+    }
+
+    const clientUrl = getClientUrl(req);
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      line_items: [{ price: PRICE_MAP[rawPlan], quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${rawPlan}`,
+      success_url: `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}${founder ? "&founder=1" : ""}`,
       cancel_url: `${clientUrl}/setup`,
       metadata: {
-        planKey: rawPlan,
-        planName: PLAN_NAME_MAP[rawPlan],
+        planKey,
+        founder: founder ? "true" : "false",
+        planName: PLAN_NAME_MAP[planKey],
+        source: "public_pricing_page",
       },
       subscription_data: {
         metadata: {
-          planKey: rawPlan,
-          planName: PLAN_NAME_MAP[rawPlan],
+          planKey,
+          founder: founder ? "true" : "false",
+          planName: PLAN_NAME_MAP[planKey],
+          source: "public_pricing_page",
         },
       },
     });
@@ -229,6 +306,8 @@ router.get("/billing-status", async (req, res) => {
       billing: {
         provider: billing.provider || "",
         planKey: billing.planKey || "",
+        planName: billing.planName || "",
+        founder: !!billing.founder,
         status: billing.status || "",
         hasAccess: !!billing.hasAccess,
         currentPeriodEnd: billing.currentPeriodEnd || null,
@@ -263,44 +342,52 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       });
     }
 
-    const rawPlan = String(req.body?.plan || "").trim().toLowerCase();
-    if (!rawPlan || !PRICE_MAP[rawPlan]) {
+    const planKey = normalizePlanKey(req.body?.plan);
+    const founder = normalizeFounderFlag(req.body?.founder);
+
+    if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
         error: "Invalid plan. Use starter, pro, or operator.",
       });
     }
 
-    const clientUrl =
-      process.env.CLIENT_URL ||
-      req.headers.origin ||
-      "http://localhost:3000";
+    const priceId = getPriceId(planKey, founder);
+    if (!priceId) {
+      return res.status(400).json({
+        ok: false,
+        error: `Missing Stripe price for ${planKey}${founder ? " founder" : ""}.`,
+      });
+    }
 
+    const clientUrl = getClientUrl(req);
     const username = String(auth.user.username || "").trim();
     const email = String(auth.user.email || "").trim();
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      line_items: [{ price: PRICE_MAP[rawPlan], quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/setup?checkout=success&plan=${rawPlan}`,
+      success_url: `${clientUrl}/setup?checkout=success&plan=${planKey}${founder ? "&founder=1" : ""}`,
       cancel_url: `${clientUrl}/setup?checkout=cancelled`,
       metadata: {
         username,
         email,
-        planKey: rawPlan,
-        planName: PLAN_NAME_MAP[rawPlan],
+        planKey,
+        founder: founder ? "true" : "false",
+        planName: PLAN_NAME_MAP[planKey],
         source: "campaign_setup",
       },
       subscription_data: {
         metadata: {
           username,
           email,
-          planKey: rawPlan,
-          planName: PLAN_NAME_MAP[rawPlan],
+          planKey,
+          founder: founder ? "true" : "false",
+          planName: PLAN_NAME_MAP[planKey],
           source: "campaign_setup",
         },
       },
@@ -346,9 +433,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const username = String(session?.metadata?.username || "").trim();
         const email = String(
           session?.customer_details?.email ||
-            session?.customer_email ||
-            session?.metadata?.email ||
-            ""
+          session?.customer_email ||
+          session?.metadata?.email ||
+          ""
         ).trim();
 
         const customerId = String(session?.customer || "").trim();
@@ -444,7 +531,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const subscriptionId = String(invoice?.subscription || "").trim();
         let username = "";
         let email = String(invoice?.customer_email || "").trim();
-        let customerId = String(invoice?.customer || "").trim();
+        const customerId = String(invoice?.customer || "").trim();
         let priceId = "";
         let currentPeriodEnd = null;
 
