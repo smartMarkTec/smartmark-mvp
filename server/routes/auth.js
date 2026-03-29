@@ -929,17 +929,13 @@ router.get('/facebook', (req, res) => {
     n: nanoid(10),
   });
 
-  if (!FACEBOOK_LOGIN_CONFIG_ID) {
-    return res.status(500).send('Missing FACEBOOK_LOGIN_CONFIG_ID');
-  }
-
-  const fbUrl =
+   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
     `?client_id=${encodeURIComponent(FACEBOOK_APP_ID)}` +
     `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
     `&response_type=code` +
-    `&state=${encodeURIComponent(state)}` +
-    `&config_id=${encodeURIComponent(FACEBOOK_LOGIN_CONFIG_ID)}`;
+    `&state=${encodeURIComponent(state)}`;
 
   res.redirect(fbUrl);
 });
