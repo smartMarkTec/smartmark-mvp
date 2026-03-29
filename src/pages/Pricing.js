@@ -117,12 +117,12 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(10px)",
   };
 
-const startCheckout = async (plan) => {
-  if (!plan?.planKey || loadingPlan) return;
-
-  setLoadingPlan(plan.planKey);
+const startCheckout = (plan) => {
+  if (!plan?.planKey) return;
 
   try {
+    localStorage.setItem("sm_selected_plan", plan.planKey);
+
     try {
       trackEvent("pricing_cta_click", {
         page: "pricing",
@@ -130,8 +130,6 @@ const startCheckout = async (plan) => {
         planKey: plan.planKey,
       });
     } catch {}
-
-    localStorage.setItem("sm_selected_plan", plan.planKey);
 
     navigate("/signup", {
       state: {
@@ -143,7 +141,6 @@ const startCheckout = async (plan) => {
   } catch (err) {
     console.error("Pricing -> signup redirect failed:", err);
     alert("Something went wrong. Please try again.");
-    setLoadingPlan("");
   }
 };
 
@@ -487,37 +484,21 @@ const startCheckout = async (plan) => {
                   </div>
                 </div>
 
-                <button
+      <button
+  type="button"
   onClick={() => startCheckout(plan)}
-  disabled={!!loadingPlan}
   style={{
     width: "100%",
     marginTop: 24,
     padding: "0.95rem 1.1rem",
     borderRadius: 999,
     border: "none",
-    background: BTN,
+    background: "#4c63ff",
     color: "#ffffff",
     fontSize: 15,
     fontWeight: 900,
-    cursor: loadingPlan ? "not-allowed" : "pointer",
+    cursor: "pointer",
     boxShadow: "0 12px 28px rgba(76,99,255,0.22)",
-    transition: "transform .15s ease, box-shadow .2s ease, opacity .2s ease",
-    opacity: loadingPlan && loadingPlan !== plan.planKey ? 0.7 : 1,
-  }}
-  onMouseEnter={(e) => {
-    if (!loadingPlan) {
-      e.currentTarget.style.background = BTN_HOVER;
-      e.currentTarget.style.transform = "translateY(-2px)";
-      e.currentTarget.style.boxShadow =
-        "0 16px 34px rgba(76,99,255,0.28)";
-    }
-  }}
-  onMouseLeave={(e) => {
-    e.currentTarget.style.background = BTN;
-    e.currentTarget.style.transform = "translateY(0)";
-    e.currentTarget.style.boxShadow =
-      "0 12px 28px rgba(76,99,255,0.22)";
   }}
 >
   {loadingPlan === plan.planKey ? "Continuing..." : plan.cta}
