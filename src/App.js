@@ -6,20 +6,9 @@ import Pricing from "./pages/Pricing";
 import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
-import Signup from "./pages/Signup";
+import Signup from "./Signup";
 import Confirmation from "./pages/Confirmation";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
-
-/**
- * NOTE:
- * Auth guard has been DISABLED intentionally so you can
- * navigate directly to /setup (and other pages) without being
- * redirected to /login during development.
- *
- * Login still works and hits your backend normally.
- * When you're ready to re-enable protection, you can wrap the
- * routes you want with a guard again.
- */
 
 function NotFound() {
   return (
@@ -45,7 +34,6 @@ function NotFound() {
 function App() {
   const location = useLocation();
 
-  // ✅ GA4 SPA pageview tracking
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!window.gtag) return;
