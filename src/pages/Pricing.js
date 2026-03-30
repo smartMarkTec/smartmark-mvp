@@ -581,18 +581,8 @@ const Pricing = () => {
             ...glass,
           }}
         >
-          <div
-            style={{
-              fontSize: isMobile ? 22 : 28,
-              fontWeight: 900,
-              lineHeight: 1.15,
-              marginBottom: 10,
-              color: TEXT,
-            }}
-          >
-            Smarter campaign execution without agency friction
-          </div>
-
+     
+        
           <div
             style={{
               maxWidth: 760,
