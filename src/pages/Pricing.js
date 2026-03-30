@@ -573,13 +573,7 @@ const Pricing = () => {
         </div>
 
         <div
-          style={{
-            marginTop: isMobile ? 28 : 40,
-            textAlign: "center",
-            borderRadius: 24,
-            padding: isMobile ? "1.2rem 1rem" : "1.5rem 1.4rem",
-            ...glass,
-          }}
+        
         >
      
         
