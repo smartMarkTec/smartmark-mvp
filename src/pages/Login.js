@@ -10,7 +10,7 @@ const TEXT = "#101426";
 const TEXT_SOFT = "#66708b";
 const PURPLE = "#5d59ea";
 const BORDER = "rgba(93, 89, 234, 0.13)";
-const PANEL = "rgba(255,255,255,0.90)";
+const PANEL = "rgba(255,255,255,0.92)";
 const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.12)";
 const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
 const BTN_HOVER =
@@ -211,157 +211,45 @@ export default function Login() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "24px 16px",
+        padding: "32px 16px",
       }}
     >
       <div
         style={{
           width: "100%",
-          maxWidth: 1100,
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          maxWidth: 520,
           background: PANEL,
           border: `1px solid ${BORDER}`,
           borderRadius: 28,
           boxShadow: SHADOW,
-          overflow: "hidden",
+          padding: "34px 32px",
         }}
       >
         <div
           style={{
-            background: "linear-gradient(180deg, #2d2d8f 0%, #3133a6 100%)",
-            color: "#ffffff",
-            padding: "34px 28px",
             display: "flex",
-            flexDirection: "column",
-            justifyContent: "space-between",
-            minHeight: 720,
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 28,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img
-              src={smartmarkLogo}
-              alt="Smartemark"
-              style={{ width: 42, height: 42, borderRadius: 12 }}
-            />
-            <div style={{ fontSize: 28, fontWeight: 900 }}>Smartemark</div>
-          </div>
-
-          <div>
-            <div
-              style={{
-                fontSize: 44,
-                lineHeight: 1.05,
-                fontWeight: 900,
-                marginBottom: 14,
-              }}
-            >
-              Welcome back
-            </div>
-            <div
-              style={{
-                color: "rgba(255,255,255,0.86)",
-                fontSize: 18,
-                lineHeight: 1.7,
-                maxWidth: 420,
-              }}
-            >
-              Log in to your Smartemark account and continue your setup.
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: 18,
-              borderRadius: 18,
-              background: "rgba(255,255,255,0.08)",
-              border: "1px solid rgba(255,255,255,0.12)",
-            }}
-          >
-            {plan ? (
-              <>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.5,
-                    textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.72)",
-                    marginBottom: 8,
-                  }}
-                >
-                  Selected plan
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>
-                  {plan.name}
-                </div>
-                <div style={{ fontSize: 16, color: "rgba(255,255,255,0.86)" }}>
-                  {plan.price}
-                </div>
-              </>
-            ) : (
-              <>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.5,
-                    textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.72)",
-                    marginBottom: 8,
-                  }}
-                >
-                  SaaS access
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>
-                  Real login flow
-                </div>
-                <div style={{ fontSize: 16, color: "rgba(255,255,255,0.86)" }}>
-                  Email and password authentication
-                </div>
-              </>
-            )}
-          </div>
+          <img
+            src={smartmarkLogo}
+            alt="Smartemark"
+            style={{ width: 42, height: 42, borderRadius: 12 }}
+          />
+          <div style={{ fontSize: 28, fontWeight: 900 }}>Smartemark</div>
         </div>
 
-        <div
-          style={{
-            padding: "42px 40px",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-          }}
-        >
+        <div style={{ marginBottom: 22 }}>
           <div
             style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginBottom: 26,
+              fontSize: 42,
+              lineHeight: 1.05,
+              fontWeight: 900,
+              marginBottom: 10,
             }}
           >
-            <button
-              onClick={() =>
-                navigate("/signup", {
-                  state: {
-                    selectedPlan,
-                    founder,
-                  },
-                })
-              }
-              style={{
-                background: "transparent",
-                border: "none",
-                color: PURPLE,
-                fontWeight: 800,
-                fontSize: 15,
-                cursor: "pointer",
-              }}
-            >
-              Need an account? Sign up
-            </button>
-          </div>
-
-          <div style={{ fontSize: 42, fontWeight: 900, marginBottom: 10 }}>
             Log in
           </div>
 
@@ -369,85 +257,141 @@ export default function Login() {
             style={{
               color: TEXT_SOFT,
               fontSize: 16,
-              lineHeight: 1.6,
-              marginBottom: 28,
+              lineHeight: 1.65,
             }}
           >
             {plan
-              ? "Log in, then continue directly to checkout."
-              : "Enter your real Smartemark account credentials."}
+              ? `Enter your account details to continue with the ${plan.name} plan.`
+              : "Enter your Smartemark email and password."}
           </div>
+        </div>
 
-          <form
-            onSubmit={handleLogin}
-            style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        {plan ? (
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 16,
+              background: "rgba(93, 89, 234, 0.06)",
+              border: "1px solid rgba(93, 89, 234, 0.12)",
+            }}
           >
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setErr("");
-              }}
-              placeholder="Email address"
-              style={inputStyle}
-            />
-
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setErr("");
-              }}
-              placeholder="Password"
-              style={inputStyle}
-            />
-
-            {err ? (
-              <div
-                style={{
-                  color: "#b42318",
-                  fontWeight: 800,
-                  fontSize: 14,
-                }}
-              >
-                {err}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={loading}
+            <div
               style={{
-                width: "100%",
-                marginTop: 8,
-                padding: "1rem 1.1rem",
-                borderRadius: 14,
-                border: "none",
-                background: BTN,
-                color: "#ffffff",
-                fontSize: 16,
+                fontSize: 12,
                 fontWeight: 900,
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.7 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!loading) e.currentTarget.style.background = BTN_HOVER;
-              }}
-              onMouseLeave={(e) => {
-                if (!loading) e.currentTarget.style.background = BTN;
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+                color: PURPLE,
+                marginBottom: 6,
               }}
             >
-              {loading
-                ? "Logging In..."
-                : plan
-                ? "Log In & Continue"
-                : "Log In"}
-            </button>
-          </form>
+              Selected plan
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 2 }}>
+              {plan.name}
+            </div>
+            <div style={{ fontSize: 15, color: TEXT_SOFT }}>{plan.price}</div>
+          </div>
+        ) : null}
+
+        <form
+          onSubmit={handleLogin}
+          style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        >
+          <input
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setErr("");
+            }}
+            placeholder="Email address"
+            style={inputStyle}
+          />
+
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setErr("");
+            }}
+            placeholder="Password"
+            style={inputStyle}
+          />
+
+          {err ? (
+            <div
+              style={{
+                color: "#b42318",
+                fontWeight: 800,
+                fontSize: 14,
+              }}
+            >
+              {err}
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              marginTop: 6,
+              padding: "1rem 1.1rem",
+              borderRadius: 14,
+              border: "none",
+              background: BTN,
+              color: "#ffffff",
+              fontSize: 16,
+              fontWeight: 900,
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.7 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!loading) e.currentTarget.style.background = BTN_HOVER;
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) e.currentTarget.style.background = BTN;
+            }}
+          >
+            {loading ? "Logging In..." : "Log In"}
+          </button>
+        </form>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            onClick={() =>
+              navigate("/signup", {
+                state: {
+                  selectedPlan,
+                  founder,
+                },
+              })
+            }
+            style={linkBtn}
+          >
+            Need an account? Sign up
+          </button>
+
+          <button
+            onClick={() => navigate("/")}
+            style={linkBtn}
+          >
+            Back to home
+          </button>
         </div>
       </div>
     </div>
@@ -464,4 +408,14 @@ const inputStyle = {
   fontSize: 16,
   fontWeight: 600,
   outline: "none",
+};
+
+const linkBtn = {
+  background: "transparent",
+  border: "none",
+  color: "#5d59ea",
+  fontWeight: 800,
+  fontSize: 15,
+  cursor: "pointer",
+  padding: 0,
 };
