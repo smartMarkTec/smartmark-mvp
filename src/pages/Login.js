@@ -92,6 +92,10 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
   return json.url;
 }
 
+function looksLikeEmail(value) {
+  return /\S+@\S+\.\S+/.test(String(value || "").trim());
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -119,7 +123,7 @@ export default function Login() {
     return normalized === "true" || normalized === "1" || normalized === "yes";
   }, [location.state]);
 
-  const [email, setEmail] = useState(
+  const [identifier, setIdentifier] = useState(
     localStorage.getItem("smartmark_login_username") ||
       localStorage.getItem("sm_signup_email") ||
       ""
@@ -134,16 +138,11 @@ export default function Login() {
     e.preventDefault();
     setErr("");
 
-    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanIdentifier = String(identifier || "").trim();
     const cleanPassword = String(password || "");
 
-    if (!cleanEmail || !cleanPassword) {
-      setErr("Enter your email and password.");
-      return;
-    }
-
-    if (!/\S+@\S+\.\S+/.test(cleanEmail)) {
-      setErr("Enter a valid email.");
+    if (!cleanIdentifier || !cleanPassword) {
+      setErr("Enter your email or username and password.");
       return;
     }
 
@@ -154,7 +153,7 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: cleanEmail,
+          username: cleanIdentifier,
           password: cleanPassword,
         }),
       });
@@ -162,11 +161,11 @@ export default function Login() {
       const loginJson = await loginRes.json().catch(() => ({}));
 
       if (!loginRes.ok || !loginJson?.success) {
-        throw new Error(loginJson?.error || "Invalid email or password.");
+        throw new Error(loginJson?.error || "Invalid login credentials.");
       }
 
-      localStorage.setItem("sm_current_user", cleanEmail);
-      localStorage.setItem("smartmark_login_username", cleanEmail);
+      localStorage.setItem("sm_current_user", cleanIdentifier);
+      localStorage.setItem("smartmark_login_username", cleanIdentifier);
       localStorage.setItem("smartmark_login_password", cleanPassword);
 
       const storedName =
@@ -178,10 +177,18 @@ export default function Login() {
         localStorage.setItem("sm_selected_plan", selectedPlan);
         localStorage.setItem("sm_founder_offer", founder ? "true" : "false");
 
+        const checkoutEmail = looksLikeEmail(cleanIdentifier)
+          ? cleanIdentifier.toLowerCase()
+          : (localStorage.getItem("sm_signup_email") || "").trim().toLowerCase();
+
+        if (!checkoutEmail) {
+          throw new Error("Please use an email-based account to continue to checkout.");
+        }
+
         const checkoutUrl = await createCheckoutSession({
           plan: selectedPlan,
           founder,
-          email: cleanEmail,
+          email: checkoutEmail,
           fullName: storedName,
         });
 
@@ -254,7 +261,7 @@ export default function Login() {
           >
             {selectedPlan && PLAN_META[selectedPlan]
               ? `Enter your account details to continue with the ${PLAN_META[selectedPlan].name} plan.`
-              : "Enter your Smartemark email and password."}
+              : "Enter your Smartemark email or username and password."}
           </div>
         </div>
 
@@ -263,14 +270,14 @@ export default function Login() {
           style={{ display: "flex", flexDirection: "column", gap: 16 }}
         >
           <input
-            type="email"
-            autoComplete="email"
-            value={email}
+            type="text"
+            autoComplete="username"
+            value={identifier}
             onChange={(e) => {
-              setEmail(e.target.value);
+              setIdentifier(e.target.value);
               setErr("");
             }}
-            placeholder="Email address"
+            placeholder="Email or username"
             style={inputStyle}
           />
 
