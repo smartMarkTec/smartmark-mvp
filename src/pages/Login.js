@@ -2,7 +2,6 @@
 // src/pages/Login.js
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import smartmarkLogo from "../assets/smartmark-logo.svg";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const BG = "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
@@ -120,8 +119,6 @@ export default function Login() {
     return normalized === "true" || normalized === "1" || normalized === "yes";
   }, [location.state]);
 
-  const plan = PLAN_META[selectedPlan] || null;
-
   const [email, setEmail] = useState(
     localStorage.getItem("smartmark_login_username") ||
       localStorage.getItem("sm_signup_email") ||
@@ -222,26 +219,21 @@ export default function Login() {
           border: `1px solid ${BORDER}`,
           borderRadius: 28,
           boxShadow: SHADOW,
-          padding: "34px 32px",
+          padding: "38px 32px",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 28,
-          }}
-        >
-          <img
-            src={smartmarkLogo}
-            alt="Smartemark"
-            style={{ width: 42, height: 42, borderRadius: 12 }}
-          />
-          <div style={{ fontSize: 28, fontWeight: 900 }}>Smartemark</div>
-        </div>
+        <div style={{ marginBottom: 24 }}>
+          <div
+            style={{
+              fontSize: 28,
+              fontWeight: 900,
+              marginBottom: 16,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            Smartemark
+          </div>
 
-        <div style={{ marginBottom: 22 }}>
           <div
             style={{
               fontSize: 42,
@@ -260,40 +252,11 @@ export default function Login() {
               lineHeight: 1.65,
             }}
           >
-            {plan
-              ? `Enter your account details to continue with the ${plan.name} plan.`
+            {selectedPlan && PLAN_META[selectedPlan]
+              ? `Enter your account details to continue with the ${PLAN_META[selectedPlan].name} plan.`
               : "Enter your Smartemark email and password."}
           </div>
         </div>
-
-        {plan ? (
-          <div
-            style={{
-              marginBottom: 20,
-              padding: 16,
-              borderRadius: 16,
-              background: "rgba(93, 89, 234, 0.06)",
-              border: "1px solid rgba(93, 89, 234, 0.12)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 0.5,
-                textTransform: "uppercase",
-                color: PURPLE,
-                marginBottom: 6,
-              }}
-            >
-              Selected plan
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 2 }}>
-              {plan.name}
-            </div>
-            <div style={{ fontSize: 15, color: TEXT_SOFT }}>{plan.price}</div>
-          </div>
-        ) : null}
 
         <form
           onSubmit={handleLogin}
@@ -386,10 +349,7 @@ export default function Login() {
             Need an account? Sign up
           </button>
 
-          <button
-            onClick={() => navigate("/")}
-            style={linkBtn}
-          >
+          <button onClick={() => navigate("/")} style={linkBtn}>
             Back to home
           </button>
         </div>
