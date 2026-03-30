@@ -583,18 +583,7 @@ const Pricing = () => {
         >
      
         
-          <div
-            style={{
-              maxWidth: 760,
-              margin: "0 auto",
-              color: TEXT_SOFT,
-              fontSize: isMobile ? 15 : 16,
-              lineHeight: 1.7,
-              fontWeight: 500,
-            }}
-          >
-            Choose the plan that matches your business today
-          </div>
+      
         </div>
       </div>
     </div>
