@@ -4233,7 +4233,7 @@ const getSavedCreatives = (campaignId) => {
       ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
       : getFallbackPublicSummary();
 
-  const showLaunchPane = !selectedCampaignId || selectedCampaignId === "__DRAFT__";
+
 
   const selectedCampaignSettings =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
@@ -5216,93 +5216,168 @@ const getSavedCreatives = (campaignId) => {
   </div>
 </div>
 
-            {selectedCampaignId ? (
-              <>
-                {selectedCampaignId !== "__DRAFT__" ? (
-                  <>
-                    <MarketerActionsCard
-                      summary={selectedOptimizerSummary}
-                      optimizerState={selectedOptimizerState}
-                    />
+           {selectedCampaignId ? (
+  <>
+    {selectedCampaignId !== "__DRAFT__" ? (
+      <>
+        <MarketerActionsCard
+          summary={selectedOptimizerSummary}
+          optimizerState={selectedOptimizerState}
+        />
 
-                    <div
-                      style={{
-                        background: "#f7f9ff",
-                        border: "1px solid #dbe4ff",
-                        borderRadius: 18,
-                        padding: 14,
-                      }}
-                    >
-                      <MetricsRow metrics={metricsMap[selectedCampaignId]} />
-                    </div>
-                  </>
-                ) : (
-                  <div
-                    style={{
-                      background: "#f7f9ff",
-                      border: "1px solid #dbe4ff",
-                      borderRadius: 16,
-                      padding: 16,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
-                      Draft Campaign
-                    </div>
-                    <div style={{ color: "#667085", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-                      This campaign is ready to review and launch.
-                    </div>
-                  </div>
-                )}
-
-  
-              </>
-            ) : (
-              <div
-                style={{
-                  color: "#667085",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  lineHeight: 1.6,
-                }}
-              >
-                Select a campaign to view metrics and AI updates, or hit the plus button to start a new one.
-              </div>
-            )}
+        <div
+          style={{
+            background: "#f7f9ff",
+            border: "1px solid #dbe4ff",
+            borderRadius: 18,
+            padding: 14,
+          }}
+        >
+          <MetricsRow metrics={metricsMap[selectedCampaignId]} />
+        </div>
+      </>
+    ) : (
+      <>
+        <div
+          style={{
+            background: "#f7f9ff",
+            border: "1px solid #dbe4ff",
+            borderRadius: 16,
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+            Draft Campaign
           </div>
-          {showLaunchPane && (
+          <div style={{ color: "#667085", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
+            This campaign is ready to review and launch.
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #dbe4ff",
+            borderRadius: 22,
+            padding: 20,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            marginTop: 2,
+          }}
+        >
+          <div>
+            <div style={{ color: "#111827", fontWeight: 900, fontSize: 18, marginBottom: 0 }}>
+              New Campaign
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Campaign Name</label>
+            <input
+              type="text"
+              value={form.campaignName}
+              onChange={(e) => setForm((prev) => ({ ...prev, campaignName: e.target.value }))}
+              placeholder="Campaign name"
+              style={{
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid #dbe4ff",
+                background: "#ffffff",
+                color: "#111827",
+                fontWeight: 700,
+                fontSize: 14,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #dbe4ff",
+              borderRadius: 14,
+              padding: 14,
+              background: "#f7f9ff",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
             <div
               style={{
-                background: "#ffffff",
-                border: "1px solid #dbe4ff",
-                borderRadius: 22,
-                padding: 20,
                 display: "flex",
-                flexDirection: "column",
-                gap: 16,
-                position: isMobile ? "static" : "sticky",
-                top: 24,
-                boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-            <div>
-              <div style={{ color: "#111827", fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
-                New Campaign
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+                Facebook Billing
               </div>
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-                These settings are for the next campaign you launch.
-              </div>
+              <button
+                type="button"
+                onClick={openFbPaymentPopup}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  background: "#5b5cf0",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Open Billing
+              </button>
             </div>
 
+            <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+              {billingLoading
+                ? "Checking billing status..."
+                : billingInfo?.hasAccess
+                ? "Facebook billing is ready."
+                : "Billing will be completed before launch."}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
+            <input
+              type="number"
+              min="1"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              placeholder="Enter budget"
+              style={{
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid #dbe4ff",
+                background: "#ffffff",
+                color: "#111827",
+                fontWeight: 700,
+                fontSize: 14,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+              gap: 10,
+            }}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Campaign Name</label>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Start Date</label>
               <input
-                type="text"
-                value={form.campaignName}
-                onChange={(e) => setForm((prev) => ({ ...prev, campaignName: e.target.value }))}
-                placeholder="Campaign name"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 style={{
                   padding: "12px 14px",
                   borderRadius: 12,
@@ -5316,6 +5391,27 @@ const getSavedCreatives = (campaignId) => {
               />
             </div>
 
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid #dbe4ff",
+                  background: "#ffffff",
+                  color: "#111827",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+            </div>
+          </div>
+
+          {!getUserFromStorage() && (
             <div
               style={{
                 border: "1px solid #dbe4ff",
@@ -5324,189 +5420,88 @@ const getSavedCreatives = (campaignId) => {
                 background: "#f7f9ff",
                 display: "flex",
                 flexDirection: "column",
-                gap: 10,
+                gap: 12,
               }}
             >
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+                Create your account first
+              </div>
+
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
+                  color: "#667085",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  lineHeight: 1.6,
                 }}
               >
-                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                  Facebook Billing
-                </div>
-                <button
-                  type="button"
-                  onClick={openFbPaymentPopup}
-                  style={{
-                    border: "none",
-                    borderRadius: 10,
-                    padding: "8px 10px",
-                    background: "#5b5cf0",
-                    color: "#ffffff",
-                    fontWeight: 900,
-                    fontSize: 12,
-                    cursor: "pointer",
-                  }}
-                >
-                  Open Billing
-                </button>
+                Before launching, create your Smartemark account and continue with your selected plan.
               </div>
 
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-                {billingLoading
-                  ? "Checking billing status..."
-                  : billingInfo?.hasAccess
-                  ? "Facebook billing is ready."
-                  : "Billing will be completed before launch."}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
-              <input
-                type="number"
-                min="1"
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                placeholder="Enter budget"
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/signup", {
+                    state: {
+                      selectedPlan,
+                      fromSetup: true,
+                    },
+                  })
+                }
                 style={{
-                  padding: "12px 14px",
+                  width: "100%",
+                  border: "none",
                   borderRadius: 12,
-                  border: "1px solid #dbe4ff",
+                  padding: "12px 14px",
+                  background: "#5b5cf0",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Create Account
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate("/login")}
+                style={{
+                  width: "100%",
+                  borderRadius: 12,
+                  padding: "12px 14px",
                   background: "#ffffff",
                   color: "#111827",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  outline: "none",
+                  border: "1px solid #dbe4ff",
+                  fontWeight: 900,
+                  fontSize: 13,
+                  cursor: "pointer",
                 }}
-              />
+              >
+                I already have an account
+              </button>
             </div>
+          )}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-                gap: 10,
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Start Date</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    border: "1px solid #dbe4ff",
-                    background: "#ffffff",
-                    color: "#111827",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    border: "1px solid #dbe4ff",
-                    background: "#ffffff",
-                    color: "#111827",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                />
-              </div>
-            </div>
-
-  {!getUserFromStorage() && (
-  <div
-    style={{
-      border: "1px solid #dbe4ff",
-      borderRadius: 14,
-      padding: 14,
-      background: "#f7f9ff",
-      display: "flex",
-      flexDirection: "column",
-      gap: 12,
-    }}
-  >
-    <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-      Create your account first
-    </div>
-
-    <div
-      style={{
-        color: "#667085",
-        fontWeight: 700,
-        fontSize: 13,
-        lineHeight: 1.6,
-      }}
-    >
-      Before launching, create your Smartemark account and continue with your selected plan.
-    </div>
-
-    <button
-      type="button"
-      onClick={() =>
-        navigate("/signup", {
-          state: {
-            selectedPlan,
-            fromSetup: true,
-          },
-        })
-      }
-      style={{
-        width: "100%",
-        border: "none",
-        borderRadius: 12,
-        padding: "12px 14px",
-        background: "#5b5cf0",
-        color: "#ffffff",
-        fontWeight: 900,
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-    >
-      Create Account
-    </button>
-
-    <button
-      type="button"
-      onClick={() => navigate("/login")}
-      style={{
-        width: "100%",
-        borderRadius: 12,
-        padding: "12px 14px",
-        background: "#ffffff",
-        color: "#111827",
-        border: "1px solid #dbe4ff",
-        fontWeight: 900,
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-    >
-      I already have an account
-    </button>
-  </div>
-)}
-
-            <button
-              onClick={handleLaunch}
-              disabled={
+          <button
+            onClick={handleLaunch}
+            disabled={
+              loading ||
+              !(
+                fbConnected &&
+                selectedAccount &&
+                selectedPageId &&
+                budget &&
+                !isNaN(parseFloat(budget)) &&
+                parseFloat(budget) >= 3
+              )
+            }
+            style={{
+              width: "100%",
+              border: "none",
+              borderRadius: 14,
+              padding: "14px 16px",
+              background:
                 loading ||
                 !(
                   fbConnected &&
@@ -5516,45 +5511,323 @@ const getSavedCreatives = (campaignId) => {
                   !isNaN(parseFloat(budget)) &&
                   parseFloat(budget) >= 3
                 )
-              }
-              style={{
-                width: "100%",
-                border: "none",
-                borderRadius: 14,
-                padding: "14px 16px",
-                background:
-                  loading ||
-                  !(
-                    fbConnected &&
-                    selectedAccount &&
-                    selectedPageId &&
-                    budget &&
-                    !isNaN(parseFloat(budget)) &&
-                    parseFloat(budget) >= 3
-                  )
-                    ? "#b8c2ff"
-                    : "#5b5cf0",
-                color: "#ffffff",
-                fontWeight: 900,
-                fontSize: 15,
-                cursor:
-                  loading ||
-                  !(
-                    fbConnected &&
-                    selectedAccount &&
-                    selectedPageId &&
-                    budget &&
-                    !isNaN(parseFloat(budget)) &&
-                    parseFloat(budget) >= 3
-                  )
-                    ? "not-allowed"
-                    : "pointer",
-              }}
-            >
-              {loading ? "Working..." : "Launch Campaign"}
-            </button>
-            </div>
-          )}
+                  ? "#b8c2ff"
+                  : "#5b5cf0",
+              color: "#ffffff",
+              fontWeight: 900,
+              fontSize: 15,
+              cursor:
+                loading ||
+                !(
+                  fbConnected &&
+                  selectedAccount &&
+                  selectedPageId &&
+                  budget &&
+                  !isNaN(parseFloat(budget)) &&
+                  parseFloat(budget) >= 3
+                )
+                  ? "not-allowed"
+                  : "pointer",
+            }}
+          >
+            {loading ? "Working..." : "Launch Campaign"}
+          </button>
+        </div>
+      </>
+    )}
+  </>
+) : (
+  <>
+    <div
+      style={{
+        color: "#667085",
+        fontWeight: 700,
+        fontSize: 14,
+        lineHeight: 1.6,
+      }}
+    >
+      Select a campaign to view metrics and AI updates, or hit the plus button to start a new one.
+    </div>
+
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #dbe4ff",
+        borderRadius: 22,
+        padding: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        marginTop: 2,
+      }}
+    >
+      <div>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 18, marginBottom: 0 }}>
+          New Campaign
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Campaign Name</label>
+        <input
+          type="text"
+          value={form.campaignName}
+          onChange={(e) => setForm((prev) => ({ ...prev, campaignName: e.target.value }))}
+          placeholder="Campaign name"
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #dbe4ff",
+            background: "#ffffff",
+            color: "#111827",
+            fontWeight: 700,
+            fontSize: 14,
+            outline: "none",
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #dbe4ff",
+          borderRadius: 14,
+          padding: 14,
+          background: "#f7f9ff",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+            Facebook Billing
+          </div>
+          <button
+            type="button"
+            onClick={openFbPaymentPopup}
+            style={{
+              border: "none",
+              borderRadius: 10,
+              padding: "8px 10px",
+              background: "#5b5cf0",
+              color: "#ffffff",
+              fontWeight: 900,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Open Billing
+          </button>
+        </div>
+
+        <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+          {billingLoading
+            ? "Checking billing status..."
+            : billingInfo?.hasAccess
+            ? "Facebook billing is ready."
+            : "Billing will be completed before launch."}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
+        <input
+          type="number"
+          min="1"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          placeholder="Enter budget"
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #dbe4ff",
+            background: "#ffffff",
+            color: "#111827",
+            fontWeight: 700,
+            fontSize: 14,
+            outline: "none",
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+          gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Start Date</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid #dbe4ff",
+              background: "#ffffff",
+              color: "#111827",
+              fontWeight: 700,
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>End Date</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid #dbe4ff",
+              background: "#ffffff",
+              color: "#111827",
+              fontWeight: 700,
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+        </div>
+      </div>
+
+      {!getUserFromStorage() && (
+        <div
+          style={{
+            border: "1px solid #dbe4ff",
+            borderRadius: 14,
+            padding: 14,
+            background: "#f7f9ff",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+            Create your account first
+          </div>
+
+          <div
+            style={{
+              color: "#667085",
+              fontWeight: 700,
+              fontSize: 13,
+              lineHeight: 1.6,
+            }}
+          >
+            Before launching, create your Smartemark account and continue with your selected plan.
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              navigate("/signup", {
+                state: {
+                  selectedPlan,
+                  fromSetup: true,
+                },
+              })
+            }
+            style={{
+              width: "100%",
+              border: "none",
+              borderRadius: 12,
+              padding: "12px 14px",
+              background: "#5b5cf0",
+              color: "#ffffff",
+              fontWeight: 900,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Create Account
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            style={{
+              width: "100%",
+              borderRadius: 12,
+              padding: "12px 14px",
+              background: "#ffffff",
+              color: "#111827",
+              border: "1px solid #dbe4ff",
+              fontWeight: 900,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            I already have an account
+          </button>
+        </div>
+      )}
+
+      <button
+        onClick={handleLaunch}
+        disabled={
+          loading ||
+          !(
+            fbConnected &&
+            selectedAccount &&
+            selectedPageId &&
+            budget &&
+            !isNaN(parseFloat(budget)) &&
+            parseFloat(budget) >= 3
+          )
+        }
+        style={{
+          width: "100%",
+          border: "none",
+          borderRadius: 14,
+          padding: "14px 16px",
+          background:
+            loading ||
+            !(
+              fbConnected &&
+              selectedAccount &&
+              selectedPageId &&
+              budget &&
+              !isNaN(parseFloat(budget)) &&
+              parseFloat(budget) >= 3
+            )
+              ? "#b8c2ff"
+              : "#5b5cf0",
+          color: "#ffffff",
+          fontWeight: 900,
+          fontSize: 15,
+          cursor:
+            loading ||
+            !(
+              fbConnected &&
+              selectedAccount &&
+              selectedPageId &&
+              budget &&
+              !isNaN(parseFloat(budget)) &&
+              parseFloat(budget) >= 3
+            )
+              ? "not-allowed"
+              : "pointer",
+        }}
+      >
+        {loading ? "Working..." : "Launch Campaign"}
+      </button>
+    </div>
+  </>
+)}
+          </div>
         </div>
       </>
     )}
