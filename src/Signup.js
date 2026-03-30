@@ -53,11 +53,8 @@ async function authFetch(path, opts = {}) {
   return res;
 }
 
-async function createCheckoutSessionAuth({
-  plan,
-  founder = false,
-}) {
-  const res = await fetch("/api/stripe/create-checkout-session-auth", {
+async function createCheckoutSession({ plan, founder = false, email, fullName }) {
+  const res = await fetch("/api/stripe/create-checkout-session", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -67,6 +64,9 @@ async function createCheckoutSessionAuth({
     body: JSON.stringify({
       plan,
       founder,
+      email,
+      username: email,
+      fullName,
     }),
   });
 
@@ -194,12 +194,14 @@ const Signup = () => {
       localStorage.setItem("sm_selected_plan", selectedPlan);
       localStorage.setItem("sm_founder_offer", founder ? "true" : "false");
 
-      const checkoutUrl = await createCheckoutSessionAuth({
+      const checkoutUrl = await createCheckoutSession({
         plan: selectedPlan,
         founder,
+        email: cleanEmail,
+        fullName: cleanName,
       });
 
-      window.location.href = checkoutUrl;
+      window.location.assign(checkoutUrl);
     } catch (error) {
       setErr(error?.message || "Could not create account.");
     } finally {
@@ -273,7 +275,7 @@ const Signup = () => {
                 maxWidth: 420,
               }}
             >
-              Set up your Smartemark account, then continue into secure billing.
+              Set up your Smartemark account, then continue to secure billing.
             </div>
           </div>
 
@@ -354,7 +356,7 @@ const Signup = () => {
               marginBottom: 28,
             }}
           >
-            Create your Smartemark login, then continue to checkout.
+            Create your Smartemark login, then continue to payment.
           </div>
 
           <form

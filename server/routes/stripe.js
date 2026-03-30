@@ -13,10 +13,6 @@ if (!stripeSecretKey) {
 
 const stripe = new Stripe(stripeSecretKey || "");
 
-/* ------------------------------------------------------------------ */
-/*                              CONFIG                                */
-/* ------------------------------------------------------------------ */
-
 const COOKIE_NAME = "sm_sid";
 const SID_HEADER = "x-sm-sid";
 
@@ -49,11 +45,7 @@ function normalizeFounderFlag(value) {
 }
 
 function getClientUrl(req) {
-  return (
-    process.env.CLIENT_URL ||
-    req.headers.origin ||
-    "http://localhost:3000"
-  );
+  return process.env.CLIENT_URL || req.headers.origin || "http://localhost:3000";
 }
 
 function getPriceMap(founder = false) {
@@ -83,10 +75,6 @@ function derivePlanMetaFromPriceId(priceId) {
   const lookup = buildPriceToPlanLookup();
   return lookup[String(priceId || "").trim()] || { planKey: "", founder: false };
 }
-
-/* ------------------------------------------------------------------ */
-/*                              DB HELPERS                            */
-/* ------------------------------------------------------------------ */
 
 async function ensureDbShape() {
   await db.read();
@@ -180,15 +168,13 @@ async function markSubscriptionFromStripe({
       founder: !!founder,
       planName: planKey ? PLAN_NAME_MAP[planKey] : "",
       status: String(status || "").trim(),
-      hasAccess: ["active", "trialing"].includes(String(status || "").trim().toLowerCase()),
+      hasAccess: ["active", "trialing"].includes(
+        String(status || "").trim().toLowerCase()
+      ),
       currentPeriodEnd: currentPeriodEnd || null,
     },
   });
 }
-
-/* ------------------------------------------------------------------ */
-/*                              ROUTES                                */
-/* ------------------------------------------------------------------ */
 
 router.get("/health", (_req, res) => {
   res.json({
@@ -211,7 +197,7 @@ router.get("/health", (_req, res) => {
   });
 });
 
-/* ========= public pricing page checkout ========= */
+/* ========= public checkout after signup ========= */
 router.post("/create-checkout-session", async (req, res) => {
   try {
     if (!process.env.STRIPE_SECRET_KEY) {
@@ -223,12 +209,21 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const planKey = normalizePlanKey(req.body?.plan);
     const founder = normalizeFounderFlag(req.body?.founder);
-    const email = String(req.body?.email || "").trim() || undefined;
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const username = String(req.body?.username || email).trim();
+    const fullName = String(req.body?.fullName || "").trim();
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
         error: "Invalid plan. Use starter, pro, or operator.",
+      });
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        ok: false,
+        error: "Email is required for checkout.",
       });
     }
 
@@ -249,20 +244,26 @@ router.post("/create-checkout-session", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}${founder ? "&founder=1" : ""}`,
-      cancel_url: `${clientUrl}/setup`,
+      success_url: `${clientUrl}/setup?checkout=success&plan=${planKey}${founder ? "&founder=1" : ""}`,
+      cancel_url: `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`,
       metadata: {
+        username,
+        email,
+        fullName,
         planKey,
         founder: founder ? "true" : "false",
         planName: PLAN_NAME_MAP[planKey],
-        source: "public_pricing_page",
+        source: "signup_page",
       },
       subscription_data: {
         metadata: {
+          username,
+          email,
+          fullName,
           planKey,
           founder: founder ? "true" : "false",
           planName: PLAN_NAME_MAP[planKey],
-          source: "public_pricing_page",
+          source: "signup_page",
         },
       },
     });
@@ -407,7 +408,6 @@ router.post("/create-checkout-session-auth", async (req, res) => {
   }
 });
 
-/* ========= webhook ========= */
 router.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   try {
     const sig = req.headers["stripe-signature"];
@@ -433,9 +433,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const username = String(session?.metadata?.username || "").trim();
         const email = String(
           session?.customer_details?.email ||
-          session?.customer_email ||
-          session?.metadata?.email ||
-          ""
+            session?.customer_email ||
+            session?.metadata?.email ||
+            ""
         ).trim();
 
         const customerId = String(session?.customer || "").trim();
@@ -454,7 +454,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
               ? new Date(Number(sub.current_period_end) * 1000).toISOString()
               : null;
           } catch (e) {
-            console.warn("[stripe webhook] could not retrieve subscription on checkout.session.completed");
+            console.warn(
+              "[stripe webhook] could not retrieve subscription on checkout.session.completed"
+            );
           }
         }
 
@@ -545,7 +547,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
               ? new Date(Number(sub.current_period_end) * 1000).toISOString()
               : null;
           } catch (e) {
-            console.warn("[stripe webhook] could not retrieve subscription on invoice.payment_failed");
+            console.warn(
+              "[stripe webhook] could not retrieve subscription on invoice.payment_failed"
+            );
           }
         }
 
