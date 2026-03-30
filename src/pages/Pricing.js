@@ -4,22 +4,16 @@ import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG =
-  "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
+const BG = "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
 const TEXT = "#101426";
 const TEXT_SOFT = "#66708b";
 const PURPLE = "#5d59ea";
-const PURPLE_2 = "#7b72ff";
 const BLUE = "#4c63ff";
 const BLUE_HOVER = "#4058f4";
 const BORDER = "rgba(93, 89, 234, 0.13)";
 const PANEL = "rgba(255,255,255,0.80)";
-const PANEL_STRONG = "rgba(255,255,255,0.92)";
 const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.12)";
 const SOFT_SHADOW = "0 10px 28px rgba(83, 77, 212, 0.08)";
-const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
-const BTN_HOVER =
-  "linear-gradient(135deg, #4358f4 0%, #554ce4 56%, #6f63fc 100%)";
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
@@ -35,22 +29,25 @@ const useIsMobile = () => {
 
 const plans = [
   {
-    name: "Starter",
+    name: "Standard",
     planKey: "starter",
     price: "$99",
     subtitle:
-      "A clean starting point for business owners who want simple campaign automation without extra complexity.",
-    badge: "Starter",
+      "A simple, powerful way to launch and manage ads with real AI help.",
+    badge: "Standard",
     accentGlow: "rgba(76,99,255,0.16)",
     cta: "Get Started",
     features: [
-      "1 active business setup",
+      "2 campaigns per month",
+      "1 business",
       "1 connected ad account",
-      "Up to 2 campaign launches per month",
-      "AI-generated ad copy and creatives",
-      "Autonomous campaign launch",
-      "Basic optimization and creative refresh",
-      "Core campaign dashboard",
+      "AI-generated ad copy",
+      "AI-generated creatives",
+      "Fast campaign launch",
+      "AI campaign monitoring",
+      "AI strategizing",
+      "Core AI optimization",
+      "Basic A/B testing",
       "Standard support",
     ],
   },
@@ -59,19 +56,20 @@ const plans = [
     planKey: "pro",
     price: "$149",
     subtitle:
-      "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
+      "For businesses that want stronger strategy, more testing, and more active optimization.",
     badge: "Most Popular",
     accentGlow: "rgba(123,114,255,0.18)",
     featured: true,
     cta: "Choose Pro",
     features: [
-      "Everything in Starter",
-      "Up to 5 campaign launches per month",
-      "More creative and variant generation",
-      "Stronger autonomous optimization cadence",
-      "Automatic creative refresh as needed",
-      "Broader testing coverage",
-      "More active campaign control",
+      "Everything in Standard",
+      "6 campaigns per month",
+      "More creative variations per campaign",
+      "More frequent A/B testing",
+      "Advanced AI strategizing",
+      "Deeper campaign research",
+      "Stronger AI optimization",
+      "Automatic creative refresh when needed",
       "Priority support",
     ],
   },
@@ -80,18 +78,19 @@ const plans = [
     planKey: "operator",
     price: "$249",
     subtitle:
-      "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
+      "For businesses that want the deepest Smartemark automation layer and strongest in-product system.",
     badge: "Advanced",
     accentGlow: "rgba(93,89,234,0.14)",
     cta: "Choose Operator",
     features: [
       "Everything in Pro",
-      "Up to 10 campaign launches per month",
-      "Highest creative generation capacity",
-      "Highest testing intensity",
-      "Deepest autonomous optimization layer",
-      "Pattern memory as operator capabilities expand",
-      "Earliest access to advanced features",
+      "10 campaigns per month",
+      "Highest number of creative variations",
+      "Most frequent A/B testing",
+      "Deepest campaign research",
+      "Operator-grade AI strategizing",
+      "Operator-grade AI optimization",
+      "More frequent creative refreshes",
       "Highest priority support",
     ],
   },
@@ -117,32 +116,34 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(10px)",
   };
 
-const startCheckout = (plan) => {
-  if (!plan?.planKey) return;
-
-  try {
-    localStorage.setItem("sm_selected_plan", plan.planKey);
+  const startCheckout = (plan) => {
+    if (!plan?.planKey) return;
 
     try {
-      trackEvent("pricing_cta_click", {
-        page: "pricing",
-        plan: plan.name,
-        planKey: plan.planKey,
-      });
-    } catch {}
+      setLoadingPlan(plan.planKey);
+      localStorage.setItem("sm_selected_plan", plan.planKey);
 
-    navigate("/signup", {
-      state: {
-        selectedPlan: plan.planKey,
-        selectedPlanName: plan.name,
-        fromPricing: true,
-      },
-    });
-  } catch (err) {
-    console.error("Pricing -> signup redirect failed:", err);
-    alert("Something went wrong. Please try again.");
-  }
-};
+      try {
+        trackEvent("pricing_cta_click", {
+          page: "pricing",
+          plan: plan.name,
+          planKey: plan.planKey,
+        });
+      } catch {}
+
+      navigate("/signup", {
+        state: {
+          selectedPlan: plan.planKey,
+          selectedPlanName: plan.name,
+          fromPricing: true,
+        },
+      });
+    } catch (err) {
+      console.error("Pricing -> signup redirect failed:", err);
+      alert("Something went wrong. Please try again.");
+      setLoadingPlan("");
+    }
+  };
 
   return (
     <div
@@ -275,10 +276,10 @@ const startCheckout = (plan) => {
           >
             <img
               src={smartmarkLogo}
-              alt="SmarteMark"
+              alt="Smartemark"
               style={{ width: 24, height: 24, borderRadius: 8, opacity: 0.95 }}
             />
-            <span style={{ fontWeight: 800, fontSize: 14 }}>SmarteMark</span>
+            <span style={{ fontWeight: 800, fontSize: 14 }}>Smartemark</span>
           </button>
 
           <button
@@ -361,7 +362,8 @@ const startCheckout = (plan) => {
               fontWeight: 500,
             }}
           >
-            Simple pricing for businesses that want AI-powered campaign launch and management without agency friction.
+            Simple pricing for businesses that want AI-powered campaign launch
+            and management without agency friction.
           </div>
         </div>
 
@@ -484,25 +486,27 @@ const startCheckout = (plan) => {
                   </div>
                 </div>
 
-      <button
-  type="button"
-  onClick={() => startCheckout(plan)}
-  style={{
-    width: "100%",
-    marginTop: 24,
-    padding: "0.95rem 1.1rem",
-    borderRadius: 999,
-    border: "none",
-    background: "#4c63ff",
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 12px 28px rgba(76,99,255,0.22)",
-  }}
->
-  {loadingPlan === plan.planKey ? "Continuing..." : plan.cta}
-</button>
+                <button
+                  type="button"
+                  onClick={() => startCheckout(plan)}
+                  disabled={!!loadingPlan}
+                  style={{
+                    width: "100%",
+                    marginTop: 24,
+                    padding: "0.95rem 1.1rem",
+                    borderRadius: 999,
+                    border: "none",
+                    background: "#4c63ff",
+                    color: "#ffffff",
+                    fontSize: 15,
+                    fontWeight: 900,
+                    cursor: loadingPlan ? "not-allowed" : "pointer",
+                    opacity: loadingPlan && !isLoading ? 0.75 : 1,
+                    boxShadow: "0 12px 28px rgba(76,99,255,0.22)",
+                  }}
+                >
+                  {isLoading ? "Continuing..." : plan.cta}
+                </button>
 
                 <div
                   style={{
@@ -595,8 +599,7 @@ const startCheckout = (plan) => {
               fontWeight: 500,
             }}
           >
-            Choose the plan that matches your business today. As your needs grow, you can move into
-            more campaign volume, deeper optimization, and stronger automation.
+            Choose the plan that matches your business
           </div>
         </div>
       </div>
