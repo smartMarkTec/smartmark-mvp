@@ -64,6 +64,8 @@ const plans = [
     features: [
       "Everything in Standard",
       "6 campaigns per month",
+      "2 businesses",
+      "2 connected ad accounts",
       "More creative variations per campaign",
       "More frequent A/B testing",
       "Advanced AI strategizing",
@@ -85,6 +87,8 @@ const plans = [
     features: [
       "Everything in Pro",
       "10 campaigns per month",
+      "3 businesses",
+      "3 connected ad accounts",
       "Highest number of creative variations",
       "Most frequent A/B testing",
       "Deepest campaign research",
@@ -599,7 +603,7 @@ const Pricing = () => {
               fontWeight: 500,
             }}
           >
-            Choose the plan that matches your business
+            Choose the plan that matches your business today
           </div>
         </div>
       </div>
