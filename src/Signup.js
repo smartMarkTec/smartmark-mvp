@@ -53,6 +53,32 @@ async function authFetch(path, opts = {}) {
   return res;
 }
 
+async function createCheckoutSessionAuth({
+  plan,
+  founder = false,
+}) {
+  const res = await fetch("/api/stripe/create-checkout-session-auth", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-sm-sid": ensureStoredSid(),
+    },
+    credentials: "include",
+    body: JSON.stringify({
+      plan,
+      founder,
+    }),
+  });
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok || !json?.ok || !json?.url) {
+    throw new Error(json?.error || "Could not start checkout.");
+  }
+
+  return json.url;
+}
+
 const Signup = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -68,6 +94,17 @@ const Signup = () => {
         .toLowerCase(),
     [location.state]
   );
+
+  const founder = useMemo(() => {
+    const raw =
+      location.state?.founder ??
+      localStorage.getItem("sm_founder_offer") ??
+      "false";
+
+    if (typeof raw === "boolean") return raw;
+    const normalized = String(raw).trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }, [location.state]);
 
   const plan = PLAN_META[selectedPlan] || PLAN_META.starter;
 
@@ -155,16 +192,14 @@ const Signup = () => {
       localStorage.setItem("sm_signup_full_name", cleanName);
       localStorage.setItem("sm_signup_email", cleanEmail);
       localStorage.setItem("sm_selected_plan", selectedPlan);
+      localStorage.setItem("sm_founder_offer", founder ? "true" : "false");
 
-      navigate("/setup", {
-        state: {
-          selectedPlan,
-          selectedPlanName: plan.name,
-          createdAccount: true,
-          loginUser: cleanEmail,
-          loginPass: cleanPassword,
-        },
+      const checkoutUrl = await createCheckoutSessionAuth({
+        plan: selectedPlan,
+        founder,
       });
+
+      window.location.href = checkoutUrl;
     } catch (error) {
       setErr(error?.message || "Could not create account.");
     } finally {
@@ -238,8 +273,7 @@ const Signup = () => {
                 maxWidth: 420,
               }}
             >
-              Set up your Smartemark account, then continue into campaign setup
-              and billing.
+              Set up your Smartemark account, then continue into secure billing.
             </div>
           </div>
 
@@ -288,7 +322,14 @@ const Signup = () => {
             }}
           >
             <button
-              onClick={() => navigate("/login")}
+              onClick={() =>
+                navigate("/login", {
+                  state: {
+                    selectedPlan,
+                    founder,
+                  },
+                })
+              }
               style={{
                 background: "transparent",
                 border: "none",
@@ -313,7 +354,7 @@ const Signup = () => {
               marginBottom: 28,
             }}
           >
-            Create your Smartemark login, then continue into setup.
+            Create your Smartemark login, then continue to checkout.
           </div>
 
           <form
@@ -387,7 +428,7 @@ const Signup = () => {
                 if (!loading) e.currentTarget.style.background = BTN;
               }}
             >
-              {loading ? "Creating Account..." : "Create Account & Continue"}
+              {loading ? "Continuing..." : "Create Account & Continue"}
             </button>
           </form>
         </div>
