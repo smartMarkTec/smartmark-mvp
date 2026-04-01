@@ -209,21 +209,13 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const planKey = normalizePlanKey(req.body?.plan);
     const founder = normalizeFounderFlag(req.body?.founder);
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const username = String(req.body?.username || email).trim();
-    const fullName = String(req.body?.fullName || "").trim();
+    const email = String(req.body?.email || "").trim() || undefined;
+    const launchIntent = String(req.body?.launchIntent || "").trim() === "1";
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
         error: "Invalid plan. Use starter, pro, or operator.",
-      });
-    }
-
-    if (!email) {
-      return res.status(400).json({
-        ok: false,
-        error: "Email is required for checkout.",
       });
     }
 
@@ -237,6 +229,14 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
+    const successUrl = launchIntent
+      ? `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}${founder ? "&founder=1" : ""}`
+      : `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}${founder ? "&founder=1" : ""}`;
+
+    const cancelUrl = launchIntent
+      ? `${clientUrl}/setup?checkout=cancelled&launch_intent=1`
+      : `${clientUrl}/setup`;
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
@@ -244,26 +244,20 @@ router.post("/create-checkout-session", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/setup?checkout=success&plan=${planKey}${founder ? "&founder=1" : ""}`,
-      cancel_url: `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
-        username,
-        email,
-        fullName,
         planKey,
         founder: founder ? "true" : "false",
         planName: PLAN_NAME_MAP[planKey],
-        source: "signup_page",
+        source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
       },
       subscription_data: {
         metadata: {
-          username,
-          email,
-          fullName,
           planKey,
           founder: founder ? "true" : "false",
           planName: PLAN_NAME_MAP[planKey],
-          source: "signup_page",
+          source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
         },
       },
     });

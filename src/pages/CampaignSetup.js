@@ -506,6 +506,7 @@ function PreviewCard({ headline, body, link }) {
 
 /* flag to detect FB redirect flow and force re-hydration */
 const FB_CONNECT_INFLIGHT_KEY = "sm_fb_connect_inflight_v1";
+const PENDING_LAUNCH_KEY = "sm_pending_launch_v1";
 
 /* creatives persist until campaign duration ends */
 const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -857,6 +858,62 @@ function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, e
   } catch {
     return false;
   }
+}
+
+function buildPendingLaunchPayload({
+  selectedPlan,
+  budget,
+  startDate,
+  endDate,
+  selectedAccount,
+  selectedPageId,
+  form,
+  answers,
+  headline,
+  body,
+  inferredLink,
+  previewCopy,
+  draftCreatives,
+  navImageUrls,
+}) {
+  return {
+    selectedPlan,
+    budget,
+    startDate,
+    endDate,
+    selectedAccount,
+    selectedPageId,
+    form,
+    answers,
+    headline,
+    body,
+    inferredLink,
+    previewCopy,
+    draftCreatives,
+    navImageUrls,
+    savedAt: Date.now(),
+  };
+}
+
+function savePendingLaunch(payload) {
+  try {
+    localStorage.setItem(PENDING_LAUNCH_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function loadPendingLaunch() {
+  try {
+    const raw = localStorage.getItem(PENDING_LAUNCH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingLaunch() {
+  try {
+    localStorage.removeItem(PENDING_LAUNCH_KEY);
+  } catch {}
 }
 
 const calculateFees = (budget) => {
@@ -2573,6 +2630,8 @@ useEffect(() => {
 
   const [showCampaignMenu, setShowCampaignMenu] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
+  const [showPlanModal, setShowPlanModal] = useState(false);
+const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(false);
   const [campaignSettingsMap, setCampaignSettingsMap] = useState(() =>
     readCampaignSettingsMap(resolvedUser)
   );
@@ -3725,49 +3784,19 @@ const handleSubscribeToPlan = async () => {
   setBillingLoading(true);
 
   try {
-       if (TEMP_BILLING_BYPASS) {
-      const currentEmail =
-        String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() ||
-        String(loginUser || "").trim().toLowerCase();
+    const currentEmail =
+      String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() ||
+      String(loginUser || "").trim().toLowerCase();
 
-      const res = await stripeFetch(`/api/stripe/create-checkout-session`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          plan: selectedPlan,
-          email: /\S+@\S+\.\S+/.test(currentEmail) ? currentEmail : undefined,
-        }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(json?.error || "Could not open checkout.");
-      }
-
-      if (!json?.url) {
-        throw new Error("Stripe checkout URL missing.");
-      }
-
-      window.location.assign(json.url);
-      return;
-    }
-
-    const ok = await handleLogin();
-    if (!ok) {
-      alert("Login failed. Please check your credentials.");
-      return;
-    }
-
-    const res = await stripeFetch(`/api/stripe/create-checkout-session-auth`, {
+    const res = await stripeFetch(`/api/stripe/create-checkout-session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         plan: selectedPlan,
+        email: /\S+@\S+\.\S+/.test(currentEmail) ? currentEmail : undefined,
+        launchIntent: "1",
       }),
     });
 
