@@ -16,6 +16,43 @@ const stripe = new Stripe(stripeSecretKey || "");
 const COOKIE_NAME = "sm_sid";
 const SID_HEADER = "x-sm-sid";
 
+const isProd = process.env.NODE_ENV === "production" || !!process.env.RENDER;
+
+function computeCookieDomain() {
+  if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN;
+
+  try {
+    const clientUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
+    if (clientUrl) {
+      const host = new URL(clientUrl).hostname.toLowerCase();
+
+      if (host === "localhost") return undefined;
+      if (host === "www.smartemark.com" || host === "smartemark.com") {
+        return ".smartemark.com";
+      }
+
+      return host;
+    }
+  } catch {}
+
+  return undefined;
+}
+
+function setSessionCookie(res, sid) {
+  const opts = {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
+
+  const dom = computeCookieDomain();
+  if (dom) opts.domain = dom;
+
+  res.cookie(COOKIE_NAME, sid, opts);
+}
+
 const PLAN_NAME_MAP = {
   starter: "Starter",
   pro: "Pro",
@@ -255,7 +292,7 @@ async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
     expand: ["subscription"],
   });
 
-  const stripeUsername = String(session?.metadata?.username || "").trim();
+  const stripeUsername = String(session?.metadata?.username || "").trim().toLowerCase();
   const stripeEmail = String(
     session?.customer_details?.email ||
       session?.customer_email ||
@@ -263,11 +300,11 @@ async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
       ""
   ).trim().toLowerCase();
 
-  const fallbackUsername = String(fallbackUser?.username || "").trim();
+  const fallbackUsername = String(fallbackUser?.username || "").trim().toLowerCase();
   const fallbackEmail = String(fallbackUser?.email || "").trim().toLowerCase();
 
-  const username = stripeUsername || fallbackUsername || stripeEmail || fallbackEmail;
   const email = stripeEmail || fallbackEmail || stripeUsername || fallbackUsername;
+  const username = email || stripeUsername || fallbackUsername || "";
 
   const customerId = String(session?.customer || "").trim();
   const subscriptionObj = session?.subscription || null;
@@ -305,9 +342,43 @@ async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
     currentPeriodEnd,
   });
 
+  if (!result?.ok) {
+    return {
+      ok: false,
+      reason: "user_not_found_after_sync",
+      result,
+      billing: {
+        username,
+        email,
+        customerId,
+        subscriptionId,
+        priceId,
+        status,
+        currentPeriodEnd,
+      },
+    };
+  }
+
+  await ensureDbShape();
+
+  const resolvedUser =
+    db.data.users.find(
+      (x) => String(x?.username || "").trim().toLowerCase() === String(username || "").trim().toLowerCase()
+    ) ||
+    db.data.users.find(
+      (x) => String(x?.email || "").trim().toLowerCase() === String(email || "").trim().toLowerCase()
+    ) ||
+    null;
+
   return {
-    ok: !!result?.ok,
+    ok: !!resolvedUser,
     result,
+    user: resolvedUser
+      ? {
+          username: resolvedUser.username,
+          email: resolvedUser.email,
+        }
+      : null,
     billing: {
       username,
       email,
@@ -387,7 +458,7 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
-const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
+const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`;
 const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
 
     const session = await stripe.checkout.sessions.create({
@@ -841,7 +912,7 @@ router.post("/sync-checkout-session", async (req, res) => {
 
     const synced = await syncCheckoutSessionToUser(sessionId, fallbackUser);
 
-    if (!synced?.ok) {
+    if (!synced?.ok || !synced?.user?.username) {
       return res.status(404).json({
         ok: false,
         error: "Could not sync checkout session to user",
@@ -849,11 +920,24 @@ router.post("/sync-checkout-session", async (req, res) => {
       });
     }
 
+    await ensureDbShape();
+
+    const sid = `sm_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+
+    db.data.sessions.push({
+      sid,
+      username: String(synced.user.username || "").trim(),
+    });
+
+    await db.write();
+    setSessionCookie(res, sid);
+
     return res.json({
       ok: true,
       synced: true,
+      sessionCreated: true,
       billing: synced.billing,
-      user: synced.result?.user || null,
+      user: synced.user,
     });
   } catch (err) {
     console.error("[stripe] sync-checkout-session error:", err);
