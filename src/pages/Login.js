@@ -92,6 +92,24 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
   return json.url;
 }
 
+async function getBillingStatus() {
+  const res = await fetch("/api/stripe/billing-status", {
+    method: "GET",
+    headers: {
+      "x-sm-sid": ensureStoredSid(),
+    },
+    credentials: "include",
+  });
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    return { ok: false, billing: null };
+  }
+
+  return json;
+}
+
 function looksLikeEmail(value) {
   return /\S+@\S+\.\S+/.test(String(value || "").trim());
 }
@@ -178,6 +196,16 @@ const isAdminBypassUser =
   cleanPassword === "knowwilltech@gmail.com";
 
 if (isAdminBypassUser) {
+  navigate("/setup");
+  return;
+}
+
+const billingStatus = await getBillingStatus();
+const alreadyHasAccess = !!billingStatus?.billing?.hasAccess;
+
+if (alreadyHasAccess) {
+  localStorage.removeItem("sm_selected_plan");
+  localStorage.removeItem("sm_founder_offer");
   navigate("/setup");
   return;
 }

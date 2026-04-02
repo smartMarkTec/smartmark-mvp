@@ -3226,9 +3226,12 @@ useEffect(() => {
     const pending = loadPendingLaunch();
 
     if (!ok) return;
-    if (!hasLaunchIntent) return;
-    if (!pending) return;
-
+      if (!pending) {
+      localStorage.removeItem("sm_selected_plan");
+      localStorage.removeItem("sm_founder_offer");
+      setSetupTab("campaign");
+      return;
+    }
     try {
       if (pending.selectedPlan) setSelectedPlan(String(pending.selectedPlan).trim().toLowerCase());
       if (pending.budget !== undefined && pending.budget !== null) setBudget(String(pending.budget));
@@ -3282,12 +3285,16 @@ useEffect(() => {
       setShowPlanModal(false);
       setPendingLaunchAfterCheckout(false);
 
-      setTimeout(() => {
-        handleLaunch();
-      }, 250);
+      localStorage.removeItem("sm_selected_plan");
+      localStorage.removeItem("sm_founder_offer");
+
+      setSetupTab("campaign");
     } catch (e) {
       console.error("[setup] auto-finish launch after checkout failed", e);
     } finally {
+      localStorage.removeItem("sm_selected_plan");
+      localStorage.removeItem("sm_founder_offer");
+
       const clean = new URL(window.location.href);
       clean.searchParams.delete("checkout");
       clean.searchParams.delete("launch_intent");

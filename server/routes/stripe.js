@@ -28,41 +28,7 @@ const PUBLIC_PRICE_MAP = {
   operator: process.env.STRIPE_PRICE_OPERATOR || "",
 };
 
-const HIDDEN_FOUNDER_PRICE_META = {
-  founder_legacy_40: {
-    priceId: process.env.STRIPE_PRICE_STARTER_FOUNDER_40 || "",
-    planKey: "starter",
-    planName: "Starter",
-    billingLabel: "Starter Founder $40",
-    founder: true,
-    hidden: true,
-  },
-  founder_starter_70: {
-    priceId: process.env.STRIPE_PRICE_STARTER_FOUNDER_70 || "",
-    planKey: "starter",
-    planName: "Starter",
-    billingLabel: "Starter Founder $70",
-    founder: true,
-    hidden: true,
-  },
-  founder_pro_105: {
-    priceId: process.env.STRIPE_PRICE_PRO_FOUNDER_105 || "",
-    planKey: "pro",
-    planName: "Pro",
-    billingLabel: "Pro Founder $105",
-    founder: true,
-    hidden: true,
-  },
-  founder_operator_175: {
-    priceId: process.env.STRIPE_PRICE_OPERATOR_FOUNDER_175 || "",
-    planKey: "operator",
-    planName: "Operator",
-    billingLabel: "Operator Founder $175",
-    founder: true,
-    hidden: true,
-  },
-};
-
+const HIDDEN_FOUNDER_PRICE_META = {};
 function normalizePlanKey(raw) {
   return String(raw || "").trim().toLowerCase();
 }
@@ -327,13 +293,8 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
-    const successUrl = launchIntent
-      ? `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}`
-      : `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
-
-    const cancelUrl = launchIntent
-      ? `${clientUrl}/setup?checkout=cancelled&launch_intent=1`
-      : `${clientUrl}/setup`;
+    const successUrl = `${clientUrl}/setup?checkout=success&plan=${planKey}`;
+const cancelUrl = `${clientUrl}/setup?checkout=cancelled`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
