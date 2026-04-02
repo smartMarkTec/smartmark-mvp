@@ -293,7 +293,7 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
-    const successUrl = `${clientUrl}/setup?checkout=success&plan=${planKey}`;
+    const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
 const cancelUrl = `${clientUrl}/setup?checkout=cancelled`;
 
     const session = await stripe.checkout.sessions.create({
@@ -306,6 +306,8 @@ const cancelUrl = `${clientUrl}/setup?checkout=cancelled`;
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: {
+        username: email || "",
+        email: email || "",
         planKey,
         founder: "false",
         planName: PLAN_NAME_MAP[planKey],
@@ -315,6 +317,8 @@ const cancelUrl = `${clientUrl}/setup?checkout=cancelled`;
       },
       subscription_data: {
         metadata: {
+          username: email || "",
+          email: email || "",
           planKey,
           founder: "false",
           planName: PLAN_NAME_MAP[planKey],
