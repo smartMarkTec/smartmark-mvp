@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useEffect, useState } from "react";
-import { FaArrowRight, FaBolt, FaChevronDown } from "react-icons/fa";
+import { FaBolt, FaChevronDown } from "react-icons/fa";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
@@ -153,7 +153,6 @@ function FAQItem({ item, open, onToggle }) {
 export default function Landing() {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
   const [openFaq, setOpenFaq] = useState(-1);
-  const [showDemoModal, setShowDemoModal] = useState(false);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 920);
@@ -161,17 +160,7 @@ export default function Landing() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const openDemoPopup = () => {
-    setShowDemoModal(true);
-  };
-
-  const closeDemoPopup = () => {
-    setShowDemoModal(false);
-  };
-
-  const handleDemoSubmit = (e) => {
-    e.preventDefault();
-    setShowDemoModal(false);
+  const goToForm = () => {
     window.location.href = "/form";
   };
 
@@ -288,7 +277,7 @@ export default function Landing() {
                 FAQ
               </button>
 
-              <CTAButton onClick={openDemoPopup}>Launch Campaign</CTAButton>
+              <CTAButton onClick={goToForm}>Launch Campaign</CTAButton>
             </div>
           </div>
 
@@ -361,11 +350,8 @@ export default function Landing() {
                     marginBottom: 28,
                   }}
                 >
-                  <CTAButton onClick={openDemoPopup}>Launch Campaign</CTAButton>
+                  <CTAButton onClick={goToForm}>Launch Campaign</CTAButton>
                 </div>
-
-            
-          
               </div>
 
               <div
@@ -439,77 +425,77 @@ export default function Landing() {
                       </div>
                     </div>
 
-                   <div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
-  }}
->
-  <div
-    style={{
-      background: "#ffffff",
-      border: `1px solid ${BORDER}`,
-      borderRadius: 18,
-      padding: 16,
-    }}
-  >
-    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-      Impressions
-    </div>
-    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
-      34.2K
-    </div>
-  </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: `1px solid ${BORDER}`,
+                          borderRadius: 18,
+                          padding: 16,
+                        }}
+                      >
+                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                          Impressions
+                        </div>
+                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                          34.2K
+                        </div>
+                      </div>
 
-  <div
-    style={{
-      background: "#ffffff",
-      border: `1px solid ${BORDER}`,
-      borderRadius: 18,
-      padding: 16,
-    }}
-  >
-    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-      CTR
-    </div>
-    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
-      4.3%
-    </div>
-  </div>
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: `1px solid ${BORDER}`,
+                          borderRadius: 18,
+                          padding: 16,
+                        }}
+                      >
+                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                          CTR
+                        </div>
+                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                          4.3%
+                        </div>
+                      </div>
 
-  <div
-    style={{
-      background: "#ffffff",
-      border: `1px solid ${BORDER}`,
-      borderRadius: 18,
-      padding: 16,
-    }}
-  >
-    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-      Clicks
-    </div>
-    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
-      1,472
-    </div>
-  </div>
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: `1px solid ${BORDER}`,
+                          borderRadius: 18,
+                          padding: 16,
+                        }}
+                      >
+                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                          Clicks
+                        </div>
+                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                          1,472
+                        </div>
+                      </div>
 
-<div
-  style={{
-    background: "#ffffff",
-    border: `1px solid ${BORDER}`,
-    borderRadius: 18,
-    padding: 16,
-  }}
->
-  <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
-    AI Status
-  </div>
-  <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
-    Optimizing
-  </div>
-</div>
-</div>
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: `1px solid ${BORDER}`,
+                          borderRadius: 18,
+                          padding: 16,
+                        }}
+                      >
+                        <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
+                          AI Status
+                        </div>
+                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
+                          Optimizing
+                        </div>
+                      </div>
+                    </div>
 
                     <div
                       style={{
@@ -518,7 +504,7 @@ export default function Landing() {
                         justifyContent: "center",
                       }}
                     >
-                      <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
+                      <CTAButton onClick={goToForm}>Get Started</CTAButton>
                     </div>
                   </div>
                 </div>
@@ -647,7 +633,7 @@ export default function Landing() {
                 marginTop: 10,
               }}
             >
-              <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
+              <CTAButton onClick={goToForm}>Get Started</CTAButton>
             </div>
           </section>
 
@@ -678,152 +664,6 @@ export default function Landing() {
               ))}
             </div>
           </section>
-
-          {showDemoModal && (
-            <div
-              onClick={closeDemoPopup}
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 9999,
-                background: "rgba(12,16,36,0.42)",
-                backdropFilter: "blur(6px)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 20,
-              }}
-            >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  width: "min(520px, 94vw)",
-                  background: "#ffffff",
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 28,
-                  boxShadow: SHADOW,
-                  padding: 24,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 18,
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      color: TEXT,
-                      fontSize: 28,
-                      fontWeight: 800,
-                      lineHeight: 1.05,
-                      letterSpacing: "-0.04em",
-                      marginBottom: 8,
-                    }}
-                  >
-                    Get started
-                  </div>
-                  <div
-                    style={{
-                      color: TEXT_SOFT,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      lineHeight: 1.65,
-                    }}
-                  >
-                    Enter your info and continue to the demo flow.
-                  </div>
-                </div>
-
-                <form
-                  onSubmit={handleDemoSubmit}
-                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Your name"
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: 16,
-                      border: `1px solid ${BORDER}`,
-                      outline: "none",
-                      fontFamily: FONT,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      color: TEXT,
-                      background: "#ffffff",
-                    }}
-                  />
-
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: 16,
-                      border: `1px solid ${BORDER}`,
-                      outline: "none",
-                      fontFamily: FONT,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      color: TEXT,
-                      background: "#ffffff",
-                    }}
-                  />
-
-                  <input
-                    type="text"
-                    placeholder="Business name"
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: 16,
-                      border: `1px solid ${BORDER}`,
-                      outline: "none",
-                      fontFamily: FONT,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      color: TEXT,
-                      background: "#ffffff",
-                    }}
-                  />
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 12,
-                      justifyContent: "flex-end",
-                      flexWrap: "wrap",
-                      marginTop: 6,
-                    }}
-                  >
-                    <CTAButton onClick={closeDemoPopup}>Cancel</CTAButton>
-                    <button
-                      type="submit"
-                      style={{
-                        appearance: "none",
-                        border: "none",
-                        background: BTN,
-                        color: "#fff",
-                        borderRadius: 999,
-                        padding: "15px 24px",
-                        fontSize: 16,
-                        fontWeight: 800,
-                        cursor: "pointer",
-                        fontFamily: FONT,
-                        boxShadow: "0 12px 28px rgba(93,89,234,0.20)",
-                      }}
-                    >
-                      Continue
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

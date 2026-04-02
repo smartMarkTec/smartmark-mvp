@@ -1657,9 +1657,16 @@ router.post('/register', async (req, res) => {
       const existingHash = String(existingUser?.passwordHash || '').trim();
       const matches = existingHash ? bcrypt.compareSync(rawPassword, existingHash) : false;
 
-      const sid = `sm_${nanoid(24)}`;
+      const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+
+      db.data.sessions = (db.data.sessions || []).filter(
+        (s) => String(s?.sid || "").trim() !== String(sid).trim()
+      );
+
       db.data.sessions.push({ sid, username: existingUser.username });
+
       await db.write();
+
       setSessionCookie(res, sid);
 
       return res.json({
@@ -1701,7 +1708,12 @@ router.post('/register', async (req, res) => {
 
     db.data.users.push(user);
 
-    const sid = `sm_${nanoid(24)}`;
+    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+
+    db.data.sessions = (db.data.sessions || []).filter(
+      (s) => String(s?.sid || "").trim() !== String(sid).trim()
+    );
+
     db.data.sessions.push({ sid, username: user.username });
 
     await db.write();
@@ -1765,11 +1777,16 @@ router.post('/login', async (req, res) => {
         db.data.users.push(adminUser);
       }
 
-      const sid = `sm_${nanoid(24)}`;
-      db.data.sessions.push({ sid, username: adminUser.username });
-      await db.write();
+    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
 
-      setSessionCookie(res, sid);
+db.data.sessions = (db.data.sessions || []).filter(
+  (s) => String(s?.sid || "").trim() !== String(sid).trim()
+);
+
+db.data.sessions.push({ sid, username: adminUser.username });
+await db.write();
+
+setSessionCookie(res, sid);
 
       return res.json({
         success: true,
@@ -1801,7 +1818,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const sid = `sm_${nanoid(24)}`;
+    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+
+    db.data.sessions = (db.data.sessions || []).filter(
+      (s) => String(s?.sid || "").trim() !== String(sid).trim()
+    );
+
     db.data.sessions.push({ sid, username: user.username });
     await db.write();
 
