@@ -1611,15 +1611,21 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
 
 async function requireSession(req) {
   await ensureUsersAndSessions();
-  const auth = req.headers.authorization || '';
-  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  const sid = req.cookies?.[COOKIE_NAME] || req.get(SID_HEADER) || bearer;
+
+  const sid = String(getSidFromReq(req) || '').trim();
 
   if (!sid) return { ok: false, status: 401, error: 'Not logged in' };
-  const sess = db.data.sessions.find((s) => s.sid === sid);
+
+  const sess =
+    (db.data.sessions || []).find((s) => String(s?.sid || '').trim() === sid) || null;
+
   if (!sess) return { ok: false, status: 401, error: 'Session not found' };
 
-  const user = db.data.users.find((u) => u.username === sess.username);
+  const user =
+    (db.data.users || []).find(
+      (u) => String(u?.username || '').trim() === String(sess.username || '').trim()
+    ) || null;
+
   if (!user) return { ok: false, status: 401, error: 'User not found for session' };
 
   return { ok: true, sid, sess, user };
@@ -4719,17 +4725,21 @@ if (!finalImages.length) {
 });
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   try {
-    const { campaignId } = req.params;
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
     let ownerKey = '';
-    let userToken = null;
+    let userToken = '';
 
     if (usingDebugKey) {
       ownerKey = String(
         getDebugOwnerKeyOverride(req) ||
         req.body?.ownerKey ||
         req.body?.owner_key ||
+        req.query?.ownerKey ||
+        req.query?.owner_key ||
         ''
       ).trim();
 
@@ -4739,7 +4749,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
         });
       }
 
-      userToken = getFbUserToken(ownerKey);
+      userToken = String(getFbUserToken(ownerKey) || '').trim();
 
       if (!userToken) {
         return res.status(401).json({
@@ -4748,20 +4758,40 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
         });
       }
     } else {
-      ownerKey = ownerKeyFromReq(req);
-      userToken = getFbUserToken(ownerKey);
+      const resolved = await resolveFacebookTokenFromReq(req, {
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        preferredOwnerKey: String(
+          req.query?.ownerKey ||
+          req.query?.owner_key ||
+          req.body?.ownerKey ||
+          req.body?.owner_key ||
+          ''
+        ).trim(),
+      });
+
+      ownerKey = String(
+        resolved?.ownerKey ||
+        ownerKeyFromReq(req) ||
+        ''
+      ).trim();
+
+      userToken = String(resolved?.userToken || '').trim();
 
       if (!userToken) {
-        return res.status(401).json({ error: 'Not authenticated with Facebook' });
+        return res.status(401).json({
+          error: 'Not authenticated with Facebook',
+          ownerKeyUsed: ownerKey || null,
+          sid: String(getSidFromReq(req) || '').trim() || null,
+        });
       }
     }
 
     await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
+      `https://graph.facebook.com/v18.0/${normalizedCampaignId}`,
       { status: 'PAUSED' },
       { params: { access_token: userToken } }
     );
-
       try {
       await markManualOverride(campaignId, {
         manualOverride: true,
@@ -4795,17 +4825,21 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
   try {
-    const { campaignId } = req.params;
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
     let ownerKey = '';
-    let userToken = null;
+    let userToken = '';
 
     if (usingDebugKey) {
       ownerKey = String(
         getDebugOwnerKeyOverride(req) ||
         req.body?.ownerKey ||
         req.body?.owner_key ||
+        req.query?.ownerKey ||
+        req.query?.owner_key ||
         ''
       ).trim();
 
@@ -4815,7 +4849,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
         });
       }
 
-      userToken = getFbUserToken(ownerKey);
+      userToken = String(getFbUserToken(ownerKey) || '').trim();
 
       if (!userToken) {
         return res.status(401).json({
@@ -4824,16 +4858,37 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
         });
       }
     } else {
-      ownerKey = ownerKeyFromReq(req);
-      userToken = getFbUserToken(ownerKey);
+      const resolved = await resolveFacebookTokenFromReq(req, {
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        preferredOwnerKey: String(
+          req.query?.ownerKey ||
+          req.query?.owner_key ||
+          req.body?.ownerKey ||
+          req.body?.owner_key ||
+          ''
+        ).trim(),
+      });
+
+      ownerKey = String(
+        resolved?.ownerKey ||
+        ownerKeyFromReq(req) ||
+        ''
+      ).trim();
+
+      userToken = String(resolved?.userToken || '').trim();
 
       if (!userToken) {
-        return res.status(401).json({ error: 'Not authenticated with Facebook' });
+        return res.status(401).json({
+          error: 'Not authenticated with Facebook',
+          ownerKeyUsed: ownerKey || null,
+          sid: String(getSidFromReq(req) || '').trim() || null,
+        });
       }
     }
 
     await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
+      `https://graph.facebook.com/v18.0/${normalizedCampaignId}`,
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
