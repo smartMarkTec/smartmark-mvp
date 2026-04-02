@@ -2202,7 +2202,7 @@ async function generatePosterBPair(runToken) {
         {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
+         <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
         <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>Ad Previews</div>
       </div>
 
@@ -2249,21 +2249,21 @@ async function generatePosterBPair(runToken) {
               </span>
 
               <button
-                style={{
-                  background: "#e5e0ff",
-                  color: "#5f56eb",
-                  border: "none",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: "1.01rem",
-                  padding: "6px 20px",
-                  cursor: imageLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8,
-                  boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                }}
+              style={{
+  background: "#e5e0ff",
+  color: "#5f56eb",
+  border: "none",
+  borderRadius: 12,
+  fontWeight: 700,
+  fontSize: "1.01rem",
+  padding: "6px 20px",
+  cursor: imageLoading ? "not-allowed" : "pointer",
+  marginLeft: 8,
+  boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+}}
                 onClick={handleRegenerateImage}
                 disabled={imageLoading}
                 title="Regenerate Image Ad"
@@ -2273,6 +2273,7 @@ async function generatePosterBPair(runToken) {
               </button>
             </div>
 
+            {/* ✅ put this OUTSIDE the button */}
             <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
               {(() => {
                 const q = loadGenQuota();
@@ -2311,6 +2312,7 @@ async function generatePosterBPair(runToken) {
                   style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
                   onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
                   onError={() => {
+                    // If the hosted URL died (deploy/restart), try to use cached Data URL.
                     setImgFail((p) => ({ ...p, [activeImage]: true }));
                     const ctx = getActiveCtx();
                     const c = loadImageCache(ctx);
@@ -2355,32 +2357,33 @@ async function generatePosterBPair(runToken) {
               {displayHeadline}
             </div>
             <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 6, minHeight: 18, whiteSpace: "pre-wrap" }}>
-              {displayBody}
-            </div>
+  {displayBody}
+</div>
 
-            {displayLink ? (
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 13,
-                  fontWeight: 800,
-                  color: "#1b6fff",
-                  wordBreak: "break-word",
-                  lineHeight: 1.25,
-                }}
-              >
-                Learn more:{" "}
-                <a
-                  href={displayLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "#1b6fff", textDecoration: "none" }}
-                  title={displayLink}
-                >
-                  {prettyLink(displayLink)}
-                </a>
-              </div>
-            ) : null}
+{displayLink ? (
+  <div
+    style={{
+      marginTop: 6,
+      fontSize: 13,
+      fontWeight: 800,
+      color: "#1b6fff",
+      wordBreak: "break-word",
+      lineHeight: 1.25,
+    }}
+  >
+    Learn more:{" "}
+    <a
+      href={displayLink}
+      target="_blank"
+      rel="noreferrer"
+      style={{ color: "#1b6fff", textDecoration: "none" }}
+      title={displayLink}
+    >
+      {prettyLink(displayLink)}
+    </a>
+  </div>
+) : null}
+
           </div>
 
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
@@ -2452,29 +2455,30 @@ async function generatePosterBPair(runToken) {
               </label>
 
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Link URL</div>
-                <input
-                  value={editLink}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setEditLink(v);
-                    setAnswers((prev) => ({ ...(prev || {}), url: v }));
-                  }}
-                  onBlur={() => {
-                    const v = (editLink || "").trim();
-                    setEditLink(v);
-                    setAnswers((prev) => ({ ...(prev || {}), url: v }));
-                  }}
-                  placeholder="https://yourbusiness.com"
-                  style={{
-                    width: "100%",
-                    borderRadius: 10,
-                    border: "1px solid #e4e7ec",
-                    padding: "10px 12px",
-                    fontWeight: 700,
-                  }}
-                />
-              </label>
+  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Link URL</div>
+  <input
+    value={editLink}
+    onChange={(e) => {
+      const v = e.target.value;
+      setEditLink(v);
+      setAnswers((prev) => ({ ...(prev || {}), url: v })); // ✅ keeps launch link correct
+    }}
+    onBlur={() => {
+      const v = (editLink || "").trim();
+      setEditLink(v);
+      setAnswers((prev) => ({ ...(prev || {}), url: v }));
+    }}
+    placeholder="https://yourbusiness.com"
+    style={{
+      width: "100%",
+      borderRadius: 10,
+      border: "1px solid #e4e7ec",
+      padding: "10px 12px",
+      fontWeight: 700,
+    }}
+  />
+</label>
+
 
               <label style={{ display: "block" }}>
                 <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
