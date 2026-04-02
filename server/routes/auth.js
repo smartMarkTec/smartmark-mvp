@@ -1245,27 +1245,41 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
   await ensureUsersAndSessions();
   await db.read();
 
-  db.data = db.data || {};
-  db.data.sessions = db.data.sessions || [];
-  db.data.campaign_creatives = db.data.campaign_creatives || [];
+  const ensureArrays = () => {
+    db.data = db.data || {};
+    db.data.users = Array.isArray(db.data.users) ? db.data.users : [];
+    db.data.sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
+    db.data.campaign_creatives = Array.isArray(db.data.campaign_creatives)
+      ? db.data.campaign_creatives
+      : [];
+  };
+
+  ensureArrays();
 
   const candidates = [];
   const seen = new Set();
 
   const add = (v) => {
-    const s = String(v || '').trim();
+    const s = String(v || "").trim();
     if (!s || seen.has(s)) return;
     seen.add(s);
     candidates.push(s);
   };
 
-  const campaignId = String(options?.campaignId || req.params?.campaignId || '').trim();
-  const accountId = String(options?.accountId || req.params?.accountId || '').replace(/^act_/, '').trim();
-  const preferredOwnerKey = String(options?.preferredOwnerKey || '').trim();
+  const campaignId = String(
+    options?.campaignId || req.params?.campaignId || ""
+  ).trim();
 
-  const reqOwner = ownerKeyFromReq(req);
-  const sid = getSidFromReq(req);
-  const debugOwnerKey = getDebugOwnerKeyOverride(req);
+  const accountId = String(
+    options?.accountId || req.params?.accountId || ""
+  )
+    .replace(/^act_/, "")
+    .trim();
+
+  const preferredOwnerKey = String(options?.preferredOwnerKey || "").trim();
+  const reqOwner = String(ownerKeyFromReq(req) || "").trim();
+  const sid = String(getSidFromReq(req) || "").trim();
+  const debugOwnerKey = String(getDebugOwnerKeyOverride(req) || "").trim();
 
   add(preferredOwnerKey);
   add(debugOwnerKey);
@@ -1278,19 +1292,25 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
   add(reqOwner);
   add(sid);
 
+  ensureArrays();
+  let sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
+  let creatives = Array.isArray(db.data.campaign_creatives)
+    ? db.data.campaign_creatives
+    : [];
+
   const sess =
     sid
-      ? (db.data.sessions || []).find((s) => String(s.sid || '').trim() === String(sid).trim())
+      ? sessions.find((s) => String(s?.sid || "").trim() === sid) || null
       : null;
 
-  const sessionUsername = String(sess?.username || '').trim();
+  const sessionUsername = String(sess?.username || "").trim();
   if (sessionUsername) add(`user:${sessionUsername}`);
 
   if (campaignId && accountId) {
     const exactState = await findExactOptimizerCampaignState({
       campaignId,
       accountId,
-      ownerKey: preferredOwnerKey || debugOwnerKey || '',
+      ownerKey: preferredOwnerKey || debugOwnerKey || "",
     });
 
     add(exactState?.ownerKey);
@@ -1298,11 +1318,18 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
     const looseState = await findOptimizerCampaignStateByCampaignId(campaignId);
     add(looseState?.ownerKey);
 
+    // Re-normalize AFTER awaited calls in case db.data got reloaded elsewhere
+    ensureArrays();
+    sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
+    creatives = Array.isArray(db.data.campaign_creatives)
+      ? db.data.campaign_creatives
+      : [];
+
     const creativeRecord =
-      db.data.campaign_creatives.find((row) => {
+      creatives.find((row) => {
         return (
-          String(row?.campaignId || '').trim() === campaignId &&
-          String(row?.accountId || '').replace(/^act_/, '').trim() === accountId
+          String(row?.campaignId || "").trim() === campaignId &&
+          String(row?.accountId || "").replace(/^act_/, "").trim() === accountId
         );
       }) || null;
 
@@ -1311,24 +1338,30 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
 
   const expanded = [...candidates];
 
-  for (const key of candidates) {
-    const normalizedKey = String(key || '').trim();
+  for (const key of [...candidates]) {
+    const normalizedKey = String(key || "").trim();
     if (!normalizedKey) continue;
 
-    if (normalizedKey.startsWith('user:')) {
+    ensureArrays();
+    sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
+
+    if (normalizedKey.startsWith("user:")) {
       const username = normalizedKey.slice(5).trim();
 
-      for (const s of db.data.sessions) {
-        if (String(s?.username || '').trim() === username) {
-          add(String(s.sid || '').trim());
-          expanded.push(String(s.sid || '').trim());
+      for (const s of sessions) {
+        if (String(s?.username || "").trim() === username) {
+          const sidAlias = String(s?.sid || "").trim();
+          if (sidAlias) {
+            add(sidAlias);
+            expanded.push(sidAlias);
+          }
         }
       }
     }
 
     if (/^sm_/i.test(normalizedKey)) {
       const matchingSession =
-        db.data.sessions.find((s) => String(s?.sid || '').trim() === normalizedKey) || null;
+        sessions.find((s) => String(s?.sid || "").trim() === normalizedKey) || null;
 
       if (matchingSession?.username) {
         const userKey = `user:${String(matchingSession.username).trim()}`;
@@ -1338,9 +1371,8 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
     }
   }
 
-  // First pass: direct candidate lookup
   for (const key of expanded) {
-    const normalized = String(key || '').trim();
+    const normalized = String(key || "").trim();
     if (!normalized) continue;
 
     const token = getFbUserToken(normalized);
@@ -1349,31 +1381,33 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
     }
   }
 
-  // Second pass: if we know the current username, search ALL aliases for that username
   const fallbackUsername =
     sessionUsername ||
-    (String(reqOwner || '').startsWith('user:') ? String(reqOwner).slice(5).trim() : '') ||
-    (String(preferredOwnerKey || '').startsWith('user:') ? String(preferredOwnerKey).slice(5).trim() : '') ||
-    '';
+    (reqOwner.startsWith("user:") ? reqOwner.slice(5).trim() : "") ||
+    (preferredOwnerKey.startsWith("user:") ? preferredOwnerKey.slice(5).trim() : "") ||
+    "";
 
   if (fallbackUsername) {
     const userKey = `user:${fallbackUsername}`;
 
+    ensureArrays();
+    sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
+
     const aliasKeys = [userKey];
 
-    for (const s of db.data.sessions) {
-      if (String(s?.username || '').trim() === fallbackUsername) {
-        aliasKeys.push(String(s.sid || '').trim());
+    for (const s of sessions) {
+      if (String(s?.username || "").trim() === fallbackUsername) {
+        const sidAlias = String(s?.sid || "").trim();
+        if (sidAlias) aliasKeys.push(sidAlias);
       }
     }
 
     for (const alias of aliasKeys) {
-      const normalized = String(alias || '').trim();
+      const normalized = String(alias || "").trim();
       if (!normalized) continue;
 
       const token = getFbUserToken(normalized);
       if (token) {
-        // hydrate both aliases so future lookups are stable
         try {
           await setFbUserToken(token, userKey);
           if (sid) await setFbUserToken(token, sid);
@@ -1391,7 +1425,7 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
   }
 
   return {
-    ownerKey: preferredOwnerKey || debugOwnerKey || reqOwner || sid || '',
+    ownerKey: preferredOwnerKey || debugOwnerKey || reqOwner || sid || "",
     userToken: null,
   };
 }
