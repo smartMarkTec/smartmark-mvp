@@ -1625,18 +1625,18 @@ async function markManualOverride(campaignId, patch = {}) {
 
 router.post('/register', async (req, res) => {
   try {
-    const rawUsername = String(req.body?.username || '').trim();
+    const rawDisplayName = String(req.body?.username || '').trim();
     const rawEmail = String(req.body?.email || '').trim();
     const rawPassword = String(req.body?.password || '');
 
-    if (!rawUsername || !rawEmail || !rawPassword) {
-      return res.status(400).json({ error: 'Username, email, and password required' });
+    if (!rawDisplayName || !rawEmail || !rawPassword) {
+      return res.status(400).json({ error: 'Name, email, and password required' });
     }
 
     await ensureUsersAndSessions();
 
-    const username = rawUsername.toLowerCase();
     const email = rawEmail.toLowerCase();
+    const username = email; // canonical account identity = email
 
     const existingUser = db.data.users.find((u) => {
       const uName = String(u?.username || '').trim().toLowerCase();
@@ -1645,7 +1645,7 @@ router.post('/register', async (req, res) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({ error: 'Username or email already exists' });
+      return res.status(400).json({ error: 'Account already exists for this email' });
     }
 
     const passwordHash = bcrypt.hashSync(rawPassword, 10);
@@ -1653,6 +1653,7 @@ router.post('/register', async (req, res) => {
     const user = {
       username,
       email,
+      displayName: rawDisplayName,
       passwordHash,
       createdAt: new Date().toISOString(),
     };
@@ -1668,7 +1669,11 @@ router.post('/register', async (req, res) => {
 
     return res.json({
       success: true,
-      user: { username: user.username, email: user.email },
+      user: {
+        username: user.username,
+        email: user.email,
+        displayName: user.displayName,
+      },
     });
   } catch (err) {
     return res.status(500).json({
@@ -1690,7 +1695,6 @@ router.post('/login', async (req, res) => {
 
     const lookup = rawUsername.toLowerCase();
 
-    // ADMIN BYPASS
     if (rawUsername === ADMIN_BYPASS_USERNAME && rawPassword === ADMIN_BYPASS_PASSWORD) {
       let adminUser =
         db.data.users.find(

@@ -224,7 +224,7 @@ async function markSubscriptionFromStripe({
   });
 }
 
-async function syncCheckoutSessionToUser(sessionId) {
+async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
   const id = String(sessionId || "").trim();
   if (!id) return { ok: false, reason: "missing_session_id" };
 
@@ -232,13 +232,19 @@ async function syncCheckoutSessionToUser(sessionId) {
     expand: ["subscription"],
   });
 
-  const username = String(session?.metadata?.username || "").trim();
-  const email = String(
+  const stripeUsername = String(session?.metadata?.username || "").trim();
+  const stripeEmail = String(
     session?.customer_details?.email ||
       session?.customer_email ||
       session?.metadata?.email ||
       ""
-  ).trim();
+  ).trim().toLowerCase();
+
+  const fallbackUsername = String(fallbackUser?.username || "").trim();
+  const fallbackEmail = String(fallbackUser?.email || "").trim().toLowerCase();
+
+  const username = stripeUsername || fallbackUsername || stripeEmail || fallbackEmail;
+  const email = stripeEmail || fallbackEmail || stripeUsername || fallbackUsername;
 
   const customerId = String(session?.customer || "").trim();
   const subscriptionObj = session?.subscription || null;
@@ -290,7 +296,6 @@ async function syncCheckoutSessionToUser(sessionId) {
     },
   };
 }
-
 async function getAuthenticatedBilling(req) {
   const auth = await getSessionUser(req);
 
@@ -808,7 +813,10 @@ router.post("/sync-checkout-session", async (req, res) => {
       });
     }
 
-    const synced = await syncCheckoutSessionToUser(sessionId);
+    const auth = await getSessionUser(req);
+    const fallbackUser = auth?.user || null;
+
+    const synced = await syncCheckoutSessionToUser(sessionId, fallbackUser);
 
     if (!synced?.ok) {
       return res.status(404).json({
