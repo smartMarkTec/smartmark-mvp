@@ -6163,6 +6163,50 @@ const selectedCampaignCreatives =
         </div>
       </div>
 
+      {!billingInfo?.hasAccess && (
+        <div
+          style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 14,
+            padding: 16,
+            background: "#ffffff",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div style={{ color: "#111827", fontWeight: 500, fontSize: 15, lineHeight: 1.5 }}>
+            Choose a plan to unlock campaign launching and account features.
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/pricing", {
+                  state: {
+                    fromSetup: true,
+                    returnTo: "/setup",
+                  },
+                })
+              }
+              style={{
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 14px",
+                background: "#5b5cf0",
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              View Plans
+            </button>
+          </div>
+        </div>
+      )}
+
       {!!billingInfo?.hasAccess && (
         <div
           style={{
