@@ -71,7 +71,21 @@ async function authFetch(path, opts = {}) {
   headers["x-sm-sid"] = sid;
 
   const p = String(path || "");
-  const rel = p.startsWith("/") ? p : `/${p}`;
+  const rel0 = p.startsWith("/") ? p : `/${p}`;
+
+  const appendSid = (rel) => {
+    try {
+      const u = new URL(rel, window.location.origin);
+      if (!u.searchParams.get("sm_sid")) u.searchParams.set("sm_sid", sid);
+      if (!u.searchParams.get("sid")) u.searchParams.set("sid", sid);
+      return `${u.pathname}${u.search}`;
+    } catch {
+      const joiner = rel.includes("?") ? "&" : "?";
+      return `${rel}${joiner}sm_sid=${encodeURIComponent(sid)}&sid=${encodeURIComponent(sid)}`;
+    }
+  };
+
+  const rel = appendSid(rel0);
 
   const doFetch = (base) =>
     fetch(`${base}${rel}`, {
@@ -81,10 +95,8 @@ async function authFetch(path, opts = {}) {
       cache: "no-store",
     });
 
-  // ✅ hit the real backend route first
   let res = await doFetch(AUTH_BASE_PRIMARY);
 
-  // ✅ fallback if some client path still expects /api/auth
   if (res.status === 404) {
     res = await doFetch(AUTH_BASE_FALLBACK);
   }

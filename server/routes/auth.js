@@ -540,9 +540,11 @@ function isSidLike(x) {
 function getSidFromReq(req) {
   const cookieSid = req.cookies?.[COOKIE_NAME];
   const headerSid = req.get(SID_HEADER);
+  const querySid = String(req.query?.sm_sid || req.query?.sid || '').trim();
   const auth = req.headers.authorization || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
-  return (cookieSid || headerSid || bearer || '').trim();
+
+  return (cookieSid || headerSid || querySid || bearer || '').trim();
 }
 
 function ensureSid(req, res) {
