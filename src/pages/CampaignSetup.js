@@ -2993,7 +2993,7 @@ useEffect(() => {
     } catch {}
   }, [draftCreatives, resolvedUser]);
 
- const handleClearDraft = () => {
+const handleClearDraft = () => {
   try {
     sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
   } catch {}
@@ -3003,25 +3003,35 @@ useEffect(() => {
   try {
     if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
     localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem(CREATIVE_DRAFT_KEY_LEGACY);
   } catch {}
   try {
     if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
     localStorage.removeItem(FORM_DRAFT_KEY);
   } catch {}
-
-  // ✅ clear backup + inflight so it can't resurrect
   try {
     localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
     localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
     localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+    localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
+    localStorage.removeItem(SETUP_PREVIEW_BACKUP_KEY);
+    localStorage.removeItem(SETUP_FETCHABLE_IMAGES_KEY);
+    localStorage.removeItem("smartmark.imageDrafts.v1");
+    localStorage.removeItem("sm_image_cache_v1");
+    localStorage.removeItem("u:anon:sm_image_cache_v1");
+    if (resolvedUser) {
+      localStorage.removeItem(LS_PREVIEW_KEY(resolvedUser));
+      localStorage.removeItem(LS_FETCHABLE_KEY(resolvedUser));
+      localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY));
+    }
   } catch {}
 
-  // ✅ kill UI immediately
+  setDraftDisabled(resolvedUser, false);
   setDraftCreatives({ images: [], mediaSelection: "image" });
-
-  // ✅ IMPORTANT: if UI was focused on the draft, detach it
+  setPreviewCopy({ headline: "", body: "", link: "" });
   setExpandedId((prev) => (prev === "__DRAFT__" ? null : prev));
   setSelectedCampaignId((prev) => (prev === "__DRAFT__" ? "" : prev));
+  setSetupTab("campaign");
 };
 
 
@@ -3666,13 +3676,48 @@ useEffect(() => {
 
 
 useEffect(() => {
-  const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
-  lsSet(resolvedUser, "smartmark_last_selected_account", v, true); // ✅ alsoLegacy
-}, [selectedAccount, resolvedUser]);
+  const normalizedSelectedAccount = String(selectedAccount || "").replace(/^act_/, "").trim();
+  const availableAccountIds = (adAccounts || [])
+    .map((a) => String(a?.id || "").replace(/^act_/, "").trim())
+    .filter(Boolean);
+
+  const hasValidConnectedAccount =
+    !!fbConnected &&
+    !!normalizedSelectedAccount &&
+    availableAccountIds.includes(normalizedSelectedAccount);
+
+  if (hasValidConnectedAccount) {
+    lsSet(resolvedUser, "smartmark_last_selected_account", normalizedSelectedAccount, true);
+    return;
+  }
+
+  try {
+    localStorage.removeItem("smartmark_last_selected_account");
+    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_account"));
+  } catch {}
+}, [selectedAccount, adAccounts, fbConnected, resolvedUser]);
 
 useEffect(() => {
-  lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId, true); // ✅ alsoLegacy
-}, [selectedPageId, resolvedUser]);
+  const normalizedSelectedPageId = String(selectedPageId || "").trim();
+  const availablePageIds = (pages || [])
+    .map((p) => String(p?.id || "").trim())
+    .filter(Boolean);
+
+  const hasValidConnectedPage =
+    !!fbConnected &&
+    !!normalizedSelectedPageId &&
+    availablePageIds.includes(normalizedSelectedPageId);
+
+  if (hasValidConnectedPage) {
+    lsSet(resolvedUser, "smartmark_last_selected_pageId", normalizedSelectedPageId, true);
+    return;
+  }
+
+  try {
+    localStorage.removeItem("smartmark_last_selected_pageId");
+    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_pageId"));
+  } catch {}
+}, [selectedPageId, pages, fbConnected, resolvedUser]);
 
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
@@ -4608,26 +4653,32 @@ const getSavedCreatives = (campaignId) => {
       gap: 10,
     }}
   >
-     {[
-      {
-        key: "connect",
-        step: "01",
-        title: "Connect Facebook",
-        subtitle: "Ad account details",
-      },
-      {
-        key: "creatives",
-        step: "02",
-        title: "Creatives",
-        subtitle: "Ad visuals and AI updates",
-      },
-      {
-        key: "campaign",
-        step: "03",
-        title: "Campaign",
-        subtitle: "Metrics, launch, management",
-      },
-    ].map((item) => {
+  {[
+  {
+    key: "connect",
+    step: "01",
+    title: "Connect Facebook",
+    subtitle: "Ad account details",
+  },
+  {
+    key: "creatives",
+    step: "02",
+    title: "Creatives",
+    subtitle: "Ad visuals and AI updates",
+  },
+  {
+    key: "campaign",
+    step: "03",
+    title: "Campaign",
+    subtitle: "Metrics, launch, management",
+  },
+  {
+    key: "account",
+    step: "04",
+    title: "Account",
+    subtitle: "Plan and email",
+  },
+].map((item) => {
       const active = setupTab === item.key;
       return (
         <button
@@ -4922,19 +4973,19 @@ const getSavedCreatives = (campaignId) => {
         minHeight: 520,
       }}
     >
-      {selectedCampaignId ? (
-        <>
-          {(() => {
-            const creativeMeta = selectedCampaignCreatives?.meta || {};
-            const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
-            const pending = optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null;
-            const pendingStatus = String(pending?.status || "").trim().toLowerCase();
-            const isTesting =
-              pendingStatus === "live" ||
-              pendingStatus === "ready" ||
-              pendingStatus === "staged";
+    {selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? (
+  <>
+    {(() => {
+      const creativeMeta = selectedCampaignCreatives?.meta || {};
+      const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
+      const pending = optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null;
+      const pendingStatus = String(pending?.status || "").trim().toLowerCase();
+      const isTesting =
+        pendingStatus === "live" ||
+        pendingStatus === "ready" ||
+        pendingStatus === "staged";
 
-            return (
+      return (
               <>
                 <div
                   style={{
@@ -5115,8 +5166,19 @@ const getSavedCreatives = (campaignId) => {
           })()}
         </>
       ) : (
-        <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
-          Select a campaign to view its creatives and AI activity.
+        <div
+          style={{
+            border: "1px dashed #dbe4ff",
+            borderRadius: 16,
+            padding: 18,
+            background: "#f8fafc",
+            color: "#64748b",
+            fontWeight: 700,
+            fontSize: 14,
+            lineHeight: 1.6,
+          }}
+        >
+          Select a live campaign to view creatives here.
         </div>
       )}
     </div>
@@ -5195,27 +5257,27 @@ const getSavedCreatives = (campaignId) => {
     </div>
 
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      {selectedCampaignId === "__DRAFT__" && (
-        <button
-          type="button"
-          onClick={handleClearDraft}
-          title="Remove Draft"
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            border: "1px solid #ffd6d6",
-            background: "#fff1f2",
-            color: "#b42318",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-          }}
-        >
-          <FaTrash />
-        </button>
-      )}
+     {selectedCampaignId === "__DRAFT__" && (
+  <button
+    type="button"
+    onClick={() => handleDeleteCampaign("__DRAFT__")}
+    title="Remove Draft"
+    style={{
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      border: "1px solid #ffd6d6",
+      background: "#fff1f2",
+      color: "#b42318",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: "pointer",
+    }}
+  >
+    <FaTrash />
+  </button>
+)}
 
       <button
         type="button"
@@ -5478,60 +5540,7 @@ const getSavedCreatives = (campaignId) => {
             />
           </div>
 
-          <div
-  style={{
-    border: "1px solid #dbe4ff",
-    borderRadius: 14,
-    padding: 14,
-    background: "#f7f9ff",
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap",
-    }}
-  >
-    <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-      Billing + Plan
-    </div>
 
-    <button
-      type="button"
-      onClick={openFbPaymentPopup}
-      style={{
-        border: "none",
-        borderRadius: 10,
-        padding: "8px 10px",
-        background: "#5b5cf0",
-        color: "#ffffff",
-        fontWeight: 900,
-        fontSize: 12,
-        cursor: "pointer",
-      }}
-    >
-      Open Billing
-    </button>
-  </div>
-
-  <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-    {billingLoading
-      ? "Checking billing status..."
-      : billingInfo?.hasAccess
-      ? `Active plan: ${
-          PLAN_UI[billingInfo?.planKey]?.label ||
-          String(billingInfo?.planKey || "").trim() ||
-          "Paid"
-        }`
-      : "No active plan yet. Launch will open plan selection first."}
-  </div>
-</div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
@@ -6022,6 +6031,86 @@ const getSavedCreatives = (campaignId) => {
     )}
   </div>
 </main>
+
+{setupTab === "account" && (
+  <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
+        Account
+      </div>
+      <div style={{ color: "#667085", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+        Plan and account details.
+      </div>
+    </div>
+
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #dbe4ff",
+        borderRadius: 22,
+        padding: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        minHeight: 420,
+        boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
+      }}
+    >
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+          background: "#f8fafc",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>EMAIL</div>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+          {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+          background: "#f8fafc",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>PLAN</div>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+          {billingInfo?.planKey
+            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label || String(billingInfo.planKey)
+            : "No active plan"}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+          background: "#f8fafc",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>STATUS</div>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+          {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
+        </div>
+      </div>
+    </div>
+  </>
+)}
 
           {showEditCampaignModal && selectedLiveCampaign && (
         <div
