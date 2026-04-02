@@ -3728,7 +3728,7 @@ const handleDeleteCampaign = async (campaignId) => {
     return;
   }
 
-  const acctId = String(selectedAccount).trim();
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
 
   if (!window.confirm("Delete this campaign?")) return;
 
@@ -3736,10 +3736,13 @@ const handleDeleteCampaign = async (campaignId) => {
   try {
     const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
     });
 
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error || "Delete failed");
+    if (!r.ok || j?.ok === false) {
+      throw new Error(j?.error || j?.message || "Delete failed");
+    }
 
     try {
       const map = readCreativeMap(resolvedUser, acctId);
@@ -3749,37 +3752,46 @@ const handleDeleteCampaign = async (campaignId) => {
       }
     } catch {}
 
-    setCampaigns((prev) =>
-      Array.isArray(prev) ? prev.filter((c) => String(c?.id || "") !== idToDelete) : prev
-    );
+    const nextCampaigns = Array.isArray(campaigns)
+      ? campaigns.filter((c) => String(c?.id || "") !== idToDelete)
+      : [];
+
+    setCampaigns(nextCampaigns);
 
     setMetricsMap((m) => {
-      const { [idToDelete]: _, ...rest } = m || {};
+      const { [idToDelete]: removed, ...rest } = m || {};
       return rest;
     });
 
     setPublicSummaryMap((m) => {
-      const { [idToDelete]: _, ...rest } = m || {};
+      const { [idToDelete]: removed, ...rest } = m || {};
       return rest;
     });
 
     setOptimizerCreativeMap((m) => {
-      const { [idToDelete]: _, ...rest } = m || {};
+      const { [idToDelete]: removed, ...rest } = m || {};
       return rest;
     });
 
     setOptimizerStateMap((m) => {
-      const { [idToDelete]: _, ...rest } = m || {};
+      const { [idToDelete]: removed, ...rest } = m || {};
       return rest;
     });
 
     setCampaignCreativesMap((m) => {
-      const { [idToDelete]: _, ...rest } = m || {};
+      const { [idToDelete]: removed, ...rest } = m || {};
       return rest;
     });
 
-    if (selectedCampaignId === idToDelete) setSelectedCampaignId("");
-    if (expandedId === idToDelete) setExpandedId(null);
+    const fallbackId = String(nextCampaigns?.[0]?.id || "").trim();
+
+    if (selectedCampaignId === idToDelete) {
+      setSelectedCampaignId(fallbackId || "");
+    }
+
+    if (expandedId === idToDelete) {
+      setExpandedId(fallbackId || null);
+    }
 
     setShowCampaignMenu(false);
     setCampaignStatus("ARCHIVED");
@@ -3936,46 +3948,47 @@ function isValidHttpUrl(u) {
   }
 }
 
+const handleLaunch = async () => {
+  if (!billingInfo?.hasAccess) {
+    const loggedInUser = getUserFromStorage();
 
-   const handleLaunch = async () => {
-if (!billingInfo?.hasAccess) {
-  const loggedInUser = getUserFromStorage();
-
-  if (!loggedInUser) {
-    navigate("/signup", {
-      state: {
+    savePendingLaunch(
+      buildPendingLaunchPayload({
         selectedPlan,
-        fromSetup: true,
-      },
-    });
+        budget,
+        startDate,
+        endDate,
+        selectedAccount,
+        selectedPageId,
+        form,
+        answers,
+        headline,
+        body,
+        inferredLink,
+        previewCopy,
+        draftCreatives,
+        navImageUrls,
+      })
+    );
+
+    if (!loggedInUser) {
+      navigate("/signup", {
+        state: {
+          selectedPlan,
+          fromSetup: true,
+          launchIntent: true,
+          returnTo: "/setup",
+        },
+      });
+      return;
+    }
+
+    setPendingLaunchAfterCheckout(true);
+    setShowPlanModal(true);
     return;
   }
 
-  savePendingLaunch(
-    buildPendingLaunchPayload({
-      selectedPlan,
-      budget,
-      startDate,
-      endDate,
-      selectedAccount,
-      selectedPageId,
-      form,
-      answers,
-      headline,
-      body,
-      inferredLink,
-      previewCopy,
-      draftCreatives,
-      navImageUrls,
-    })
-  );
-
-  setPendingLaunchAfterCheckout(true);
-  setShowPlanModal(true);
-  return;
-}
-
-    setLoading(true);
+  setLoading(true);
     try {
 const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
 const pageId = String(selectedPageId || "").trim();

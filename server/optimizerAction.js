@@ -4,9 +4,33 @@ const axios = require('axios');
 const { buildUpdatedPrimaryText } = require('./optimizerCopy');
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v18.0';
-const MAX_TOTAL_ADS_PER_CAMPAIGN = 3;
-const MAX_CHALLENGER_ADS_PER_CAMPAIGN = 2;
 
+const PLAN_LIMITS = {
+  starter: {
+    key: 'starter',
+    label: 'Standard',
+    maxTotalAdsPerCampaign: 2,
+    maxChallengerAdsPerCampaign: 1,
+    maxCreativeVariantsPerRound: 1,
+    minCreativeTestHours: 72,
+  },
+  pro: {
+    key: 'pro',
+    label: 'Pro',
+    maxTotalAdsPerCampaign: 4,
+    maxChallengerAdsPerCampaign: 2,
+    maxCreativeVariantsPerRound: 2,
+    minCreativeTestHours: 72,
+  },
+  operator: {
+    key: 'operator',
+    label: 'Operator',
+    maxTotalAdsPerCampaign: 5,
+    maxChallengerAdsPerCampaign: 3,
+    maxCreativeVariantsPerRound: 3,
+    minCreativeTestHours: 72,
+  },
+};
 function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
@@ -68,6 +92,28 @@ function buildBaseSkippedResult({
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function resolvePlanKey(optimizerState) {
+  const raw = String(
+    optimizerState?.planKey ||
+    optimizerState?.subscriptionPlan ||
+    optimizerState?.billing?.planKey ||
+    optimizerState?.user?.billing?.planKey ||
+    optimizerState?.account?.planKey ||
+    'starter'
+  ).trim().toLowerCase();
+
+  if (raw === 'standard') return 'starter';
+  if (raw === 'starter' || raw === 'pro' || raw === 'operator') {
+    return raw;
+  }
+  return 'starter';
+}
+
+function getPlanLimits(optimizerState) {
+  const planKey = resolvePlanKey(optimizerState);
+  return PLAN_LIMITS[planKey] || PLAN_LIMITS.starter;
 }
 
 function dedupeStrings(values) {
@@ -249,50 +295,69 @@ function buildCreativeGenerationPlan({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestDecision = optimizerState?.latestDecision || null;
   const metrics = optimizerState?.metricsSnapshot || {};
+  const planLimits = getPlanLimits(optimizerState);
 
   const diagnosis = String(latestDiagnosis?.diagnosis || '').trim();
   const decision = String(latestDecision?.decision || '').trim();
   const ctr = Number(metrics?.ctr || 0);
   const frequency = Number(metrics?.frequency || 0);
   const impressions = Number(metrics?.impressions || 0);
+  const clicks = Number(metrics?.clicks || 0);
+  const spend = Number(metrics?.spend || 0);
 
   let variantCount = 1;
   let reason =
-    'Smartemark wants a fresh creative direction, but a single replacement concept is enough for the next step.';
+    'Smartemark wants a fresh creative direction, but one replacement concept is enough for the next step.';
   let creativeGoal = 'refresh_visual_hook';
 
-  if (
+  const clearFatigue =
     diagnosis === 'creative_fatigue_risk' ||
     decision === 'prepare_refresh' ||
-    (frequency >= 2.5 && impressions >= 800)
-  ) {
-    variantCount = 2;
-    creativeGoal = 'launch_ab_creative_test';
-    reason =
-      'Smartemark sees signs of fatigue or unclear creative strength, so two fresh variants should be generated for controlled testing.';
-  } else if (
+    (frequency >= 2.5 && impressions >= 800);
+
+  const weakEfficiency =
     diagnosis === 'weak_engagement' ||
     diagnosis === 'high_cpc' ||
-    decision === 'improve_efficiency'
-  ) {
-    variantCount = 2;
+    decision === 'improve_efficiency';
+
+  const veryWeakPerformance =
+    (diagnosis === 'low_ctr' && ctr < 0.9) ||
+    (ctr > 0 && ctr < 0.8 && impressions >= 1000) ||
+    (clicks >= 20 && spend > 0 && ctr < 1.0);
+
+  if (clearFatigue) {
+    variantCount = planLimits.key === 'operator' ? 3 : 2;
+    creativeGoal = 'launch_ab_creative_test';
+    reason =
+      planLimits.key === 'operator'
+        ? 'Smartemark sees enough fatigue and data to justify a broader challenger round with three fresh creative angles.'
+        : 'Smartemark sees signs of fatigue or unclear creative strength, so it should test fresh challenger creatives.';
+  } else if (weakEfficiency) {
+    variantCount = planLimits.key === 'starter' ? 1 : 2;
     creativeGoal = 'test_two_fresh_angles';
     reason =
-      'Smartemark wants to test two different visual directions because response quality is weak enough to justify creative comparison.';
-  } else if (diagnosis === 'low_ctr' && ctr < 0.9) {
+      planLimits.key === 'starter'
+        ? 'Response quality is weak, but this plan should stay measured and test one stronger replacement first.'
+        : 'Response quality is weak enough to justify testing multiple creative directions.';
+  } else if (veryWeakPerformance) {
     variantCount = 1;
     creativeGoal = 'support_copy_refresh_with_new_visual';
     reason =
-      'Low CTR is present, but Smartemark can start with one stronger replacement visual before escalating to a broader A/B test.';
+      'CTR is weak, so Smartemark should start with one sharper visual before escalating into a larger creative round.';
   }
 
+  variantCount = Math.max(
+    1,
+    Math.min(variantCount, safeNumber(planLimits.maxCreativeVariantsPerRound, 1))
+  );
+
   return {
+    planKey: planLimits.key,
     variantCount,
     creativeGoal,
     reason,
   };
 }
-
 function inferBusinessContext(optimizerState) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestDecision = optimizerState?.latestDecision || null;
@@ -742,7 +807,9 @@ async function executeCreativeGeneration({
     });
   }
 
-  const variantCount =
+  const planLimits = getPlanLimits(optimizerState);
+
+  const requestedVariantCount =
     safeNumber(actionConfig?.variantCount, 0) > 0
       ? safeNumber(actionConfig.variantCount, 0)
       : actionType === 'generate_two_creative_variants'
@@ -750,6 +817,11 @@ async function executeCreativeGeneration({
       : actionType === 'generate_single_creative_variant'
       ? 1
       : plan.variantCount;
+
+  const variantCount = Math.max(
+    1,
+    Math.min(requestedVariantCount, safeNumber(planLimits.maxCreativeVariantsPerRound, 1))
+  );
 
   const creativeGoal =
     String(actionConfig?.creativeGoal || '').trim() || plan.creativeGoal;
@@ -814,9 +886,12 @@ async function executeCreativeGeneration({
       mutationType: 'generate_creative_variants',
       generationReady: true,
       pendingPromotionReady: true,
+      planKey: planLimits.key,
+      planLabel: planLimits.label,
       creativeGoal,
       generationReason: plan.reason,
-      requestedVariantCount: variantCount,
+      requestedVariantCount,
+      allowedVariantCount: variantCount,
       generatedVariantCount: imageUrls.length,
       imageUrls,
       generationPrompt: prompt,
@@ -933,16 +1008,23 @@ async function executeCreativePromotion({
     });
   }
 
-  if (summary.challengerCount >= MAX_CHALLENGER_ADS_PER_CAMPAIGN || summary.totalAds >= MAX_TOTAL_ADS_PER_CAMPAIGN) {
+  const planLimits = getPlanLimits(optimizerState);
+
+  if (
+    summary.challengerCount >= planLimits.maxChallengerAdsPerCampaign ||
+    summary.totalAds >= planLimits.maxTotalAdsPerCampaign
+  ) {
     return buildBaseSkippedResult({
       campaignId,
       actionType: 'promote_generated_creative_variants',
       status: 'blocked_by_ad_cap',
       reason:
-        'Smartemark found enough existing ads in this campaign already, so it will monitor and resolve the current test instead of creating more ads.',
+        `Smartemark hit the ${planLimits.label} plan ad cap for this campaign, so it will monitor and resolve the current test instead of creating more ads.`,
       extra: {
         actionResult: {
           mutationType: 'promote_generated_creative_variants',
+          planKey: planLimits.key,
+          planLabel: planLimits.label,
           campaign,
           existingAds: {
             totalAds: summary.totalAds,
@@ -951,14 +1033,18 @@ async function executeCreativePromotion({
             challengerAdIds: summary.challengerAds.map((ad) => String(ad.id || '').trim()),
             controlAdIds: summary.controlAds.map((ad) => String(ad.id || '').trim()),
           },
+          caps: {
+            maxTotalAdsPerCampaign: planLimits.maxTotalAdsPerCampaign,
+            maxChallengerAdsPerCampaign: planLimits.maxChallengerAdsPerCampaign,
+          },
         },
       },
     });
   }
 
   const remainingSlots = Math.min(
-    MAX_CHALLENGER_ADS_PER_CAMPAIGN - summary.challengerCount,
-    MAX_TOTAL_ADS_PER_CAMPAIGN - summary.totalAds
+    planLimits.maxChallengerAdsPerCampaign - summary.challengerCount,
+    planLimits.maxTotalAdsPerCampaign - summary.totalAds
   );
 
   if (remainingSlots <= 0) {
@@ -1111,7 +1197,7 @@ async function executeCreativePromotion({
       variants: variantResults,
       errors,
       testStartedAt: new Date().toISOString(),
-      pendingCreativeTest: {
+        pendingCreativeTest: {
         status: launchStatus === 'ACTIVE' ? 'live' : 'staged',
         creativeGoal: pending.creativeGoal,
         generationReason: pending.generationReason,
@@ -1123,6 +1209,8 @@ async function executeCreativePromotion({
         metaImageHashes: imageHashes,
         launchedVariantCount: variantResults.length,
         launchStatus,
+        planKey: planLimits.key,
+        planLabel: planLimits.label,
         startedAt: new Date().toISOString(),
       },
     },

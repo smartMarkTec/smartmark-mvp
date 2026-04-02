@@ -42,6 +42,78 @@ const crypto = require('crypto');
 
 const ADMIN_BYPASS_USERNAME = 'TheBoss';
 const ADMIN_BYPASS_PASSWORD = 'knowwilltech@gmail.com';
+
+function normalizeBillingPlanKey(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'standard') return 'starter';
+  if (s === 'starter' || s === 'pro' || s === 'operator') return s;
+  return 'starter';
+}
+
+function getLaunchPlanLimits(planKey) {
+  const key = normalizeBillingPlanKey(planKey);
+
+  if (key === 'operator') {
+    return {
+      planKey: 'operator',
+      planLabel: 'Operator',
+      maxCampaignsPerMonth: 10,
+      maxBusinesses: 3,
+      maxAdAccounts: 3,
+      imageVariants: 2,
+    };
+  }
+
+  if (key === 'pro') {
+    return {
+      planKey: 'pro',
+      planLabel: 'Pro',
+      maxCampaignsPerMonth: 6,
+      maxBusinesses: 2,
+      maxAdAccounts: 2,
+      imageVariants: 2,
+    };
+  }
+
+  return {
+    planKey: 'starter',
+    planLabel: 'Standard',
+    maxCampaignsPerMonth: 2,
+    maxBusinesses: 1,
+    maxAdAccounts: 1,
+    imageVariants: 1,
+  };
+}
+
+async function findUserByOwnerKey(ownerKey) {
+  await ensureUsersAndSessions();
+  await db.read();
+
+  const key = String(ownerKey || '').trim();
+  if (!key) return null;
+
+  if (key.startsWith('user:')) {
+    const username = key.slice(5).trim();
+    return (
+      (db.data.users || []).find(
+        (u) => String(u?.username || '').trim() === username
+      ) || null
+    );
+  }
+
+  const sess =
+    (db.data.sessions || []).find(
+      (s) => String(s?.sid || '').trim() === key
+    ) || null;
+
+  if (!sess?.username) return null;
+
+  return (
+    (db.data.users || []).find(
+      (u) => String(u?.username || '').trim() === String(sess.username || '').trim()
+    ) || null
+  );
+}
 /* ------------------------------------------------------------------ */
 /*        META API USAGE TRACKER (GENERAL + QUALIFIED MARKETING)      */
 /* ------------------------------------------------------------------ */
@@ -2040,36 +2112,119 @@ if (aiAudience?.fbInterestIds?.length) {
   ];
 }
 
-    if (!VALIDATE_ONLY) {
-      const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
-        params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 },
-      });
-      const activeCount = (existing.data?.data || []).filter(
-        (c) => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
-      ).length;
-      if (activeCount >= 2) {
-        return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
-      }
-    }
+const ownerUser = await findUserByOwnerKey(ownerKey);
+const billingPlanKey = normalizeBillingPlanKey(ownerUser?.billing?.planKey || 'starter');
+const launchPlanLimits = getLaunchPlanLimits(billingPlanKey);
 
-    const dailyBudget = Number(budget) || 0;
-    const hours = (() => {
-      if (flightEnd && flightStart) return Math.max(0, (new Date(flightEnd) - new Date(flightStart)) / 36e5);
-      if (flightHours) return Number(flightHours) || 0;
-      return 0;
-    })();
+if (!VALIDATE_ONLY) {
+  await ensureUsersAndSessions();
+  await db.read();
 
-    const plan = policy.decideVariantPlan({
-      assetTypes: 'image',
-      dailyBudget,
-      flightHours: hours,
-      overrideCountPerType:
-        overrideCountPerType && typeof overrideCountPerType === 'object'
-          ? { images: Number(overrideCountPerType.images || 0) }
-          : overrideCountPerType,
+  db.data = db.data || {};
+  db.data.campaign_creatives = Array.isArray(db.data.campaign_creatives)
+    ? db.data.campaign_creatives
+    : [];
+
+  const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
+    params: { access_token: userToken, fields: 'id,name,effective_status', limit: 100 },
+  });
+
+  const activeCampaigns = (existing.data?.data || []).filter(
+    (c) => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
+  );
+
+  const activeCount = activeCampaigns.length;
+
+  if (activeCount >= launchPlanLimits.maxCampaignsPerMonth) {
+    return res.status(400).json({
+      error: `Limit reached for ${launchPlanLimits.planLabel}: maximum of ${launchPlanLimits.maxCampaignsPerMonth} active campaigns.`,
+      planKey: launchPlanLimits.planKey,
+      planLabel: launchPlanLimits.planLabel,
+      limitType: 'campaigns',
+      maxAllowed: launchPlanLimits.maxCampaignsPerMonth,
+      currentCount: activeCount,
     });
+  }
 
-    const needImg = plan.images || 0;
+  const accountCreativeRows = (db.data.campaign_creatives || []).filter((row) => {
+    return String(row?.ownerKey || '').trim() === String(ownerKey || '').trim();
+  });
+
+  const uniqueAccountIds = [
+    ...new Set(
+      accountCreativeRows
+        .map((row) => String(row?.accountId || '').replace(/^act_/, '').trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  const uniqueBusinessNames = [
+    ...new Set(
+      accountCreativeRows
+        .map((row) => String(row?.name || '').trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
+
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+  const normalizedCampaignName = String(campaignName || '').trim().toLowerCase();
+
+  const nextAdAccountCount = uniqueAccountIds.includes(normalizedAccountId)
+    ? uniqueAccountIds.length
+    : uniqueAccountIds.length + 1;
+
+  const nextBusinessCount = uniqueBusinessNames.includes(normalizedCampaignName)
+    ? uniqueBusinessNames.length
+    : uniqueBusinessNames.length + 1;
+
+  if (nextAdAccountCount > launchPlanLimits.maxAdAccounts) {
+    return res.status(400).json({
+      error: `Limit reached for ${launchPlanLimits.planLabel}: maximum of ${launchPlanLimits.maxAdAccounts} connected ad account(s).`,
+      planKey: launchPlanLimits.planKey,
+      planLabel: launchPlanLimits.planLabel,
+      limitType: 'ad_accounts',
+      maxAllowed: launchPlanLimits.maxAdAccounts,
+      currentCount: uniqueAccountIds.length,
+    });
+  }
+
+  if (nextBusinessCount > launchPlanLimits.maxBusinesses) {
+    return res.status(400).json({
+      error: `Limit reached for ${launchPlanLimits.planLabel}: maximum of ${launchPlanLimits.maxBusinesses} business(es).`,
+      planKey: launchPlanLimits.planKey,
+      planLabel: launchPlanLimits.planLabel,
+      limitType: 'businesses',
+      maxAllowed: launchPlanLimits.maxBusinesses,
+      currentCount: uniqueBusinessNames.length,
+    });
+  }
+}
+
+const dailyBudget = Number(budget) || 0;
+const hours = (() => {
+  if (flightEnd && flightStart) return Math.max(0, (new Date(flightEnd) - new Date(flightStart)) / 36e5);
+  if (flightHours) return Number(flightHours) || 0;
+  return 0;
+})();
+
+const requestedImageOverride =
+  overrideCountPerType && typeof overrideCountPerType === 'object'
+    ? Number(overrideCountPerType.images || 0)
+    : 0;
+
+const plan = policy.decideVariantPlan({
+  assetTypes: 'image',
+  dailyBudget,
+  flightHours: hours,
+  overrideCountPerType: {
+    images: Math.min(
+      launchPlanLimits.imageVariants,
+      requestedImageOverride > 0 ? requestedImageOverride : launchPlanLimits.imageVariants
+    ),
+  },
+});
+
+const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariants);
 
     if (needImg > 0 && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
@@ -2265,6 +2420,8 @@ const optimizerPayload = {
       form.cuisineType ||
       ''
   ).trim(),
+  planKey: String(launchPlanLimits.planKey || 'starter').trim(),
+  planLabel: String(launchPlanLimits.planLabel || 'Standard').trim(),
   currentStatus: String(campaignStatus || '').trim(),
   optimizationEnabled: !VALIDATE_ONLY,
   billingBlocked: false,
@@ -2273,7 +2430,7 @@ const optimizerPayload = {
   latestMonitoringDecision: null,
   currentWinner: null,
   activeTestType: '',
-publicSummary: makeInitialPublicSummary(),
+  publicSummary: makeInitialPublicSummary(),
 };
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);

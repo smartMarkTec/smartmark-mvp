@@ -28,10 +28,39 @@ const PUBLIC_PRICE_MAP = {
   operator: process.env.STRIPE_PRICE_OPERATOR || "",
 };
 
-const FOUNDER_PRICE_MAP = {
-  starter: process.env.STRIPE_PRICE_STARTER_FOUNDER || "",
-  pro: process.env.STRIPE_PRICE_PRO_FOUNDER || "",
-  operator: process.env.STRIPE_PRICE_OPERATOR_FOUNDER || "",
+const HIDDEN_FOUNDER_PRICE_META = {
+  founder_legacy_40: {
+    priceId: process.env.STRIPE_PRICE_STARTER_FOUNDER_40 || "",
+    planKey: "starter",
+    planName: "Starter",
+    billingLabel: "Starter Founder $40",
+    founder: true,
+    hidden: true,
+  },
+  founder_starter_70: {
+    priceId: process.env.STRIPE_PRICE_STARTER_FOUNDER_70 || "",
+    planKey: "starter",
+    planName: "Starter",
+    billingLabel: "Starter Founder $70",
+    founder: true,
+    hidden: true,
+  },
+  founder_pro_105: {
+    priceId: process.env.STRIPE_PRICE_PRO_FOUNDER_105 || "",
+    planKey: "pro",
+    planName: "Pro",
+    billingLabel: "Pro Founder $105",
+    founder: true,
+    hidden: true,
+  },
+  founder_operator_175: {
+    priceId: process.env.STRIPE_PRICE_OPERATOR_FOUNDER_175 || "",
+    planKey: "operator",
+    planName: "Operator",
+    billingLabel: "Operator Founder $175",
+    founder: true,
+    hidden: true,
+  },
 };
 
 function normalizePlanKey(raw) {
@@ -48,12 +77,12 @@ function getClientUrl(req) {
   return process.env.CLIENT_URL || req.headers.origin || "http://localhost:3000";
 }
 
-function getPriceMap(founder = false) {
-  return founder ? FOUNDER_PRICE_MAP : PUBLIC_PRICE_MAP;
+function getPriceMap() {
+  return PUBLIC_PRICE_MAP;
 }
 
-function getPriceId(planKey, founder = false) {
-  const map = getPriceMap(founder);
+function getPriceId(planKey) {
+  const map = getPriceMap();
   return String(map[planKey] || "").trim();
 }
 
@@ -61,11 +90,30 @@ function buildPriceToPlanLookup() {
   const out = {};
 
   for (const [planKey, priceId] of Object.entries(PUBLIC_PRICE_MAP)) {
-    if (priceId) out[priceId] = { planKey, founder: false };
+    if (!priceId) continue;
+
+    out[String(priceId).trim()] = {
+      planKey,
+      founder: false,
+      hidden: false,
+      planName: PLAN_NAME_MAP[planKey] || planKey,
+      billingLabel: PLAN_NAME_MAP[planKey] || planKey,
+      offerKey: `public_${planKey}`,
+    };
   }
 
-  for (const [planKey, priceId] of Object.entries(FOUNDER_PRICE_MAP)) {
-    if (priceId) out[priceId] = { planKey, founder: true };
+  for (const [offerKey, meta] of Object.entries(HIDDEN_FOUNDER_PRICE_META)) {
+    const priceId = String(meta?.priceId || "").trim();
+    if (!priceId) continue;
+
+    out[priceId] = {
+      planKey: String(meta.planKey || "").trim(),
+      founder: !!meta.founder,
+      hidden: !!meta.hidden,
+      planName: String(meta.planName || "").trim(),
+      billingLabel: String(meta.billingLabel || "").trim(),
+      offerKey,
+    };
   }
 
   return out;
@@ -73,7 +121,17 @@ function buildPriceToPlanLookup() {
 
 function derivePlanMetaFromPriceId(priceId) {
   const lookup = buildPriceToPlanLookup();
-  return lookup[String(priceId || "").trim()] || { planKey: "", founder: false };
+
+  return (
+    lookup[String(priceId || "").trim()] || {
+      planKey: "",
+      founder: false,
+      hidden: false,
+      planName: "",
+      billingLabel: "",
+      offerKey: "",
+    }
+  );
 }
 
 async function ensureDbShape() {
@@ -108,6 +166,7 @@ async function getSessionUser(req) {
 
   return { sid, sess, user };
 }
+
 async function setUserBillingByIdentity({
   username = "",
   email = "",
@@ -167,7 +226,14 @@ async function markSubscriptionFromStripe({
   status = "",
   currentPeriodEnd = null,
 }) {
-  const { planKey, founder } = derivePlanMetaFromPriceId(priceId);
+  const {
+    planKey,
+    founder,
+    hidden,
+    planName,
+    billingLabel,
+    offerKey,
+  } = derivePlanMetaFromPriceId(priceId);
 
   return await setUserBillingByIdentity({
     username,
@@ -179,7 +245,10 @@ async function markSubscriptionFromStripe({
       stripePriceId: priceId || "",
       planKey: planKey || "",
       founder: !!founder,
-      planName: planKey ? PLAN_NAME_MAP[planKey] : "",
+      hiddenPlan: !!hidden,
+      offerKey: offerKey || "",
+      planName: planName || "",
+      billingLabel: billingLabel || "",
       status: String(status || "").trim(),
       hasAccess: ["active", "trialing"].includes(
         String(status || "").trim().toLowerCase()
@@ -201,10 +270,11 @@ router.get("/health", (_req, res) => {
         pro: !!PUBLIC_PRICE_MAP.pro,
         operator: !!PUBLIC_PRICE_MAP.operator,
       },
-      founder: {
-        starter: !!FOUNDER_PRICE_MAP.starter,
-        pro: !!FOUNDER_PRICE_MAP.pro,
-        operator: !!FOUNDER_PRICE_MAP.operator,
+      founderHidden: {
+        founder_legacy_40: !!HIDDEN_FOUNDER_PRICE_META.founder_legacy_40.priceId,
+        founder_starter_70: !!HIDDEN_FOUNDER_PRICE_META.founder_starter_70.priceId,
+        founder_pro_105: !!HIDDEN_FOUNDER_PRICE_META.founder_pro_105.priceId,
+        founder_operator_175: !!HIDDEN_FOUNDER_PRICE_META.founder_operator_175.priceId,
       },
     },
   });
@@ -221,7 +291,6 @@ router.post("/create-checkout-session", async (req, res) => {
     }
 
     const planKey = normalizePlanKey(req.body?.plan);
-    const founder = normalizeFounderFlag(req.body?.founder);
     const email = String(req.body?.email || "").trim() || undefined;
     const launchIntent = String(req.body?.launchIntent || "").trim() === "1";
 
@@ -232,19 +301,19 @@ router.post("/create-checkout-session", async (req, res) => {
       });
     }
 
-    const priceId = getPriceId(planKey, founder);
+    const priceId = getPriceId(planKey);
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for ${planKey}${founder ? " founder" : ""}.`,
+        error: `Missing Stripe price for ${planKey}.`,
       });
     }
 
     const clientUrl = getClientUrl(req);
 
     const successUrl = launchIntent
-      ? `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}${founder ? "&founder=1" : ""}`
-      : `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}${founder ? "&founder=1" : ""}`;
+      ? `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}`
+      : `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
 
     const cancelUrl = launchIntent
       ? `${clientUrl}/setup?checkout=cancelled&launch_intent=1`
@@ -261,15 +330,19 @@ router.post("/create-checkout-session", async (req, res) => {
       cancel_url: cancelUrl,
       metadata: {
         planKey,
-        founder: founder ? "true" : "false",
+        founder: "false",
         planName: PLAN_NAME_MAP[planKey],
+        billingLabel: PLAN_NAME_MAP[planKey],
+        offerKey: `public_${planKey}`,
         source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
       },
       subscription_data: {
         metadata: {
           planKey,
-          founder: founder ? "true" : "false",
+          founder: "false",
           planName: PLAN_NAME_MAP[planKey],
+          billingLabel: PLAN_NAME_MAP[planKey],
+          offerKey: `public_${planKey}`,
           source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
         },
       },
@@ -315,7 +388,10 @@ router.get("/billing-status", async (req, res) => {
         provider: billing.provider || "",
         planKey: billing.planKey || "",
         planName: billing.planName || "",
+        billingLabel: billing.billingLabel || "",
         founder: !!billing.founder,
+        hiddenPlan: !!billing.hiddenPlan,
+        offerKey: billing.offerKey || "",
         status: billing.status || "",
         hasAccess: !!billing.hasAccess,
         currentPeriodEnd: billing.currentPeriodEnd || null,
@@ -351,7 +427,6 @@ router.post("/create-checkout-session-auth", async (req, res) => {
     }
 
     const planKey = normalizePlanKey(req.body?.plan);
-    const founder = normalizeFounderFlag(req.body?.founder);
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
@@ -360,11 +435,11 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       });
     }
 
-    const priceId = getPriceId(planKey, founder);
+    const priceId = getPriceId(planKey);
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for ${planKey}${founder ? " founder" : ""}.`,
+        error: `Missing Stripe price for ${planKey}.`,
       });
     }
 
@@ -379,14 +454,16 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-   success_url: `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}${founder ? "&founder=1" : ""}`,
-cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
+      success_url: `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}`,
+      cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
       metadata: {
         username,
         email,
         planKey,
-        founder: founder ? "true" : "false",
+        founder: "false",
         planName: PLAN_NAME_MAP[planKey],
+        billingLabel: PLAN_NAME_MAP[planKey],
+        offerKey: `public_${planKey}`,
         source: "campaign_setup",
       },
       subscription_data: {
@@ -394,8 +471,10 @@ cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
           username,
           email,
           planKey,
-          founder: founder ? "true" : "false",
+          founder: "false",
           planName: PLAN_NAME_MAP[planKey],
+          billingLabel: PLAN_NAME_MAP[planKey],
+          offerKey: `public_${planKey}`,
           source: "campaign_setup",
         },
       },
@@ -411,6 +490,97 @@ cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
     return res.status(500).json({
       ok: false,
       error: err?.message || "Failed to create authenticated checkout session",
+    });
+  }
+});
+
+router.post("/admin/assign-plan", async (req, res) => {
+  try {
+    const adminUser = String(req.body?.adminUser || "").trim();
+    if (adminUser !== "TheBoss") {
+      return res.status(403).json({
+        ok: false,
+        error: "Forbidden",
+      });
+    }
+
+    const username = String(req.body?.username || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const offerKey = String(req.body?.offerKey || "").trim();
+
+    const hiddenMeta = HIDDEN_FOUNDER_PRICE_META[offerKey] || null;
+    const publicMeta =
+      offerKey === "public_starter"
+        ? {
+            planKey: "starter",
+            planName: "Starter",
+            billingLabel: "Starter",
+            founder: false,
+            hidden: false,
+            offerKey,
+          }
+        : offerKey === "public_pro"
+        ? {
+            planKey: "pro",
+            planName: "Pro",
+            billingLabel: "Pro",
+            founder: false,
+            hidden: false,
+            offerKey,
+          }
+        : offerKey === "public_operator"
+        ? {
+            planKey: "operator",
+            planName: "Operator",
+            billingLabel: "Operator",
+            founder: false,
+            hidden: false,
+            offerKey,
+          }
+        : null;
+
+    const meta = hiddenMeta || publicMeta;
+
+    if (!meta) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid offerKey",
+      });
+    }
+
+    const result = await setUserBillingByIdentity({
+      username,
+      email,
+      patch: {
+        provider: "stripe",
+        planKey: meta.planKey,
+        planName: meta.planName,
+        billingLabel: meta.billingLabel,
+        founder: !!meta.founder,
+        hiddenPlan: !!meta.hidden,
+        offerKey: meta.offerKey,
+        status: "active",
+        hasAccess: true,
+        currentPeriodEnd: null,
+      },
+    });
+
+    if (!result?.ok) {
+      return res.status(404).json({
+        ok: false,
+        error: "User not found",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      user: result.user,
+    });
+  } catch (err) {
+    console.error("[stripe] admin/assign-plan error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to assign plan",
     });
   }
 });
@@ -460,7 +630,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
             currentPeriodEnd = sub?.current_period_end
               ? new Date(Number(sub.current_period_end) * 1000).toISOString()
               : null;
-          } catch (e) {
+          } catch (_e) {
             console.warn(
               "[stripe webhook] could not retrieve subscription on checkout.session.completed"
             );
@@ -509,7 +679,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
               : null;
             username = String(sub?.metadata?.username || "").trim();
             if (!email) email = String(sub?.metadata?.email || "").trim();
-          } catch (e) {
+          } catch (_e) {
             console.warn("[stripe webhook] could not retrieve subscription on invoice.paid");
           }
         }
@@ -553,7 +723,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
             currentPeriodEnd = sub?.current_period_end
               ? new Date(Number(sub.current_period_end) * 1000).toISOString()
               : null;
-          } catch (e) {
+          } catch (_e) {
             console.warn(
               "[stripe webhook] could not retrieve subscription on invoice.payment_failed"
             );
