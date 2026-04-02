@@ -2202,298 +2202,350 @@ async function generatePosterBPair(runToken) {
         {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
-         <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
         <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>Ad Previews</div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
+      {hasGenerated || generating || imageLoading || imageUrls.length > 0 ? (
+        <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
           <div
             style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
+              background: "#fff",
+              borderRadius: 13,
+              boxShadow: "0 2px 24px #16242714",
+              minWidth: 340,
+              maxWidth: 390,
+              flex: 1,
+              marginBottom: 20,
+              padding: "0px 0px 14px 0px",
+              border: "1.5px solid #eaeaea",
+              fontFamily: AD_FONT,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              position: "relative",
             }}
           >
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 12,
+                background: "#f5f6fa",
+                padding: "11px 20px",
+                borderBottom: "1px solid #e0e4eb",
+                fontWeight: 700,
+                color: "#495a68",
+                fontSize: 16,
+                letterSpacing: 0.08,
               }}
             >
-              <span>
-                Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
-              </span>
-
-              <button
-              style={{
-  background: "#e5e0ff",
-  color: "#5f56eb",
-  border: "none",
-  borderRadius: 12,
-  fontWeight: 700,
-  fontSize: "1.01rem",
-  padding: "6px 20px",
-  cursor: imageLoading ? "not-allowed" : "pointer",
-  marginLeft: 8,
-  boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
-  display: "flex",
-  alignItems: "center",
-  gap: 7,
-}}
-                onClick={handleRegenerateImage}
-                disabled={imageLoading}
-                title="Regenerate Image Ad"
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
               >
-                <FaSyncAlt style={{ fontSize: 16 }} />
-                {imageLoading || generating ? <Dotty /> : "Regenerate"}
+                <span>
+                  Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
+                </span>
+
+                <button
+                  style={{
+                    background: "#e5e0ff",
+                    color: "#5f56eb",
+                    border: "none",
+                    borderRadius: 12,
+                    fontWeight: 700,
+                    fontSize: "1.01rem",
+                    padding: "6px 20px",
+                    cursor: imageLoading ? "not-allowed" : "pointer",
+                    marginLeft: 8,
+                    boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                  }}
+                  onClick={handleRegenerateImage}
+                  disabled={imageLoading}
+                  title="Regenerate Image Ad"
+                >
+                  <FaSyncAlt style={{ fontSize: 16 }} />
+                  {imageLoading || generating ? <Dotty /> : "Regenerate"}
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
+                {(() => {
+                  const q = loadGenQuota();
+                  const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
+                  const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+                  const hrs = Math.floor(totalMins / 60);
+                  const mins = totalMins % 60;
+                  const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+                  return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${resetStr})`;
+                })()}
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#222",
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 220,
+              }}
+            >
+              {imageLoading || generating ? (
+                <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Dotty />
+                </div>
+              ) : imageUrls.length > 0 ? (
+                <>
+                  <img
+                    src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
+                    alt="Ad Preview"
+                    style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+                    onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
+                    onError={() => {
+                      setImgFail((p) => ({ ...p, [activeImage]: true }));
+                      const ctx = getActiveCtx();
+                      const c = loadImageCache(ctx);
+                      const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
+                      if (cached.length) setImageDataUrls(cached);
+                    }}
+                  />
+
+                  <Arrow
+                    side="left"
+                    onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)}
+                    disabled={imageUrls.length <= 1}
+                  />
+                  <Arrow
+                    side="right"
+                    onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)}
+                    disabled={imageUrls.length <= 1}
+                  />
+                  <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
+                </>
+              ) : (
+                <div
+                  style={{
+                    height: 220,
+                    width: "100%",
+                    background: "#f3f4f6",
+                    color: "#6b7280",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 16,
+                    textAlign: "center",
+                    padding: "0 20px",
+                  }}
+                >
+                  Generate creatives to preview your ad here
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: "17px 18px 4px 18px" }}>
+              <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
+                {displayHeadline}
+              </div>
+              <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 6, minHeight: 18, whiteSpace: "pre-wrap" }}>
+                {displayBody}
+              </div>
+
+              {displayLink ? (
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: "#1b6fff",
+                    wordBreak: "break-word",
+                    lineHeight: 1.25,
+                  }}
+                >
+                  Learn more:{" "}
+                  <a
+                    href={displayLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#1b6fff", textDecoration: "none" }}
+                    title={displayLink}
+                  >
+                    {prettyLink(displayLink)}
+                  </a>
+                </div>
+              ) : null}
+            </div>
+
+            <div style={{ padding: "8px 18px", marginTop: 2 }}>
+              <button
+                style={{
+                  background: "#14e7b9",
+                  color: "#181b20",
+                  fontWeight: 700,
+                  border: "none",
+                  borderRadius: 9,
+                  padding: "8px 20px",
+                  fontSize: 15,
+                  cursor: "pointer",
+                }}
+              >
+                {displayCTA}
               </button>
             </div>
 
-            {/* ✅ put this OUTSIDE the button */}
-            <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
-              {(() => {
-                const q = loadGenQuota();
-                const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
+            <button
+              style={{
+                position: "absolute",
+                bottom: 10,
+                right: 18,
+                background: "#f3f6f7",
+                color: "#12cbb8",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: "1.05rem",
+                padding: "5px 14px",
+                cursor: "pointer",
+                boxShadow: "0 1px 3px #2bcbb828",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                zIndex: 2,
+              }}
+              onClick={() => setImageEditing((v) => !v)}
+            >
+              {imageEditing ? "Done" : "Edit"}
+            </button>
 
-                const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
-                const hrs = Math.floor(totalMins / 60);
-                const mins = totalMins % 60;
+            {imageEditing && (
+              <div style={{ padding: "10px 18px 4px 18px", display: "grid", gap: 10 }}>
+                <label style={{ display: "block" }}>
+                  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Headline (max 55 chars)</div>
+                  <input
+                    value={editHeadline}
+                    onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
+                    onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
+                    placeholder="Headline"
+                    maxLength={55}
+                    style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
+                  />
+                  <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
+                </label>
 
-                const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+                <label style={{ display: "block" }}>
+                  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Body (18–30 words)</div>
+                  <textarea
+                    value={editBody}
+                    onChange={(e) => setEditBody(e.target.value)}
+                    onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
+                    rows={3}
+                    placeholder="Body copy"
+                    style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 600 }}
+                  />
+                </label>
 
-                return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${resetStr})`;
-              })()}
-            </div>
-          </div>
+                <label style={{ display: "block" }}>
+                  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Link URL</div>
+                  <input
+                    value={editLink}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setEditLink(v);
+                      setAnswers((prev) => ({ ...(prev || {}), url: v }));
+                    }}
+                    onBlur={() => {
+                      const v = (editLink || "").trim();
+                      setEditLink(v);
+                      setAnswers((prev) => ({ ...(prev || {}), url: v }));
+                    }}
+                    placeholder="https://yourbusiness.com"
+                    style={{
+                      width: "100%",
+                      borderRadius: 10,
+                      border: "1px solid #e4e7ec",
+                      padding: "10px 12px",
+                      fontWeight: 700,
+                    }}
+                  />
+                </label>
 
-          <div
-            style={{
-              background: "#222",
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 220,
-            }}
-          >
-            {imageLoading || generating ? (
-              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Dotty />
-              </div>
-            ) : imageUrls.length > 0 ? (
-              <>
-                <img
-                  src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
-                  alt="Ad Preview"
-                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
-                  onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
-                  onError={() => {
-                    // If the hosted URL died (deploy/restart), try to use cached Data URL.
-                    setImgFail((p) => ({ ...p, [activeImage]: true }));
-                    const ctx = getActiveCtx();
-                    const c = loadImageCache(ctx);
-                    const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
-                    if (cached.length) setImageDataUrls(cached);
-                  }}
-                />
-
-                <Arrow
-                  side="left"
-                  onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)}
-                  disabled={imageUrls.length <= 1}
-                />
-                <Arrow
-                  side="right"
-                  onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)}
-                  disabled={imageUrls.length <= 1}
-                />
-                <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
-              </>
-            ) : (
-              <div
-                style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22,
-                }}
-              >
-                Image goes here
+                <label style={{ display: "block" }}>
+                  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
+                  <input
+                    value={editCTA}
+                    onChange={(e) => setEditCTA(e.target.value)}
+                    onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
+                    placeholder="CTA"
+                    style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
+                  />
+                </label>
               </div>
             )}
           </div>
-
-          <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
-              {displayHeadline}
+        </div>
+      ) : (
+        <div style={{ width: "100%", display: "flex", justifyContent: "center", paddingBottom: 8 }}>
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 2px 24px #16242714",
+              minWidth: 340,
+              maxWidth: 390,
+              width: "100%",
+              marginBottom: 20,
+              padding: "26px 22px",
+              border: "1.5px solid #eaeaea",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 20, marginBottom: 8 }}>
+              Generate creatives
             </div>
-            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 6, minHeight: 18, whiteSpace: "pre-wrap" }}>
-  {displayBody}
-</div>
 
-{displayLink ? (
-  <div
-    style={{
-      marginTop: 6,
-      fontSize: 13,
-      fontWeight: 800,
-      color: "#1b6fff",
-      wordBreak: "break-word",
-      lineHeight: 1.25,
-    }}
-  >
-    Learn more:{" "}
-    <a
-      href={displayLink}
-      target="_blank"
-      rel="noreferrer"
-      style={{ color: "#1b6fff", textDecoration: "none" }}
-      title={displayLink}
-    >
-      {prettyLink(displayLink)}
-    </a>
-  </div>
-) : null}
-
-          </div>
-
-          <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button
+            <div
               style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer",
+                color: "#6b7280",
+                fontSize: 14,
+                fontWeight: 500,
+                lineHeight: 1.6,
+                marginBottom: 16,
               }}
             >
-              {displayCTA}
+              Finish the chat above to generate your ad previews.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const inputEl = document.querySelector('input[aria-label="Your answer"]');
+                if (inputEl) inputEl.focus();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              style={{
+                background: "#e5e0ff",
+                color: "#5f56eb",
+                border: "none",
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: "1rem",
+                padding: "10px 18px",
+                cursor: "pointer",
+                boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
+              }}
+            >
+              Go to chat
             </button>
           </div>
-
-          <button
-            style={{
-              position: "absolute",
-              bottom: 10,
-              right: 18,
-              background: "#f3f6f7",
-              color: "#12cbb8",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: "1.05rem",
-              padding: "5px 14px",
-              cursor: "pointer",
-              boxShadow: "0 1px 3px #2bcbb828",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              zIndex: 2,
-            }}
-            onClick={() => setImageEditing((v) => !v)}
-          >
-            {imageEditing ? "Done" : "Edit"}
-          </button>
-
-          {imageEditing && (
-            <div style={{ padding: "10px 18px 4px 18px", display: "grid", gap: 10 }}>
-              <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Headline (max 55 chars)</div>
-                <input
-                  value={editHeadline}
-                  onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
-                  onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
-                  placeholder="Headline"
-                  maxLength={55}
-                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
-                />
-                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
-              </label>
-
-              <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Body (18–30 words)</div>
-                <textarea
-                  value={editBody}
-                  onChange={(e) => setEditBody(e.target.value)}
-                  onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
-                  rows={3}
-                  placeholder="Body copy"
-                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 600 }}
-                />
-              </label>
-
-              <label style={{ display: "block" }}>
-  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Link URL</div>
-  <input
-    value={editLink}
-    onChange={(e) => {
-      const v = e.target.value;
-      setEditLink(v);
-      setAnswers((prev) => ({ ...(prev || {}), url: v })); // ✅ keeps launch link correct
-    }}
-    onBlur={() => {
-      const v = (editLink || "").trim();
-      setEditLink(v);
-      setAnswers((prev) => ({ ...(prev || {}), url: v }));
-    }}
-    placeholder="https://yourbusiness.com"
-    style={{
-      width: "100%",
-      borderRadius: 10,
-      border: "1px solid #e4e7ec",
-      padding: "10px 12px",
-      fontWeight: 700,
-    }}
-  />
-</label>
-
-
-              <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
-                <input
-                  value={editCTA}
-                  onChange={(e) => setEditCTA(e.target.value)}
-                  onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
-                  placeholder="CTA"
-                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
-                />
-              </label>
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       <div
         style={{
