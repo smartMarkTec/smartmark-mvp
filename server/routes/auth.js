@@ -1657,7 +1657,7 @@ router.post('/register', async (req, res) => {
       const existingHash = String(existingUser?.passwordHash || '').trim();
       const matches = existingHash ? bcrypt.compareSync(rawPassword, existingHash) : false;
 
-      const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+      const sid = ensureSid(req, res);
 
       db.data.sessions = (db.data.sessions || []).filter(
         (s) => String(s?.sid || "").trim() !== String(sid).trim()
@@ -1708,7 +1708,7 @@ router.post('/register', async (req, res) => {
 
     db.data.users.push(user);
 
-    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+    const sid = ensureSid(req, res);
 
     db.data.sessions = (db.data.sessions || []).filter(
       (s) => String(s?.sid || "").trim() !== String(sid).trim()
@@ -1777,16 +1777,16 @@ router.post('/login', async (req, res) => {
         db.data.users.push(adminUser);
       }
 
-    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+      const sid = ensureSid(req, res);
 
-db.data.sessions = (db.data.sessions || []).filter(
-  (s) => String(s?.sid || "").trim() !== String(sid).trim()
-);
+      db.data.sessions = (db.data.sessions || []).filter(
+        (s) => String(s?.sid || "").trim() !== String(sid).trim()
+      );
 
-db.data.sessions.push({ sid, username: adminUser.username });
-await db.write();
+      db.data.sessions.push({ sid, username: adminUser.username });
+      await db.write();
 
-setSessionCookie(res, sid);
+      setSessionCookie(res, sid);
 
       return res.json({
         success: true,
@@ -1818,7 +1818,7 @@ setSessionCookie(res, sid);
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const sid = getSidFromReq(req) || `sm_${nanoid(24)}`;
+    const sid = ensureSid(req, res);
 
     db.data.sessions = (db.data.sessions || []).filter(
       (s) => String(s?.sid || "").trim() !== String(sid).trim()
