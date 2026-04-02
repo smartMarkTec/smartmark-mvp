@@ -4290,11 +4290,31 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
-  const userToken = getFbUserToken(ownerKeyFromReq(req));
+  const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
-  const { campaignId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    preferredOwnerKey: String(
+      req.query?.ownerKey ||
+      req.query?.owner_key ||
+      req.body?.ownerKey ||
+      req.body?.owner_key ||
+      ''
+    ).trim(),
+  });
 
+  const userToken = String(resolved?.userToken || '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({
+      error: 'Not authenticated with Facebook',
+      ownerKeyUsed: String(resolved?.ownerKey || ownerKeyFromReq(req) || '').trim() || null,
+      sid: String(getSidFromReq(req) || '').trim() || null,
+    });
+  }
   try {
     const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
       params: {
@@ -4309,17 +4329,37 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const userToken = getFbUserToken(ownerKey);
-
   const { campaignId, accountId } = req.params;
   const normalizedCampaignId = String(campaignId || '').trim();
   const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
-  if (!userToken) {
-    return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  }
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    preferredOwnerKey: String(
+      req.query?.ownerKey ||
+      req.query?.owner_key ||
+      req.body?.ownerKey ||
+      req.body?.owner_key ||
+      ''
+    ).trim(),
+  });
 
+  const ownerKey = String(
+    resolved?.ownerKey ||
+    ownerKeyFromReq(req) ||
+    ''
+  ).trim();
+
+  const userToken = String(resolved?.userToken || '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({
+      error: 'Not authenticated with Facebook',
+      ownerKeyUsed: ownerKey || null,
+      sid: String(getSidFromReq(req) || '').trim() || null,
+    });
+  }
   const fs = require('fs');
   const path = require('path');
 
@@ -4830,12 +4870,37 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const userToken = getFbUserToken(ownerKey);
+  const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
-  const { campaignId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    preferredOwnerKey: String(
+      req.query?.ownerKey ||
+      req.query?.owner_key ||
+      req.body?.ownerKey ||
+      req.body?.owner_key ||
+      ''
+    ).trim(),
+  });
 
+  const ownerKey = String(
+    resolved?.ownerKey ||
+    ownerKeyFromReq(req) ||
+    ''
+  ).trim();
+
+  const userToken = String(resolved?.userToken || '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({
+      error: 'Not authenticated with Facebook',
+      ownerKeyUsed: ownerKey || null,
+      sid: String(getSidFromReq(req) || '').trim() || null,
+    });
+  }
   try {
     await axios.post(
       `https://graph.facebook.com/v18.0/${campaignId}`,
