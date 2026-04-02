@@ -158,7 +158,28 @@ const CASHAPP_TAG = "$SmarteMark";
 const CASHAPP_URL = "https://cash.app/" + CASHAPP_TAG.replace("$", "");
 const FEE_PAID_KEY = "sm_fee_paid_v1";
 const ADMIN_BYPASS_USERNAME = "TheBoss";
-const TEMP_BILLING_BYPASS = true;
+
+const PLAN_UI = {
+  starter: {
+    key: "starter",
+    label: "Standard",
+    sub: "Basic A/B testing",
+    detail: "2 campaigns • 1 business • 1 ad account",
+  },
+  pro: {
+    key: "pro",
+    label: "Pro",
+    sub: "Enhanced A/B testing",
+    detail: "6 campaigns • 2 businesses • 2 ad accounts",
+  },
+  operator: {
+    key: "operator",
+    label: "Operator",
+    sub: "Operator-grade A/B testing",
+    detail: "10 campaigns • 3 businesses • 3 ad accounts",
+  },
+};
+// billing access now comes fully from Stripe billing status
 
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -3179,11 +3200,87 @@ useEffect(() => {
 
 useEffect(() => {
   const params = new URLSearchParams(location.search || "");
-  if (params.get("checkout") === "success") {
-    refreshBillingStatus();
-  }
+
+  if (params.get("checkout") !== "success") return;
+
+  (async () => {
+    const ok = await refreshBillingStatus();
+    const hasLaunchIntent = params.get("launch_intent") === "1";
+    const pending = loadPendingLaunch();
+
+    if (!ok) return;
+    if (!hasLaunchIntent) return;
+    if (!pending) return;
+
+    try {
+      if (pending.selectedPlan) setSelectedPlan(String(pending.selectedPlan).trim().toLowerCase());
+      if (pending.budget !== undefined && pending.budget !== null) setBudget(String(pending.budget));
+      if (pending.startDate) setStartDate(String(pending.startDate));
+      if (pending.endDate) setEndDate(String(pending.endDate));
+      if (pending.selectedAccount) setSelectedAccount(String(pending.selectedAccount).replace(/^act_/, ""));
+      if (pending.selectedPageId) setSelectedPageId(String(pending.selectedPageId));
+      if (pending.form && typeof pending.form === "object") {
+        setForm((prev) => ({ ...prev, ...pending.form }));
+      }
+      if (pending.previewCopy && typeof pending.previewCopy === "object") {
+        setPreviewCopy({
+          headline: String(pending.previewCopy.headline || ""),
+          body: String(pending.previewCopy.body || ""),
+          link: String(pending.previewCopy.link || ""),
+        });
+      }
+
+      const pendingImages = Array.isArray(pending?.draftCreatives?.images)
+        ? pending.draftCreatives.images.map(toAbsoluteMedia).filter(Boolean).slice(0, 2)
+        : Array.isArray(pending?.navImageUrls)
+        ? pending.navImageUrls.map(toAbsoluteMedia).filter(Boolean).slice(0, 2)
+        : [];
+
+      if (pendingImages.length) {
+        const payload = {
+          ctxKey: getActiveCtx(resolvedUser) || "",
+          images: pendingImages,
+          mediaSelection: "image",
+          savedAt: Date.now(),
+        };
+
+        setDraftDisabled(resolvedUser, false);
+        setDraftCreatives({ images: pendingImages, mediaSelection: "image" });
+        setSelectedCampaignId("__DRAFT__");
+        setExpandedId("__DRAFT__");
+
+        try {
+          sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
+          sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+          if (resolvedUser) {
+            localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+          }
+          localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+          saveSetupCreativeBackup(resolvedUser, payload);
+          saveFetchableImagesBackup(resolvedUser, pendingImages);
+        } catch {}
+      }
+
+      clearPendingLaunch();
+      setShowPlanModal(false);
+      setPendingLaunchAfterCheckout(false);
+
+      setTimeout(() => {
+        handleLaunch();
+      }, 250);
+    } catch (e) {
+      console.error("[setup] auto-finish launch after checkout failed", e);
+    } finally {
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete("checkout");
+      clean.searchParams.delete("launch_intent");
+      clean.searchParams.delete("plan");
+      clean.searchParams.delete("founder");
+      window.history.replaceState({}, document.title, clean.pathname + clean.search);
+    }
+  })();
   // eslint-disable-next-line
-}, [location.search]);
+}, [location.search, resolvedUser]);
 
   useEffect(() => {
     const imgs = (Array.isArray(navImageUrls) ? navImageUrls : [])
@@ -3788,16 +3885,28 @@ const handleSubscribeToPlan = async () => {
       String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() ||
       String(loginUser || "").trim().toLowerCase();
 
-    const res = await stripeFetch(`/api/stripe/create-checkout-session`, {
+    const loggedInUser = getUserFromStorage();
+    const endpoint = loggedInUser
+      ? `/api/stripe/create-checkout-session-auth`
+      : `/api/stripe/create-checkout-session`;
+
+    const bodyPayload = loggedInUser
+      ? {
+          plan: selectedPlan,
+          launchIntent: "1",
+        }
+      : {
+          plan: selectedPlan,
+          email: /\S+@\S+\.\S+/.test(currentEmail) ? currentEmail : undefined,
+          launchIntent: "1",
+        };
+
+    const res = await stripeFetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        plan: selectedPlan,
-        email: /\S+@\S+\.\S+/.test(currentEmail) ? currentEmail : undefined,
-        launchIntent: "1",
-      }),
+      body: JSON.stringify(bodyPayload),
     });
 
     const json = await res.json().catch(() => ({}));
@@ -3829,10 +3938,42 @@ function isValidHttpUrl(u) {
 
 
    const handleLaunch = async () => {
-    if (!billingInfo?.hasAccess) {
-      await handleSubscribeToPlan();
-      return;
-    }
+if (!billingInfo?.hasAccess) {
+  const loggedInUser = getUserFromStorage();
+
+  if (!loggedInUser) {
+    navigate("/signup", {
+      state: {
+        selectedPlan,
+        fromSetup: true,
+      },
+    });
+    return;
+  }
+
+  savePendingLaunch(
+    buildPendingLaunchPayload({
+      selectedPlan,
+      budget,
+      startDate,
+      endDate,
+      selectedAccount,
+      selectedPageId,
+      form,
+      answers,
+      headline,
+      body,
+      inferredLink,
+      previewCopy,
+      draftCreatives,
+      navImageUrls,
+    })
+  );
+
+  setPendingLaunchAfterCheckout(true);
+  setShowPlanModal(true);
+  return;
+}
 
     setLoading(true);
     try {
@@ -5325,53 +5466,59 @@ const getSavedCreatives = (campaignId) => {
           </div>
 
           <div
-            style={{
-              border: "1px solid #dbe4ff",
-              borderRadius: 14,
-              padding: 14,
-              background: "#f7f9ff",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                Facebook Billing
-              </div>
-              <button
-                type="button"
-                onClick={openFbPaymentPopup}
-                style={{
-                  border: "none",
-                  borderRadius: 10,
-                  padding: "8px 10px",
-                  background: "#5b5cf0",
-                  color: "#ffffff",
-                  fontWeight: 900,
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                Open Billing
-              </button>
-            </div>
+  style={{
+    border: "1px solid #dbe4ff",
+    borderRadius: 14,
+    padding: 14,
+    background: "#f7f9ff",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 8,
+      flexWrap: "wrap",
+    }}
+  >
+    <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+      Billing + Plan
+    </div>
 
-            <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-              {billingLoading
-                ? "Checking billing status..."
-                : billingInfo?.hasAccess
-                ? "Facebook billing is ready."
-                : "Billing will be completed before launch."}
-            </div>
-          </div>
+    <button
+      type="button"
+      onClick={openFbPaymentPopup}
+      style={{
+        border: "none",
+        borderRadius: 10,
+        padding: "8px 10px",
+        background: "#5b5cf0",
+        color: "#ffffff",
+        fontWeight: 900,
+        fontSize: 12,
+        cursor: "pointer",
+      }}
+    >
+      Open Billing
+    </button>
+  </div>
+
+  <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+    {billingLoading
+      ? "Checking billing status..."
+      : billingInfo?.hasAccess
+      ? `Active plan: ${
+          PLAN_UI[billingInfo?.planKey]?.label ||
+          String(billingInfo?.planKey || "").trim() ||
+          "Paid"
+        }`
+      : "No active plan yet. Launch will open plan selection first."}
+  </div>
+</div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
@@ -6012,11 +6159,129 @@ const getSavedCreatives = (campaignId) => {
         </div>
       )}
 
-      <ImageModal
-        open={showImageModal}
-        imageUrl={modalImg}
-        onClose={() => setShowImageModal(false)}
-      />
+      {showPlanModal && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1010,
+      background: "rgba(15,23,42,0.40)",
+      backdropFilter: "blur(6px)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}
+    onClick={() => setShowPlanModal(false)}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "min(760px, 96vw)",
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 24,
+        padding: 24,
+        boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 24 }}>
+          Choose a plan to launch
+        </div>
+        <div style={{ color: "#667085", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+          Complete billing, return to setup, and Smartemark will finish the launch automatically.
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+          gap: 14,
+        }}
+      >
+        {Object.values(PLAN_UI).map((plan) => {
+          const active = selectedPlan === plan.key;
+          return (
+            <button
+              key={plan.key}
+              type="button"
+              onClick={() => setSelectedPlan(plan.key)}
+              style={{
+                textAlign: "left",
+                borderRadius: 18,
+                padding: 16,
+                border: active ? "2px solid #5b5cf0" : "1px solid #e5e7eb",
+                background: active ? "#eef2ff" : "#ffffff",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 18 }}>
+                {plan.label}
+              </div>
+              <div style={{ color: "#4f46e5", fontWeight: 800, fontSize: 13 }}>
+                {plan.sub}
+              </div>
+              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+                {plan.detail}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button
+          type="button"
+          onClick={() => setShowPlanModal(false)}
+          style={{
+            background: "#f8fafc",
+            color: "#111827",
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: "11px 14px",
+            fontWeight: 900,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={handleSubscribeToPlan}
+          disabled={billingLoading}
+          style={{
+            background: billingLoading ? "#b8c2ff" : "#5b5cf0",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: 12,
+            padding: "11px 16px",
+            fontWeight: 900,
+            fontSize: 13,
+            cursor: billingLoading ? "not-allowed" : "pointer",
+          }}
+        >
+          {billingLoading ? "Opening checkout..." : "Continue to Stripe"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+<ImageModal
+  open={showImageModal}
+  imageUrl={modalImg}
+  onClose={() => setShowImageModal(false)}
+/>
     </div>
   </div>
 );

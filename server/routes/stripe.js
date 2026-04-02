@@ -108,7 +108,6 @@ async function getSessionUser(req) {
 
   return { sid, sess, user };
 }
-
 async function setUserBillingByIdentity({
   username = "",
   email = "",
@@ -118,8 +117,22 @@ async function setUserBillingByIdentity({
 
   const u = String(username || "").trim();
   const e = String(email || "").trim().toLowerCase();
+  const stripeCustomerId = String(patch?.stripeCustomerId || "").trim();
+  const stripeSubscriptionId = String(patch?.stripeSubscriptionId || "").trim();
 
   const user =
+    (stripeCustomerId
+      ? db.data.users.find(
+          (x) =>
+            String(x?.billing?.stripeCustomerId || "").trim() === stripeCustomerId
+        )
+      : null) ||
+    (stripeSubscriptionId
+      ? db.data.users.find(
+          (x) =>
+            String(x?.billing?.stripeSubscriptionId || "").trim() === stripeSubscriptionId
+        )
+      : null) ||
     db.data.users.find((x) => String(x.username || "").trim() === u) ||
     db.data.users.find((x) => String(x.email || "").trim().toLowerCase() === e);
 
@@ -366,8 +379,8 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/setup?checkout=success&plan=${planKey}${founder ? "&founder=1" : ""}`,
-      cancel_url: `${clientUrl}/setup?checkout=cancelled`,
+   success_url: `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}${founder ? "&founder=1" : ""}`,
+cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
       metadata: {
         username,
         email,
