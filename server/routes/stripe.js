@@ -224,6 +224,72 @@ async function markSubscriptionFromStripe({
   });
 }
 
+async function syncCheckoutSessionToUser(sessionId) {
+  const id = String(sessionId || "").trim();
+  if (!id) return { ok: false, reason: "missing_session_id" };
+
+  const session = await stripe.checkout.sessions.retrieve(id, {
+    expand: ["subscription"],
+  });
+
+  const username = String(session?.metadata?.username || "").trim();
+  const email = String(
+    session?.customer_details?.email ||
+      session?.customer_email ||
+      session?.metadata?.email ||
+      ""
+  ).trim();
+
+  const customerId = String(session?.customer || "").trim();
+  const subscriptionObj = session?.subscription || null;
+  const subscriptionId =
+    typeof subscriptionObj === "string"
+      ? String(subscriptionObj).trim()
+      : String(subscriptionObj?.id || "").trim();
+
+  let priceId = "";
+  let status = "active";
+  let currentPeriodEnd = null;
+
+  if (subscriptionObj && typeof subscriptionObj === "object") {
+    priceId = String(subscriptionObj?.items?.data?.[0]?.price?.id || "").trim();
+    status = String(subscriptionObj?.status || "active").trim();
+    currentPeriodEnd = subscriptionObj?.current_period_end
+      ? new Date(Number(subscriptionObj.current_period_end) * 1000).toISOString()
+      : null;
+  } else if (subscriptionId) {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    priceId = String(sub?.items?.data?.[0]?.price?.id || "").trim();
+    status = String(sub?.status || "active").trim();
+    currentPeriodEnd = sub?.current_period_end
+      ? new Date(Number(sub.current_period_end) * 1000).toISOString()
+      : null;
+  }
+
+  const result = await markSubscriptionFromStripe({
+    username,
+    email,
+    customerId,
+    subscriptionId,
+    priceId,
+    status,
+    currentPeriodEnd,
+  });
+
+  return {
+    ok: !!result?.ok,
+    result,
+    billing: {
+      username,
+      email,
+      customerId,
+      subscriptionId,
+      priceId,
+      status,
+      currentPeriodEnd,
+    },
+  };
+}
 
 async function getAuthenticatedBilling(req) {
   const auth = await getSessionUser(req);
@@ -293,8 +359,8 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
-    const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
-const cancelUrl = `${clientUrl}/setup?checkout=cancelled`;
+const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
+const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -435,8 +501,8 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      success_url: `${clientUrl}/setup?checkout=success&launch_intent=1&plan=${planKey}`,
-      cancel_url: `${clientUrl}/setup?checkout=cancelled&launch_intent=1`,
+    success_url: `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`,
+cancel_url: `${clientUrl}/setup?billing_cancelled=1&plan=${planKey}`,
       metadata: {
         username,
         email,
@@ -731,6 +797,42 @@ router.post("/change-plan", async (req, res) => {
   }
 });
 
+router.post("/sync-checkout-session", async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || "").trim();
+
+    if (!sessionId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing sessionId",
+      });
+    }
+
+    const synced = await syncCheckoutSessionToUser(sessionId);
+
+    if (!synced?.ok) {
+      return res.status(404).json({
+        ok: false,
+        error: "Could not sync checkout session to user",
+        detail: synced || null,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      synced: true,
+      billing: synced.billing,
+      user: synced.result?.user || null,
+    });
+  } catch (err) {
+    console.error("[stripe] sync-checkout-session error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to sync checkout session",
+    });
+  }
+});
+
 router.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   try {
     const sig = req.headers["stripe-signature"];
@@ -743,7 +845,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
 
     let event;
     try {
-      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+     event = stripe.webhooks.constructEvent(req.rawBody || req.body, sig, webhookSecret);
     } catch (err) {
       console.error("[stripe webhook] Signature verification failed:", err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);

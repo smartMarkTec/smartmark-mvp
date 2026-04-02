@@ -3217,31 +3217,58 @@ useEffect(() => {
 
 useEffect(() => {
   const params = new URLSearchParams(location.search || "");
-
   if (params.get("checkout") !== "success") return;
 
   (async () => {
-    const ok = await refreshBillingStatus();
-    const hasLaunchIntent = params.get("launch_intent") === "1";
-    const pending = loadPendingLaunch();
+    const sessionId = String(params.get("session_id") || "").trim();
 
-    if (!ok) return;
-      if (!pending) {
-      localStorage.removeItem("sm_selected_plan");
-      localStorage.removeItem("sm_founder_offer");
-      setSetupTab("campaign");
-      return;
-    }
     try {
-      if (pending.selectedPlan) setSelectedPlan(String(pending.selectedPlan).trim().toLowerCase());
-      if (pending.budget !== undefined && pending.budget !== null) setBudget(String(pending.budget));
+      if (sessionId) {
+        await stripeFetch(`/api/stripe/sync-checkout-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+      }
+
+      const ok = await refreshBillingStatus();
+      const pending = loadPendingLaunch();
+
+      if (!ok) return;
+
+      if (!pending) {
+        clearPendingLaunch();
+        setShowPlanModal(false);
+        setPendingLaunchAfterCheckout(false);
+        localStorage.removeItem("sm_selected_plan");
+        localStorage.removeItem("sm_founder_offer");
+        setSetupTab("campaign");
+        return;
+      }
+
+      if (pending.selectedPlan) {
+        setSelectedPlan(String(pending.selectedPlan).trim().toLowerCase());
+      }
+
+      if (pending.budget !== undefined && pending.budget !== null) {
+        setBudget(String(pending.budget));
+      }
+
       if (pending.startDate) setStartDate(String(pending.startDate));
       if (pending.endDate) setEndDate(String(pending.endDate));
-      if (pending.selectedAccount) setSelectedAccount(String(pending.selectedAccount).replace(/^act_/, ""));
-      if (pending.selectedPageId) setSelectedPageId(String(pending.selectedPageId));
+
+      if (pending.selectedAccount) {
+        setSelectedAccount(String(pending.selectedAccount).replace(/^act_/, ""));
+      }
+
+      if (pending.selectedPageId) {
+        setSelectedPageId(String(pending.selectedPageId));
+      }
+
       if (pending.form && typeof pending.form === "object") {
         setForm((prev) => ({ ...prev, ...pending.form }));
       }
+
       if (pending.previewCopy && typeof pending.previewCopy === "object") {
         setPreviewCopy({
           headline: String(pending.previewCopy.headline || ""),
@@ -3284,19 +3311,18 @@ useEffect(() => {
       clearPendingLaunch();
       setShowPlanModal(false);
       setPendingLaunchAfterCheckout(false);
-
       localStorage.removeItem("sm_selected_plan");
       localStorage.removeItem("sm_founder_offer");
-
       setSetupTab("campaign");
     } catch (e) {
-      console.error("[setup] auto-finish launch after checkout failed", e);
+      console.error("[setup] checkout sync failed", e);
     } finally {
       localStorage.removeItem("sm_selected_plan");
       localStorage.removeItem("sm_founder_offer");
 
       const clean = new URL(window.location.href);
       clean.searchParams.delete("checkout");
+      clean.searchParams.delete("session_id");
       clean.searchParams.delete("launch_intent");
       clean.searchParams.delete("plan");
       clean.searchParams.delete("founder");
@@ -3305,6 +3331,19 @@ useEffect(() => {
   })();
   // eslint-disable-next-line
 }, [location.search, resolvedUser]);
+
+useEffect(() => {
+  const params = new URLSearchParams(location.search || "");
+  if (params.get("billing_cancelled") !== "1") return;
+
+  setShowPlanModal(false);
+  setPendingLaunchAfterCheckout(false);
+
+  const clean = new URL(window.location.href);
+  clean.searchParams.delete("billing_cancelled");
+  clean.searchParams.delete("plan");
+  window.history.replaceState({}, document.title, clean.pathname + clean.search);
+}, [location.search]);
 
   useEffect(() => {
     const imgs = (Array.isArray(navImageUrls) ? navImageUrls : [])
