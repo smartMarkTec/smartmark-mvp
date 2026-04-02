@@ -80,27 +80,25 @@ async function authFetch(path, opts = {}) {
   headers["x-sm-sid"] = sid;
 
   const p = String(path || "");
-  const rel = `${p.startsWith("/") ? p : `/${p}`}`;
+  const rel = p.startsWith("/") ? p : `/${p}`;
 
   const doFetch = (base) =>
     fetch(`${base}${rel}`, {
       ...opts,
       headers,
       credentials: "include",
+      cache: "no-store",
     });
 
-  // ✅ Preferred: /auth/*
- // ✅ Preferred: /auth/*
-let res = await doFetch(AUTH_BASE_FALLBACK);
+  // ✅ Prefer Vercel same-origin rewrite first
+  let res = await doFetch(AUTH_BASE_PRIMARY);
 
-// ✅ Fallback: /api/auth/* (only if /auth is missing)
-if (res.status === 404) {
-  res = await doFetch(AUTH_BASE_PRIMARY);
-}
+  // ✅ Fallback only if rewrite path truly missing
+  if (res.status === 404) {
+    res = await doFetch(AUTH_BASE_FALLBACK);
+  }
 
   return res;
-
-
 }
 
 async function stripeFetch(path, opts = {}) {

@@ -942,18 +942,18 @@ useEffect(() => {
 */
 useEffect(() => {
   (async () => {
-    try {
-      const sid =
-        (localStorage.getItem("sm_sid_v1") || "").trim() ||
-        (() => {
-          const s = `sm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-          try {
-            localStorage.setItem("sm_sid_v1", s);
-          } catch {}
-          return s;
-        })();
+    const sid =
+      (localStorage.getItem("sm_sid_v1") || "").trim() ||
+      (() => {
+        const s = `sm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        try {
+          localStorage.setItem("sm_sid_v1", s);
+        } catch {}
+        return s;
+      })();
 
-      // 1) Try Vercel rewrite path first
+    try {
+      // ✅ Prefer same-origin rewrite first
       let res = await fetch(`/api/auth/whoami`, {
         method: "GET",
         credentials: "include",
@@ -961,7 +961,7 @@ useEffect(() => {
         cache: "no-store",
       });
 
-      // 2) If running without rewrites (Render direct), fallback to /auth/whoami
+      // ✅ Only fallback if rewrite truly missing
       if (res.status === 404) {
         res = await fetch(`/auth/whoami`, {
           method: "GET",
@@ -971,26 +971,21 @@ useEffect(() => {
         });
       }
 
-      if (!res.ok) throw new Error(`whoami ${res.status}`);
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const u = j?.user?.username || j?.user?.email || sid || "anon";
+        setUserNS(u);
+        return;
+      }
 
-      const j = await res.json().catch(() => ({}));
-      const u = j?.user?.username || j?.user?.email || "anon";
-      setUserNS(u);
+      // ✅ If not logged in, KEEP the sid namespace so drafts survive
+      setUserNS(sid || "anon");
     } catch {
-      // If not logged in, force anon AND clear any visible persisted creatives for anon
-      setUserNS("anon");
-      try {
-        localStorage.removeItem("u:anon:sm_form_draft_v3");
-        localStorage.removeItem("u:anon:draft_form_creatives_v3");
-        localStorage.removeItem("u:anon:sm_setup_creatives_backup_v1");
-        localStorage.removeItem("u:anon:sm_image_cache_v1");
-        localStorage.removeItem("u:anon:smartmark.imageDrafts.v1");
-        sessionStorage.removeItem("u:anon:draft_form_creatives");
-      } catch {}
+      // ✅ Never clear saved creatives just because whoami failed
+      setUserNS(sid || "anon");
     }
   })();
 }, []);
-
 /* ✅ If a campaign was launched, FormPage must NEVER show old previews again.
    Run this as its own hook (NOT nested) */
 useEffect(() => {
