@@ -1935,15 +1935,33 @@ router.get('/whoami', async (req, res) => {
 });
 
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
   const { accountId } = req.params;
 
-  const userToken = getFbUserToken(ownerKey);
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    accountId,
+    preferredOwnerKey: String(
+      req.body?.ownerKey ||
+      req.body?.owner_key ||
+      req.query?.ownerKey ||
+      req.query?.owner_key ||
+      ''
+    ).trim(),
+  });
+
+  const ownerKey = String(
+    resolved?.ownerKey ||
+    ownerKeyFromReq(req) ||
+    ''
+  ).trim();
+
+  const userToken = String(resolved?.userToken || '').trim();
+
   if (!userToken) {
     return res.status(401).json({
       error: 'Not authenticated with Facebook',
-      hint: 'Session mismatch: your sid cookie/header must match the one used during OAuth.',
-      ownerKeyUsed: ownerKey,
+      hint: 'Facebook token exists under a different owner alias or session alias.',
+      ownerKeyUsed: ownerKey || null,
+      sid: String(getSidFromReq(req) || '').trim() || null,
     });
   }
 
