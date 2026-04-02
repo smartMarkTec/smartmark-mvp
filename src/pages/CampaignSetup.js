@@ -3768,13 +3768,14 @@ const handleDeleteCampaign = async (campaignId) => {
   const idToDelete = String(campaignId || "").trim();
 
   if (!idToDelete || idToDelete === "__DRAFT__") {
-    handleClearDraft();
-    setSelectedCampaignId("");
-    setExpandedId(null);
-    setShowCampaignMenu(false);
-    alert("Draft discarded.");
-    return;
-  }
+  handleClearDraft();
+  purgeDraftArtifactsEverywhere();
+  setDraftDisabled(resolvedUser, true);
+  setSelectedCampaignId("");
+  setExpandedId(null);
+  setShowCampaignMenu(false);
+  return;
+}
 
   if (!selectedAccount) {
     alert("No ad account selected.");
@@ -6037,86 +6038,87 @@ const selectedCampaignCreatives =
         </div>
       </>
     )}
+
+    {setupTab === "account" && (
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
+            Account
+          </div>
+          <div style={{ color: "#667085", fontWeight: 500, fontSize: 14, lineHeight: 1.6 }}>
+            Plan and account details.
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 20,
+            padding: 22,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            minHeight: 520,
+          }}
+        >
+          <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 14,
+              padding: 16,
+              background: "#f8fafc",
+            }}
+          >
+            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+              Email
+            </div>
+            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+              {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 14,
+              padding: 16,
+              background: "#f8fafc",
+            }}
+          >
+            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+              Plan
+            </div>
+            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+              {billingInfo?.planKey
+                ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
+                  String(billingInfo.planKey)
+                : "No active plan"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 14,
+              padding: 16,
+              background: "#f8fafc",
+            }}
+          >
+            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+              Status
+            </div>
+            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+              {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
+            </div>
+          </div>
+        </div>
+      </>
+    )}
   </div>
 </main>
 
-{setupTab === "account" && (
-  <>
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
-        Account
-      </div>
-      <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.6 }}>
-        Plan and account details.
-      </div>
-    </div>
 
-    <div
-      style={{
-        background: "#ffffff",
-        border: "1px solid #dbe4ff",
-        borderRadius: 22,
-        padding: 22,
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-        minHeight: 420,
-        boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
-      }}
-    >
-      <div
-        style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          padding: 16,
-          background: "#f8fafc",
-        }}
-      >
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-          Email
-        </div>
-        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
-          {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
-        </div>
-      </div>
-
-      <div
-        style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          padding: 16,
-          background: "#f8fafc",
-        }}
-      >
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-          Plan
-        </div>
-        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
-          {billingInfo?.planKey
-            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
-              String(billingInfo.planKey)
-            : "No active plan"}
-        </div>
-      </div>
-
-      <div
-        style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          padding: 16,
-          background: "#f8fafc",
-        }}
-      >
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-          Status
-        </div>
-        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
-          {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
-        </div>
-      </div>
-    </div>
-  </>
-)}
 
           {showEditCampaignModal && selectedLiveCampaign && (
         <div
