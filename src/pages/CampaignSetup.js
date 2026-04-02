@@ -3405,12 +3405,15 @@ useEffect(() => {
 
   const acctId = String(selectedAccount).trim();
   const hasDraft = !!(draftCreatives?.images && draftCreatives.images.length);
+  let cancelled = false;
 
   authFetch(`/facebook/adaccount/${acctId}/campaigns`)
     .then((res) => (res.ok ? res.json() : Promise.reject()))
-    .then((data) => {
+    .then(async (data) => {
       const fullList = Array.isArray(data) ? data : data?.data || [];
       const list = fullList.slice(0, 2);
+
+      if (cancelled) return;
 
       setCampaigns(list);
 
@@ -3453,10 +3456,72 @@ useEffect(() => {
           setExpandedId(firstLiveId);
         }
       }
+
+      // ✅ preload live creatives from backend so they show on incognito / other browsers
+      await Promise.all(
+        list.map(async (c) => {
+          const campaignId = String(c?.id || "").trim();
+          if (!campaignId) return;
+
+          try {
+            const creativesRes = await authFetch(
+              `/facebook/adaccount/${acctId}/campaign/${campaignId}/creatives`
+            );
+
+            if (!creativesRes.ok || cancelled) return;
+
+            const creativeData = await creativesRes.json().catch(() => ({}));
+            const imgs = (Array.isArray(creativeData?.images) ? creativeData.images : [])
+              .map(toAbsoluteMedia)
+              .filter(Boolean)
+              .slice(0, 2);
+
+            const nextMeta = {
+              headline: String(creativeData?.meta?.headline || "").trim(),
+              body: String(creativeData?.meta?.body || "").trim(),
+              link: String(creativeData?.meta?.link || "").trim(),
+            };
+
+            setCampaignCreativesMap((prev) => ({
+              ...prev,
+              [campaignId]: {
+                images: imgs,
+                mediaSelection: "image",
+                meta: nextMeta,
+              },
+            }));
+
+            const existingMap = readCreativeMap(resolvedUser, acctId);
+            const prevSaved = existingMap[campaignId] || {};
+
+            existingMap[campaignId] = {
+              ...prevSaved,
+              images: imgs,
+              mediaSelection: "image",
+              time: Date.now(),
+              expiresAt:
+                prevSaved?.expiresAt ||
+                Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
+              name: prevSaved?.name || c?.name || "Untitled",
+              meta: nextMeta,
+            };
+
+            writeCreativeMap(resolvedUser, acctId, existingMap);
+
+            if (imgs.length) {
+              saveFetchableImagesBackup(resolvedUser, imgs);
+            }
+          } catch {}
+        })
+      );
     })
     .catch(() => {});
+
+  return () => {
+    cancelled = true;
+  };
   // eslint-disable-next-line
-}, [fbConnected, selectedAccount, launched, draftCreatives?.images?.length]);
+}, [fbConnected, selectedAccount, launched, draftCreatives?.images?.length, resolvedUser]);
 
   /* ===================== after FB connect, attach draft images into selected campaign creatives map ===================== */
   useEffect(() => {
