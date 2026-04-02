@@ -108,12 +108,8 @@ const Signup = () => {
 
   const plan = PLAN_META[selectedPlan] || PLAN_META.starter;
 
-  const [fullName, setFullName] = useState(
-    localStorage.getItem("sm_signup_full_name") || ""
-  );
-  const [email, setEmail] = useState(
-    localStorage.getItem("sm_signup_email") || ""
-  );
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
