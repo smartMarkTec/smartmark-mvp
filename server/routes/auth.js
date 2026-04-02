@@ -1625,49 +1625,77 @@ async function markManualOverride(campaignId, patch = {}) {
 
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body || {};
-    if (!username || !email || !password) {
+    const rawUsername = String(req.body?.username || '').trim();
+    const rawEmail = String(req.body?.email || '').trim();
+    const rawPassword = String(req.body?.password || '');
+
+    if (!rawUsername || !rawEmail || !rawPassword) {
       return res.status(400).json({ error: 'Username, email, and password required' });
     }
 
     await ensureUsersAndSessions();
-    if (db.data.users.find((u) => u.username === username || u.email === email)) {
+
+    const username = rawUsername.toLowerCase();
+    const email = rawEmail.toLowerCase();
+
+    const existingUser = db.data.users.find((u) => {
+      const uName = String(u?.username || '').trim().toLowerCase();
+      const uEmail = String(u?.email || '').trim().toLowerCase();
+      return uName === username || uEmail === email;
+    });
+
+    if (existingUser) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
-    const passwordHash = bcrypt.hashSync(password, 10);
-    const user = { username: String(username).trim(), email: String(email).trim(), passwordHash };
+    const passwordHash = bcrypt.hashSync(rawPassword, 10);
+
+    const user = {
+      username,
+      email,
+      passwordHash,
+      createdAt: new Date().toISOString(),
+    };
+
     db.data.users.push(user);
-    await db.write();
 
     const sid = `sm_${nanoid(24)}`;
     db.data.sessions.push({ sid, username: user.username });
+
     await db.write();
 
     setSessionCookie(res, sid);
-    res.json({ success: true, user: { username: user.username, email: user.email } });
+
+    return res.json({
+      success: true,
+      user: { username: user.username, email: user.email },
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Registration failed', detail: err.message });
+    return res.status(500).json({
+      error: 'Registration failed',
+      detail: err.message,
+    });
   }
 });
-
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body || {};
-    const u = String(username || '').trim();
-    const p = String(password || '').trim();
+    const rawUsername = String(req.body?.username || '').trim();
+    const rawPassword = String(req.body?.password || '');
 
-    if (!u || !p) {
+    if (!rawUsername || !rawPassword) {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
     await ensureUsersAndSessions();
 
+    const lookup = rawUsername.toLowerCase();
+
     // ADMIN BYPASS
-    if (u === ADMIN_BYPASS_USERNAME && p === ADMIN_BYPASS_PASSWORD) {
+    if (rawUsername === ADMIN_BYPASS_USERNAME && rawPassword === ADMIN_BYPASS_PASSWORD) {
       let adminUser =
-        db.data.users.find((x) => String(x.username || '').trim() === ADMIN_BYPASS_USERNAME) ||
-        null;
+        db.data.users.find(
+          (x) => String(x?.username || '').trim() === ADMIN_BYPASS_USERNAME
+        ) || null;
 
       if (!adminUser) {
         const passwordHash = bcrypt.hashSync(ADMIN_BYPASS_PASSWORD, 10);
@@ -1697,6 +1725,7 @@ router.post('/login', async (req, res) => {
       await db.write();
 
       setSessionCookie(res, sid);
+
       return res.json({
         success: true,
         bypass: true,
@@ -1709,22 +1738,42 @@ router.post('/login', async (req, res) => {
     }
 
     const user =
-      db.data.users.find((x) => x.username === u) ||
-      db.data.users.find((x) => x.email === u);
+      db.data.users.find(
+        (x) => String(x?.username || '').trim().toLowerCase() === lookup
+      ) ||
+      db.data.users.find(
+        (x) => String(x?.email || '').trim().toLowerCase() === lookup
+      );
 
-    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
 
-    const match = bcrypt.compareSync(p, user.passwordHash);
-    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+    const passwordHash = String(user?.passwordHash || '').trim();
+    const match = passwordHash ? bcrypt.compareSync(rawPassword, passwordHash) : false;
+
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
 
     const sid = `sm_${nanoid(24)}`;
     db.data.sessions.push({ sid, username: user.username });
     await db.write();
 
     setSessionCookie(res, sid);
-    res.json({ success: true, user: { username: user.username, email: user.email } });
+
+    return res.json({
+      success: true,
+      user: {
+        username: user.username,
+        email: user.email,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Login failed', detail: err.message });
+    return res.status(500).json({
+      error: 'Login failed',
+      detail: err.message,
+    });
   }
 });
 
