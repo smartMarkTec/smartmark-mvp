@@ -3993,6 +3993,56 @@ const handleSubscribeToPlan = async () => {
   }
 };
 
+const handleCancelPlan = async () => {
+  const yes = window.confirm("Cancel your plan now? This will stop future recurring payments.");
+  if (!yes) return;
+
+  try {
+    setBillingLoading(true);
+
+    const res = await stripeFetch(`/api/stripe/cancel-subscription`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.error || "Could not cancel subscription.");
+    }
+
+    await refreshBillingStatus();
+    alert("Your plan has been canceled.");
+  } catch (err) {
+    alert(err?.message || "Could not cancel subscription.");
+  } finally {
+    setBillingLoading(false);
+  }
+};
+
+const handleUpgradePlan = async (nextPlanKey) => {
+  try {
+    setBillingLoading(true);
+
+    const res = await stripeFetch(`/api/stripe/change-plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: nextPlanKey }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.error || "Could not update plan.");
+    }
+
+    await refreshBillingStatus();
+    alert(`Plan updated to ${json?.planName || nextPlanKey}.`);
+  } catch (err) {
+    alert(err?.message || "Could not update plan.");
+  } finally {
+    setBillingLoading(false);
+  }
+};
+
 function isValidHttpUrl(u) {
   try {
     const x = new URL(String(u || "").trim());
@@ -6039,82 +6089,176 @@ const selectedCampaignCreatives =
       </>
     )}
 
-    {setupTab === "account" && (
-      <>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
-            Account
-          </div>
-          <div style={{ color: "#667085", fontWeight: 500, fontSize: 14, lineHeight: 1.6 }}>
-            Plan and account details.
-          </div>
-        </div>
+{setupTab === "account" && (
+  <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
+        Account
+      </div>
+      <div style={{ color: "#667085", fontWeight: 500, fontSize: 14, lineHeight: 1.6 }}>
+        Plan and account details.
+      </div>
+    </div>
 
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 20,
+        padding: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        minHeight: 520,
+      }}
+    >
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          padding: 16,
+          background: "#f8fafc",
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Email
+        </div>
+        <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+          {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          padding: 16,
+          background: "#f8fafc",
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Current Plan
+        </div>
+        <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+          {billingInfo?.planKey
+            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
+              String(billingInfo.planKey)
+            : "No active plan"}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          padding: 16,
+          background: "#f8fafc",
+        }}
+      >
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Status
+        </div>
+        <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
+          {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
+        </div>
+      </div>
+
+      {!!billingInfo?.hasAccess && (
         <div
           style={{
-            background: "#ffffff",
             border: "1px solid #e5e7eb",
-            borderRadius: 20,
-            padding: 22,
+            borderRadius: 14,
+            padding: 16,
+            background: "#ffffff",
             display: "flex",
             flexDirection: "column",
-            gap: 16,
-            minHeight: 520,
+            gap: 12,
           }}
         >
-          <div
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 14,
-              padding: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-              Email
-            </div>
-            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
-              {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
-            </div>
+          <div style={{ color: "#111827", fontWeight: 600, fontSize: 15 }}>
+            Manage Plan
           </div>
 
-          <div
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 14,
-              padding: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-              Plan
-            </div>
-            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
-              {billingInfo?.planKey
-                ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
-                  String(billingInfo.planKey)
-                : "No active plan"}
-            </div>
-          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {String(billingInfo?.planKey || "").trim().toLowerCase() === "starter" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleUpgradePlan("pro")}
+                  style={{
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    background: "#5b5cf0",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  Upgrade to Pro
+                </button>
 
-          <div
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 14,
-              padding: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
-              Status
-            </div>
-            <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
-              {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => handleUpgradePlan("operator")}
+                  style={{
+                    border: "1px solid #dbe4ff",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    background: "#eef2ff",
+                    color: "#3b3fd9",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  Upgrade to Operator
+                </button>
+              </>
+            )}
+
+            {String(billingInfo?.planKey || "").trim().toLowerCase() === "pro" && (
+              <button
+                type="button"
+                onClick={() => handleUpgradePlan("operator")}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  background: "#5b5cf0",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Upgrade to Operator
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleCancelPlan}
+              style={{
+                border: "1px solid #ffd6d6",
+                borderRadius: 10,
+                padding: "10px 14px",
+                background: "#fff1f2",
+                color: "#b42318",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Cancel Plan
+            </button>
           </div>
         </div>
-      </>
-    )}
+      )}
+    </div>
+  </>
+)}
   </div>
 </main>
 

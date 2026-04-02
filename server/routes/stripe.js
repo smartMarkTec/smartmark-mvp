@@ -258,6 +258,22 @@ async function markSubscriptionFromStripe({
   });
 }
 
+
+async function getAuthenticatedBilling(req) {
+  const auth = await getSessionUser(req);
+
+  if (!auth) {
+    return { ok: false, status: 401, error: "Not logged in" };
+  }
+
+  const billing = auth.user.billing || {};
+  return {
+    ok: true,
+    auth,
+    billing,
+  };
+}
+
 router.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -581,6 +597,171 @@ router.post("/admin/assign-plan", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err?.message || "Failed to assign plan",
+    });
+  }
+});
+
+router.post("/cancel-subscription", async (req, res) => {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "Stripe is not configured.",
+      });
+    }
+
+    const result = await getAuthenticatedBilling(req);
+    if (!result.ok) {
+      return res.status(result.status).json({
+        ok: false,
+        error: result.error,
+      });
+    }
+
+    const { auth, billing } = result;
+    const subscriptionId = String(billing?.stripeSubscriptionId || "").trim();
+
+    if (!subscriptionId) {
+      return res.status(400).json({
+        ok: false,
+        error: "No active Stripe subscription found.",
+      });
+    }
+
+    const canceled = await stripe.subscriptions.cancel(subscriptionId);
+
+    await markSubscriptionFromStripe({
+      username: String(auth.user.username || "").trim(),
+      email: String(auth.user.email || "").trim(),
+      customerId: String(canceled?.customer || billing?.stripeCustomerId || "").trim(),
+      subscriptionId,
+      priceId: String(canceled?.items?.data?.[0]?.price?.id || billing?.stripePriceId || "").trim(),
+      status: String(canceled?.status || "canceled").trim(),
+      currentPeriodEnd: canceled?.current_period_end
+        ? new Date(Number(canceled.current_period_end) * 1000).toISOString()
+        : null,
+    });
+
+    return res.json({
+      ok: true,
+      canceled: true,
+      status: String(canceled?.status || "canceled").trim(),
+    });
+  } catch (err) {
+    console.error("[stripe] cancel-subscription error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to cancel subscription",
+    });
+  }
+});
+
+router.post("/change-plan", async (req, res) => {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "Stripe is not configured.",
+      });
+    }
+
+    const result = await getAuthenticatedBilling(req);
+    if (!result.ok) {
+      return res.status(result.status).json({
+        ok: false,
+        error: result.error,
+      });
+    }
+
+    const { auth, billing } = result;
+    const subscriptionId = String(billing?.stripeSubscriptionId || "").trim();
+    const nextPlanKey = normalizePlanKey(req.body?.plan);
+
+    if (!subscriptionId) {
+      return res.status(400).json({
+        ok: false,
+        error: "No active Stripe subscription found.",
+      });
+    }
+
+    if (!nextPlanKey || !PLAN_NAME_MAP[nextPlanKey]) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid plan. Use starter, pro, or operator.",
+      });
+    }
+
+    const currentPlanKey = normalizePlanKey(billing?.planKey);
+    if (currentPlanKey === nextPlanKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "You are already on that plan.",
+      });
+    }
+
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const itemId = String(sub?.items?.data?.[0]?.id || "").trim();
+    if (!itemId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Subscription item not found.",
+      });
+    }
+
+    const newPriceId = getPriceId(nextPlanKey);
+    if (!newPriceId) {
+      return res.status(400).json({
+        ok: false,
+        error: `Missing Stripe price for ${nextPlanKey}.`,
+      });
+    }
+
+    const updated = await stripe.subscriptions.update(subscriptionId, {
+      cancel_at_period_end: false,
+      proration_behavior: "create_prorations",
+      items: [
+        {
+          id: itemId,
+          price: newPriceId,
+        },
+      ],
+      metadata: {
+        ...(sub?.metadata || {}),
+        username: String(auth.user.username || "").trim(),
+        email: String(auth.user.email || "").trim(),
+        planKey: nextPlanKey,
+        founder: "false",
+        planName: PLAN_NAME_MAP[nextPlanKey],
+        billingLabel: PLAN_NAME_MAP[nextPlanKey],
+        offerKey: `public_${nextPlanKey}`,
+        source: "account_upgrade",
+      },
+    });
+
+    await markSubscriptionFromStripe({
+      username: String(auth.user.username || "").trim(),
+      email: String(auth.user.email || "").trim(),
+      customerId: String(updated?.customer || billing?.stripeCustomerId || "").trim(),
+      subscriptionId,
+      priceId: String(updated?.items?.data?.[0]?.price?.id || newPriceId).trim(),
+      status: String(updated?.status || "active").trim(),
+      currentPeriodEnd: updated?.current_period_end
+        ? new Date(Number(updated.current_period_end) * 1000).toISOString()
+        : null,
+    });
+
+    return res.json({
+      ok: true,
+      updated: true,
+      planKey: nextPlanKey,
+      planName: PLAN_NAME_MAP[nextPlanKey],
+      status: String(updated?.status || "active").trim(),
+    });
+  } catch (err) {
+    console.error("[stripe] change-plan error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Failed to change plan",
     });
   }
 });
