@@ -92,23 +92,6 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
   return json.url;
 }
 
-async function getBillingStatus() {
-  const res = await fetch("/api/stripe/billing-status", {
-    method: "GET",
-    headers: {
-      "x-sm-sid": ensureStoredSid(),
-    },
-    credentials: "include",
-  });
-
-  const json = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    return { ok: false, billing: null };
-  }
-
-  return json;
-}
 
 function looksLikeEmail(value) {
   return /\S+@\S+\.\S+/.test(String(value || "").trim());
