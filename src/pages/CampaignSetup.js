@@ -2996,19 +2996,24 @@ useEffect(() => {
 const handleClearDraft = () => {
   try {
     sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
-  } catch {}
-  try {
     sessionStorage.removeItem("draft_form_creatives");
+    sessionStorage.removeItem("draft_form_creatives_v2");
+    sessionStorage.removeItem("draft_form_creatives_v3");
   } catch {}
+
   try {
-    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
+    if (resolvedUser) {
+      localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
+      localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY));
+      localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
+      localStorage.removeItem(withUser(resolvedUser, ACTIVE_CTX_KEY));
+    }
     localStorage.removeItem(CREATIVE_DRAFT_KEY);
     localStorage.removeItem(CREATIVE_DRAFT_KEY_LEGACY);
-  } catch {}
-  try {
-    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
     localStorage.removeItem(FORM_DRAFT_KEY);
+    localStorage.removeItem(ACTIVE_CTX_KEY);
   } catch {}
+
   try {
     localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
     localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
@@ -3022,18 +3027,21 @@ const handleClearDraft = () => {
     if (resolvedUser) {
       localStorage.removeItem(LS_PREVIEW_KEY(resolvedUser));
       localStorage.removeItem(LS_FETCHABLE_KEY(resolvedUser));
-      localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY));
     }
   } catch {}
 
   setDraftDisabled(resolvedUser, false);
   setDraftCreatives({ images: [], mediaSelection: "image" });
   setPreviewCopy({ headline: "", body: "", link: "" });
-  setExpandedId((prev) => (prev === "__DRAFT__" ? null : prev));
-  setSelectedCampaignId((prev) => (prev === "__DRAFT__" ? "" : prev));
+  setForm((prev) => ({
+    ...prev,
+    campaignName: "",
+  }));
+  setExpandedId(null);
+  setSelectedCampaignId("");
+  setShowCampaignMenu(false);
   setSetupTab("campaign");
 };
-
 
 useEffect(() => {
   const params = new URLSearchParams(location.search);
@@ -4431,20 +4439,20 @@ const getSavedCreatives = (campaignId) => {
       ? campaigns.find((c) => String(c?.id) === String(selectedCampaignId)) || null
       : null;
 
-  const selectedCampaignCreatives =
-    selectedCampaignId === "__DRAFT__"
-      ? {
-          images: draftCreatives?.images || [],
-          mediaSelection: "image",
-          meta: {
-            headline: String(previewCopy?.headline || headline || "").trim(),
-            body: String(previewCopy?.body || body || "").trim(),
-            link: String(previewCopy?.link || inferredLink || "").trim(),
-          },
-        }
-      : selectedCampaignId
-      ? getSavedCreatives(selectedCampaignId)
-      : { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+const selectedCampaignCreatives =
+  selectedCampaignId === "__DRAFT__" && hasDraft
+    ? {
+        images: draftCreatives?.images || [],
+        mediaSelection: "image",
+        meta: {
+          headline: String(previewCopy?.headline || headline || "").trim(),
+          body: String(previewCopy?.body || body || "").trim(),
+          link: String(previewCopy?.link || inferredLink || "").trim(),
+        },
+      }
+    : selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+    ? getSavedCreatives(selectedCampaignId)
+    : { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
 
    const selectedOptimizerCreativeState =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
@@ -6038,7 +6046,7 @@ const getSavedCreatives = (campaignId) => {
       <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
         Account
       </div>
-      <div style={{ color: "#667085", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+      <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.6 }}>
         Plan and account details.
       </div>
     </div>
@@ -6051,7 +6059,7 @@ const getSavedCreatives = (campaignId) => {
         padding: 22,
         display: "flex",
         flexDirection: "column",
-        gap: 16,
+        gap: 14,
         minHeight: 420,
         boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
       }}
@@ -6062,13 +6070,12 @@ const getSavedCreatives = (campaignId) => {
           borderRadius: 16,
           padding: 16,
           background: "#f8fafc",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
         }}
       >
-        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>EMAIL</div>
-        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Email
+        </div>
+        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
           {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
         </div>
       </div>
@@ -6079,15 +6086,15 @@ const getSavedCreatives = (campaignId) => {
           borderRadius: 16,
           padding: 16,
           background: "#f8fafc",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
         }}
       >
-        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>PLAN</div>
-        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Plan
+        </div>
+        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
           {billingInfo?.planKey
-            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label || String(billingInfo.planKey)
+            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
+              String(billingInfo.planKey)
             : "No active plan"}
         </div>
       </div>
@@ -6098,13 +6105,12 @@ const getSavedCreatives = (campaignId) => {
           borderRadius: 16,
           padding: 16,
           background: "#f8fafc",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
         }}
       >
-        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>STATUS</div>
-        <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
+          Status
+        </div>
+        <div style={{ color: "#111827", fontWeight: 600, fontSize: 16, lineHeight: 1.5 }}>
           {billingLoading ? "Checking..." : billingInfo?.hasAccess ? "Active" : "No active plan"}
         </div>
       </div>
