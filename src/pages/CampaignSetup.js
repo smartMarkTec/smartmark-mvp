@@ -2749,6 +2749,7 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
       setDraftCreatives({ images: norm, mediaSelection: "image" });
       setSelectedCampaignId("__DRAFT__");
       setExpandedId("__DRAFT__");
+      
 
       // persist for reliability across redirects/refresh
       try {
@@ -2905,7 +2906,7 @@ useEffect(() => {
 
     setSelectedCampaignId("__DRAFT__");
     setExpandedId("__DRAFT__");
-
+setSetupTab("creatives");
     return true;
   };
 
@@ -5032,19 +5033,25 @@ const selectedCampaignCreatives =
         minHeight: 520,
       }}
     >
-    {selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? (
-  <>
-    {(() => {
-      const creativeMeta = selectedCampaignCreatives?.meta || {};
-      const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
-      const pending = optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null;
-      const pendingStatus = String(pending?.status || "").trim().toLowerCase();
-      const isTesting =
-        pendingStatus === "live" ||
-        pendingStatus === "ready" ||
-        pendingStatus === "staged";
+      {selectedCampaignId ? (
+        <>
+          {(() => {
+            const creativeMeta = selectedCampaignCreatives?.meta || {};
+            const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
+            const pending =
+              selectedCampaignId !== "__DRAFT__"
+                ? optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null
+                : null;
 
-      return (
+            const pendingStatus = String(pending?.status || "").trim().toLowerCase();
+            const isTesting =
+              pendingStatus === "live" ||
+              pendingStatus === "ready" ||
+              pendingStatus === "staged";
+
+            const isDraftView = selectedCampaignId === "__DRAFT__";
+
+            return (
               <>
                 <div
                   style={{
@@ -5057,10 +5064,12 @@ const selectedCampaignCreatives =
                 >
                   <div>
                     <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 4 }}>
-                      Campaign Creatives
+                      {isDraftView ? "Draft Creatives" : "Campaign Creatives"}
                     </div>
                     <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-                      Smartemark stores the current visuals and copy here.
+                      {isDraftView
+                        ? "These creatives were transferred from FormPage and are ready for launch."
+                        : "Smartemark stores the current visuals and copy here."}
                     </div>
                   </div>
 
@@ -5074,7 +5083,7 @@ const selectedCampaignCreatives =
                       fontSize: 12,
                     }}
                   >
-                    {isTesting ? "A/B Testing" : "Monitoring"}
+                    {isDraftView ? "Draft Ready" : isTesting ? "A/B Testing" : "Monitoring"}
                   </div>
                 </div>
 
@@ -5145,7 +5154,7 @@ const selectedCampaignCreatives =
                                 lineHeight: 1.6,
                               }}
                             >
-                              {String(creativeMeta?.body || previewCopy?.body || "No copy available yet.").trim()}
+                              {String(creativeMeta?.body || previewCopy?.body || body || "No copy available yet.").trim()}
                             </div>
                           </div>
 
@@ -5170,7 +5179,7 @@ const selectedCampaignCreatives =
                                 lineHeight: 1.5,
                               }}
                             >
-                              {String(creativeMeta?.headline || previewCopy?.headline || "No headline available yet.").trim()}
+                              {String(creativeMeta?.headline || previewCopy?.headline || headline || "No headline available yet.").trim()}
                             </div>
                           </div>
                         </div>
@@ -5215,7 +5224,9 @@ const selectedCampaignCreatives =
                       lineHeight: 1.6,
                     }}
                   >
-                    {isTesting
+                    {isDraftView
+                      ? "These draft creatives came from your FormPage flow and should appear here automatically before launch."
+                      : isTesting
                       ? "Smartemark is running a limited creative test and comparing performance before picking a winner. It will not keep creating more ads unless the data clearly justifies another round."
                       : "Smartemark is monitoring the current ads and will only create a new test when the campaign data shows a real need for it."}
                   </div>
@@ -5237,7 +5248,7 @@ const selectedCampaignCreatives =
             lineHeight: 1.6,
           }}
         >
-          Select a live campaign to view creatives here.
+          Select a campaign or draft to view creatives here.
         </div>
       )}
     </div>
