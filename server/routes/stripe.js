@@ -140,12 +140,12 @@ async function setUserBillingByIdentity({
 }) {
   await ensureDbShape();
 
-  const u = String(username || "").trim();
+  const u = String(username || "").trim().toLowerCase();
   const e = String(email || "").trim().toLowerCase();
   const stripeCustomerId = String(patch?.stripeCustomerId || "").trim();
   const stripeSubscriptionId = String(patch?.stripeSubscriptionId || "").trim();
 
-  const user =
+  let user =
     (stripeCustomerId
       ? db.data.users.find(
           (x) =>
@@ -158,11 +158,34 @@ async function setUserBillingByIdentity({
             String(x?.billing?.stripeSubscriptionId || "").trim() === stripeSubscriptionId
         )
       : null) ||
-    db.data.users.find((x) => String(x.username || "").trim() === u) ||
+    db.data.users.find((x) => String(x.username || "").trim().toLowerCase() === u) ||
     db.data.users.find((x) => String(x.email || "").trim().toLowerCase() === e);
+
+  // ✅ If Stripe completed but account record is missing, auto-create it from email
+  if (!user && e) {
+    user = {
+      username: e,
+      email: e,
+      displayName: e.split("@")[0],
+      passwordHash: "",
+      createdAt: new Date().toISOString(),
+      billing: {},
+    };
+
+    db.data.users.push(user);
+  }
 
   if (!user) {
     return { ok: false, reason: "user_not_found" };
+  }
+
+  // ✅ normalize canonical identity
+  if (e) {
+    user.email = e;
+    user.username = e;
+  } else if (u) {
+    user.username = u;
+    if (!user.email) user.email = u;
   }
 
   user.billing = {

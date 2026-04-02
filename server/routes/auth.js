@@ -1625,18 +1625,26 @@ async function markManualOverride(campaignId, patch = {}) {
 
 router.post('/register', async (req, res) => {
   try {
-    const rawDisplayName = String(req.body?.username || '').trim();
     const rawEmail = String(req.body?.email || '').trim();
-    const rawPassword = String(req.body?.password || '');
+    const rawPassword = String(req.body?.password || '').trim();
 
-    if (!rawDisplayName || !rawEmail || !rawPassword) {
-      return res.status(400).json({ error: 'Name, email, and password required' });
+    const rawDisplayName = String(
+      req.body?.fullName ||
+      req.body?.displayName ||
+      req.body?.name ||
+      req.body?.username ||
+      ''
+    ).trim();
+
+    if (!rawEmail || !rawPassword) {
+      return res.status(400).json({ error: 'Email and password required' });
     }
 
     await ensureUsersAndSessions();
 
     const email = rawEmail.toLowerCase();
-    const username = email; // canonical account identity = email
+    const username = email; // canonical identity
+    const displayName = rawDisplayName || email.split('@')[0];
 
     const existingUser = db.data.users.find((u) => {
       const uName = String(u?.username || '').trim().toLowerCase();
@@ -1645,7 +1653,25 @@ router.post('/register', async (req, res) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({ error: 'Account already exists for this email' });
+      // if same account already exists, allow it to behave like an idempotent signup
+      const existingHash = String(existingUser?.passwordHash || '').trim();
+      const matches = existingHash ? bcrypt.compareSync(rawPassword, existingHash) : false;
+
+      const sid = `sm_${nanoid(24)}`;
+      db.data.sessions.push({ sid, username: existingUser.username });
+      await db.write();
+      setSessionCookie(res, sid);
+
+      return res.json({
+        success: true,
+        existing: true,
+        passwordMatched: !!matches,
+        user: {
+          username: existingUser.username,
+          email: existingUser.email,
+          displayName: existingUser.displayName || displayName,
+        },
+      });
     }
 
     const passwordHash = bcrypt.hashSync(rawPassword, 10);
@@ -1653,9 +1679,24 @@ router.post('/register', async (req, res) => {
     const user = {
       username,
       email,
-      displayName: rawDisplayName,
+      displayName,
       passwordHash,
       createdAt: new Date().toISOString(),
+      billing: {
+        provider: '',
+        planKey: '',
+        planName: '',
+        billingLabel: '',
+        founder: false,
+        hiddenPlan: false,
+        offerKey: '',
+        status: '',
+        hasAccess: false,
+        currentPeriodEnd: null,
+        stripeCustomerId: '',
+        stripeSubscriptionId: '',
+        stripePriceId: '',
+      },
     };
 
     db.data.users.push(user);

@@ -212,8 +212,8 @@ export default function Login() {
         }
       }
 
-      if (!loginJson?.success) {
-        throw new Error("Invalid login credentials.");
+        if (!loginJson?.success) {
+        throw new Error("Invalid login credentials. This usually means the account was created earlier with a different password.");
       }
 
       const backendUsername = normalizeIdentifier(
