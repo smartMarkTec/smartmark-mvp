@@ -1271,6 +1271,8 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
   add(req.body?.owner_key);
   add(req.query?.ownerKey);
   add(req.query?.owner_key);
+  add(req.query?.sm_sid);
+  add(req.query?.sid);
   add(reqOwner);
   add(sid);
 
@@ -1279,7 +1281,8 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
       ? (db.data.sessions || []).find((s) => String(s.sid || '').trim() === String(sid).trim())
       : null;
 
-  if (sess?.username) add(`user:${String(sess.username).trim()}`);
+  const sessionUsername = String(sess?.username || '').trim();
+  if (sessionUsername) add(`user:${sessionUsername}`);
 
   if (campaignId && accountId) {
     const exactState = await findExactOptimizerCampaignState({
@@ -1307,26 +1310,33 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
   const expanded = [...candidates];
 
   for (const key of candidates) {
-    if (String(key).startsWith('user:')) {
-      const username = String(key).slice(5).trim();
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) continue;
+
+    if (normalizedKey.startsWith('user:')) {
+      const username = normalizedKey.slice(5).trim();
 
       for (const s of db.data.sessions) {
         if (String(s?.username || '').trim() === username) {
+          add(String(s.sid || '').trim());
           expanded.push(String(s.sid || '').trim());
         }
       }
     }
 
-    if (/^sm_/i.test(String(key))) {
+    if (/^sm_/i.test(normalizedKey)) {
       const matchingSession =
-        db.data.sessions.find((s) => String(s?.sid || '').trim() === String(key).trim()) || null;
+        db.data.sessions.find((s) => String(s?.sid || '').trim() === normalizedKey) || null;
 
       if (matchingSession?.username) {
-        expanded.push(`user:${String(matchingSession.username).trim()}`);
+        const userKey = `user:${String(matchingSession.username).trim()}`;
+        add(userKey);
+        expanded.push(userKey);
       }
     }
   }
 
+  // First pass: direct candidate lookup
   for (const key of expanded) {
     const normalized = String(key || '').trim();
     if (!normalized) continue;
@@ -1337,12 +1347,52 @@ async function resolveFacebookTokenFromReq(req, options = {}) {
     }
   }
 
+  // Second pass: if we know the current username, search ALL aliases for that username
+  const fallbackUsername =
+    sessionUsername ||
+    (String(reqOwner || '').startsWith('user:') ? String(reqOwner).slice(5).trim() : '') ||
+    (String(preferredOwnerKey || '').startsWith('user:') ? String(preferredOwnerKey).slice(5).trim() : '') ||
+    '';
+
+  if (fallbackUsername) {
+    const userKey = `user:${fallbackUsername}`;
+
+    const aliasKeys = [userKey];
+
+    for (const s of db.data.sessions) {
+      if (String(s?.username || '').trim() === fallbackUsername) {
+        aliasKeys.push(String(s.sid || '').trim());
+      }
+    }
+
+    for (const alias of aliasKeys) {
+      const normalized = String(alias || '').trim();
+      if (!normalized) continue;
+
+      const token = getFbUserToken(normalized);
+      if (token) {
+        // hydrate both aliases so future lookups are stable
+        try {
+          await setFbUserToken(token, userKey);
+          if (sid) await setFbUserToken(token, sid);
+
+          const meta = getFbUserTokenMeta(normalized);
+          if (meta) {
+            await setFbUserTokenMeta(meta, userKey);
+            if (sid) await setFbUserTokenMeta(meta, sid);
+          }
+        } catch {}
+
+        return { ownerKey: userKey, userToken: token };
+      }
+    }
+  }
+
   return {
     ownerKey: preferredOwnerKey || debugOwnerKey || reqOwner || sid || '',
     userToken: null,
   };
 }
-
 router.get('/facebook/defaults', async (req, res) => {
   const DEFAULTS = defaultsFor(ownerKeyFromReq(req));
   const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req);
