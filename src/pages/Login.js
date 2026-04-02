@@ -114,6 +114,39 @@ function looksLikeEmail(value) {
   return /\S+@\S+\.\S+/.test(String(value || "").trim());
 }
 
+function normalizeIdentifier(value) {
+  return String(value || "").trim().replace(/^\$/, "");
+}
+
+function readEmailUserMap() {
+  try {
+    return JSON.parse(localStorage.getItem("sm_email_user_map_v1") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeEmailUserMap(map) {
+  try {
+    localStorage.setItem("sm_email_user_map_v1", JSON.stringify(map || {}));
+  } catch {}
+}
+
+async function getBillingStatus() {
+  const res = await fetch("/api/stripe/billing-status", {
+    method: "GET",
+    headers: {
+      "x-sm-sid": ensureStoredSid(),
+    },
+    credentials: "include",
+  });
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) return { ok: false, billing: null, user: null };
+  return json;
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -130,17 +163,7 @@ export default function Login() {
     [location.state]
   );
 
-  const founder = useMemo(() => {
-    const raw =
-      location.state?.founder ??
-      localStorage.getItem("sm_founder_offer") ??
-      "false";
-
-    if (typeof raw === "boolean") return raw;
-    const normalized = String(raw).trim().toLowerCase();
-    return normalized === "true" || normalized === "1" || normalized === "yes";
-  }, [location.state]);
-
+  const founder = false;
   const [identifier, setIdentifier] = useState(
     localStorage.getItem("smartmark_login_username") ||
       localStorage.getItem("sm_signup_email") ||
@@ -156,7 +179,7 @@ export default function Login() {
     e.preventDefault();
     setErr("");
 
-    const cleanIdentifier = String(identifier || "").trim();
+    const cleanIdentifier = normalizeIdentifier(identifier);
     const cleanPassword = String(password || "");
 
     if (!cleanIdentifier || !cleanPassword) {
@@ -167,73 +190,111 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const loginRes = await authFetch("/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: cleanIdentifier,
-          password: cleanPassword,
-        }),
-      });
+      const storedEmail = String(
+        localStorage.getItem("sm_signup_email") || ""
+      ).trim().toLowerCase();
 
-      const loginJson = await loginRes.json().catch(() => ({}));
+      const emailUserMap = readEmailUserMap();
 
-      if (!loginRes.ok || !loginJson?.success) {
-        throw new Error(loginJson?.error || "Invalid login credentials.");
+      const candidates = [
+        cleanIdentifier,
+        cleanIdentifier.toLowerCase(),
+        looksLikeEmail(cleanIdentifier)
+          ? String(emailUserMap[cleanIdentifier.toLowerCase()] || "").trim()
+          : "",
+        looksLikeEmail(cleanIdentifier)
+          ? cleanIdentifier.toLowerCase()
+          : "",
+        storedEmail && looksLikeEmail(cleanIdentifier) ? storedEmail : "",
+      ]
+        .map((x) => normalizeIdentifier(x))
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+
+      let loginJson = null;
+      let matchedIdentifier = "";
+
+      for (const candidate of candidates) {
+        const loginRes = await authFetch("/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: candidate,
+            password: cleanPassword,
+          }),
+        });
+
+        const json = await loginRes.json().catch(() => ({}));
+
+        if (loginRes.ok && json?.success) {
+          loginJson = json;
+          matchedIdentifier = candidate;
+          break;
+        }
       }
 
-      localStorage.setItem("sm_current_user", cleanIdentifier);
-      localStorage.setItem("smartmark_login_username", cleanIdentifier);
+      if (!loginJson?.success) {
+        throw new Error("Invalid login credentials.");
+      }
+
+      const backendUsername = normalizeIdentifier(
+        loginJson?.user?.username || matchedIdentifier || cleanIdentifier
+      );
+      const backendEmail = String(
+        loginJson?.user?.email || cleanIdentifier || ""
+      ).trim().toLowerCase();
+
+      localStorage.setItem("sm_current_user", backendUsername);
+      localStorage.setItem("smartmark_login_username", backendEmail || backendUsername);
       localStorage.setItem("smartmark_login_password", cleanPassword);
 
-   const storedName =
-  localStorage.getItem("sm_signup_full_name") ||
-  localStorage.getItem("sm_full_name") ||
-  "";
+      if (backendEmail) {
+        const nextMap = {
+          ...readEmailUserMap(),
+          [backendEmail]: backendUsername,
+        };
+        writeEmailUserMap(nextMap);
+        localStorage.setItem("sm_signup_email", backendEmail);
+      }
 
-const isAdminBypassUser =
-  cleanIdentifier === "TheBoss" &&
-  cleanPassword === "knowwilltech@gmail.com";
+      const billingStatus = await getBillingStatus();
+      const alreadyHasAccess = !!billingStatus?.billing?.hasAccess;
 
-if (isAdminBypassUser) {
-  navigate("/setup");
-  return;
-}
+      if (alreadyHasAccess) {
+        localStorage.removeItem("sm_selected_plan");
+        localStorage.removeItem("sm_founder_offer");
+        navigate("/setup");
+        return;
+      }
 
-const billingStatus = await getBillingStatus();
-const alreadyHasAccess = !!billingStatus?.billing?.hasAccess;
+      if (selectedPlan && PLAN_META[selectedPlan]) {
+        localStorage.setItem("sm_selected_plan", selectedPlan);
 
-if (alreadyHasAccess) {
-  localStorage.removeItem("sm_selected_plan");
-  localStorage.removeItem("sm_founder_offer");
-  navigate("/setup");
-  return;
-}
+        const checkoutEmail =
+          backendEmail ||
+          (looksLikeEmail(cleanIdentifier) ? cleanIdentifier.toLowerCase() : "");
 
-if (selectedPlan && PLAN_META[selectedPlan]) {
-  localStorage.setItem("sm_selected_plan", selectedPlan);
-  localStorage.setItem("sm_founder_offer", founder ? "true" : "false");
+        if (!checkoutEmail) {
+          throw new Error("Please use an email-based account to continue to checkout.");
+        }
 
-  const checkoutEmail = looksLikeEmail(cleanIdentifier)
-    ? cleanIdentifier.toLowerCase()
-    : (localStorage.getItem("sm_signup_email") || "").trim().toLowerCase();
+        const storedName =
+          localStorage.getItem("sm_signup_full_name") ||
+          localStorage.getItem("sm_full_name") ||
+          "";
 
-  if (!checkoutEmail) {
-    throw new Error("Please use an email-based account to continue to checkout.");
-  }
+        const checkoutUrl = await createCheckoutSession({
+          plan: selectedPlan,
+          founder: false,
+          email: checkoutEmail,
+          fullName: storedName,
+        });
 
-  const checkoutUrl = await createCheckoutSession({
-    plan: selectedPlan,
-    founder,
-    email: checkoutEmail,
-    fullName: storedName,
-  });
+        window.location.assign(checkoutUrl);
+        return;
+      }
 
-  window.location.assign(checkoutUrl);
-  return;
-}
-
-navigate("/setup");
+      navigate("/setup");
     } catch (error) {
       setErr(error?.message || "Could not log in.");
     } finally {
@@ -263,9 +324,15 @@ navigate("/setup");
           border: `1px solid ${BORDER}`,
           borderRadius: 28,
           boxShadow: SHADOW,
-          padding: "38px 32px",
+          padding: "22px 32px 38px",
         }}
       >
+        <div style={{ marginBottom: 18 }}>
+          <button onClick={() => navigate("/")} style={linkBtn}>
+            Home
+          </button>
+        </div>
+
         <div style={{ marginBottom: 24 }}>
           <div
             style={{
@@ -296,9 +363,7 @@ navigate("/setup");
               lineHeight: 1.65,
             }}
           >
-            {selectedPlan && PLAN_META[selectedPlan]
-              ? `Enter your account details to continue with the ${PLAN_META[selectedPlan].name} plan.`
-              : "Enter your Smartemark email or username and password."}
+                        Enter your Smartemark email or username and password.
           </div>
         </div>
 
@@ -373,7 +438,7 @@ navigate("/setup");
           style={{
             marginTop: 18,
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent: "flex-start",
             alignItems: "center",
             gap: 12,
             flexWrap: "wrap",
@@ -384,17 +449,13 @@ navigate("/setup");
               navigate("/signup", {
                 state: {
                   selectedPlan,
-                  founder,
+                  founder: false,
                 },
               })
             }
             style={linkBtn}
           >
             Need an account? Sign up
-          </button>
-
-          <button onClick={() => navigate("/")} style={linkBtn}>
-            Back to home
           </button>
         </div>
       </div>
