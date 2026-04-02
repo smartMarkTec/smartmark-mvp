@@ -66,8 +66,8 @@ async function authFetch(path, opts = {}) {
   return res;
 }
 
-async function createCheckoutSession({ plan, founder = false, email, fullName }) {
-  const res = await fetch("/api/stripe/create-checkout-session", {
+async function createCheckoutSession({ plan }) {
+  const res = await fetch("/api/stripe/create-checkout-session-auth", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -76,10 +76,7 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
     credentials: "include",
     body: JSON.stringify({
       plan,
-      founder,
-      email,
-      username: email,
-      fullName,
+      launchIntent: "1",
     }),
   });
 
@@ -91,7 +88,6 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
 
   return json.url;
 }
-
 
 function looksLikeEmail(value) {
   return /\S+@\S+\.\S+/.test(String(value || "").trim());
@@ -266,11 +262,8 @@ export default function Login() {
           localStorage.getItem("sm_full_name") ||
           "";
 
-        const checkoutUrl = await createCheckoutSession({
+              const checkoutUrl = await createCheckoutSession({
           plan: selectedPlan,
-          founder: false,
-          email: checkoutEmail,
-          fullName: storedName,
         });
 
         window.location.assign(checkoutUrl);

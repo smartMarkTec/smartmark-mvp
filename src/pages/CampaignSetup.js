@@ -34,17 +34,9 @@ const APP_ORIGIN = window.location.origin;
 // Browser/UI media base (SAME ORIGIN via proxy)
 const MEDIA_ORIGIN = APP_ORIGIN;
 
-// Auth bases (unchanged)
-const AUTH_BASE_PRIMARY = "/api/auth";
-const AUTH_BASE_FALLBACK = "/auth";
-
-
-
-
-
-
-
-
+// Auth bases
+const AUTH_BASE_PRIMARY = "/auth";
+const AUTH_BASE_FALLBACK = "/api/auth";
 
 // ✅ sid fallback for when cookies are blocked / flaky
 const SM_SID_LS_KEY = "sm_sid_v1";
@@ -73,7 +65,6 @@ function ensureStoredSid() {
   return sid;
 }
 
-
 async function authFetch(path, opts = {}) {
   const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };
@@ -90,17 +81,16 @@ async function authFetch(path, opts = {}) {
       cache: "no-store",
     });
 
-  // ✅ Prefer Vercel same-origin rewrite first
+  // ✅ hit the real backend route first
   let res = await doFetch(AUTH_BASE_PRIMARY);
 
-  // ✅ Fallback only if rewrite path truly missing
+  // ✅ fallback if some client path still expects /api/auth
   if (res.status === 404) {
     res = await doFetch(AUTH_BASE_FALLBACK);
   }
 
   return res;
 }
-
 async function stripeFetch(path, opts = {}) {
   const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };

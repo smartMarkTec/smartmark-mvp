@@ -361,10 +361,16 @@ app.post("/api/craft-ad-copy", (req, res) => {
 });
 
 const authRoutes = require("./routes/auth");
+
+// Primary auth mount
 app.use("/auth", authRoutes);
 
-// ✅ Backward-compat alias (some clients still hit /api/whoami)
+// ✅ ALSO expose auth under /api/auth so Vercel /api rewrites work too
+app.use("/api/auth", authRoutes);
+
+// ✅ Backward-compat aliases
 app.get("/api/whoami", (req, res) => res.redirect(307, "/auth/whoami"));
+app.get("/api/auth/whoami", (req, res) => res.redirect(307, "/auth/whoami"));
 
 /* IMPORTANT: staticAds is your ONLY generation path now */
 const staticAdsRoutes = require("./routes/staticAds");
