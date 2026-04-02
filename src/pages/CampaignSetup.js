@@ -2482,7 +2482,6 @@ function normalizeUsername(raw) {
 
 
 
-
 const handleLogin = async () => {
   const email = String(loginUser || "").trim().toLowerCase();
   const password = String(loginPass || "").trim();
@@ -2492,18 +2491,8 @@ const handleLogin = async () => {
     return false;
   }
 
-  const tryLogin = async () => {
-    const r = await authFetch(`/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: email, password }),
-    });
-    const j = await r.json().catch(() => ({}));
-    return { r, j };
-  };
-
-  const tryRegister = async () => {
-    const r = await authFetch(`/register`, {
+  const postAuth = async (path) => {
+    const r = await authFetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2520,27 +2509,14 @@ const handleLogin = async () => {
   setAuthStatus({ ok: false, msg: "Logging in..." });
 
   try {
-    let out = await tryLogin();
-    let successUser = "";
+    // ✅ LOGIN ONLY. Do not silently register on failed login.
+    const out = await postAuth(`/login`);
 
-    if (out.r.ok && out.j?.success) {
-      successUser = String(out.j?.user?.username || email).trim();
-    } else {
-      const reg = await tryRegister();
-      if (reg.r.ok && reg.j?.success) {
-        successUser = String(reg.j?.user?.username || email).trim();
-      } else {
-        out = await tryLogin();
-        if (out.r.ok && out.j?.success) {
-          successUser = String(out.j?.user?.username || email).trim();
-        }
-      }
+    if (!out.r.ok || !out.j?.success) {
+      throw new Error(out.j?.error || "Invalid email or password.");
     }
 
-    if (!successUser) {
-      const msg = out?.j?.error || "Login failed";
-      throw new Error(msg);
-    }
+    const successUser = String(out.j?.user?.username || email).trim();
 
     try {
       localStorage.setItem("sm_current_user", successUser);
@@ -2551,13 +2527,15 @@ const handleLogin = async () => {
     setAuthStatus({ ok: true, msg: "Logged in ✅" });
     return true;
   } catch (e) {
-    setAuthStatus({ ok: false, msg: e?.message || "Login failed" });
+    setAuthStatus({
+      ok: false,
+      msg: e?.message || "Invalid email or password.",
+    });
     return false;
   } finally {
     setAuthLoading(false);
   }
 };
-
 
 
   // IMPORTANT: normalize stored account ID to "act_..."

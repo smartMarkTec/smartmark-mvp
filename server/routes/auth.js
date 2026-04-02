@@ -1705,9 +1705,16 @@ router.post('/register', async (req, res) => {
     });
 
     if (existingUser) {
-      // if same account already exists, allow it to behave like an idempotent signup
       const existingHash = String(existingUser?.passwordHash || '').trim();
       const matches = existingHash ? bcrypt.compareSync(rawPassword, existingHash) : false;
+
+      if (!matches) {
+        return res.status(409).json({
+          success: false,
+          error: 'Account already exists for this email. Password does not match.',
+          code: 'ACCOUNT_EXISTS_PASSWORD_MISMATCH',
+        });
+      }
 
       const sid = ensureSid(req, res);
 
@@ -1724,7 +1731,7 @@ router.post('/register', async (req, res) => {
       return res.json({
         success: true,
         existing: true,
-        passwordMatched: !!matches,
+        passwordMatched: true,
         user: {
           username: existingUser.username,
           email: existingUser.email,
@@ -1732,7 +1739,6 @@ router.post('/register', async (req, res) => {
         },
       });
     }
-
     const passwordHash = bcrypt.hashSync(rawPassword, 10);
 
     const user = {
