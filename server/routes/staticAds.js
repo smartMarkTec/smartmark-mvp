@@ -88,7 +88,7 @@ async function generateOpenAIAdImageBuffers({
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
 
   const body = JSON.stringify({
     model,
@@ -108,7 +108,7 @@ async function generateOpenAIAdImageBuffers({
         "Content-Type": "application/json",
       },
       Buffer.from(body),
-      120000
+      50000
     );
 
     if (status !== 200) {
@@ -142,7 +142,8 @@ async function generateOpenAIAdImageBuffers({
 
   try {
     return await attempt();
-  } catch {
+  } catch (firstErr) {
+    console.warn("[generate-static-ad] first attempt failed, retrying once:", firstErr?.message || firstErr);
     return await attempt(); // retry once
   }
 }
@@ -346,6 +347,9 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
 /* ------------------------ /generate-static-ad ------------------------ */
 
 router.post("/generate-static-ad", async (req, res) => {
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const hasKey = !!process.env.OPENAI_API_KEY;
+  console.log(`[generate-static-ad] request received | model=${model} | hasKey=${hasKey}`);
   try {
     const body = req.body || {};
     const a =
