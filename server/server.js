@@ -439,6 +439,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server started on http://0.0.0.0:${PORT} (heap<=${MAX_HEAP_MB}MB)`);
+  console.log('[build check] code change test active');
 });
 
 module.exports = app;
