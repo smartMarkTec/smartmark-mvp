@@ -825,6 +825,10 @@ export default function FormPage() {
   const [generating, setGenerating] = useState(false);
   const [sideChatCount, setSideChatCount] = useState(0);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [chatIsThinking, setChatIsThinking] = useState(false);
+  const [typingMsg, setTypingMsg] = useState("");
+  const [typingIdx, setTypingIdx] = useState(0);
+  const [pendingFollowUp, setPendingFollowUp] = useState("");
 
   const [imageDataUrls, setImageDataUrls] = useState([]); // 2 items max
   const [imgFail, setImgFail] = useState({}); // {0:true,1:true}
@@ -862,7 +866,28 @@ export default function FormPage() {
   /* Scroll chat to bottom */
   useEffect(() => {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-  }, [chatHistory]);
+  }, [chatHistory, chatIsThinking, typingMsg]);
+
+  /* Typewriter animation: advance ~4 chars every 15ms */
+  useEffect(() => {
+    if (!typingMsg) return;
+    if (typingIdx >= typingMsg.length) {
+      // Done — commit to chatHistory, then fire any pending follow-up
+      const finalText = typingMsg;
+      const followUp = pendingFollowUp;
+      setTypingMsg("");
+      setTypingIdx(0);
+      setPendingFollowUp("");
+      setChatHistory((ch) => {
+        const next = [...ch, { from: "gpt", text: finalText }];
+        if (followUp) next.push({ from: "gpt", text: followUp });
+        return next;
+      });
+      return;
+    }
+    const t = setTimeout(() => setTypingIdx((i) => Math.min(i + 4, typingMsg.length)), 15);
+    return () => clearTimeout(t);
+  }, [typingMsg, typingIdx, pendingFollowUp]);
 
 /* Warm backend on mount + ✅ BFCache fix: always re-check drafts when page is shown */
 useEffect(() => {
@@ -1567,14 +1592,21 @@ useEffect(() => {
       return;
     }
     setSideChatCount((c) => c + 1);
+    setChatIsThinking(true);
     const reply = await askGPT(userText);
-    if (reply) setChatHistory((ch) => [...ch, { from: "gpt", text: reply }]);
-    if (followUpPrompt) setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
+    setChatIsThinking(false);
+    if (reply) {
+      if (followUpPrompt) setPendingFollowUp(followUpPrompt);
+      setTypingIdx(0);
+      setTypingMsg(reply);
+    } else {
+      if (followUpPrompt) setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
+    }
   }
 
   async function handleUserInput(e) {
     e.preventDefault();
-    if (loading) return;
+    if (loading || chatIsThinking || !!typingMsg) return;
     const value = (input || "").trim();
     if (!value) return;
 
@@ -2106,6 +2138,50 @@ async function generatePosterBPair(runToken) {
               </div>
             );
           })}
+
+          {/* Typewriter bubble — AI reply being revealed progressively */}
+          {!!typingMsg && (
+            <div
+              style={{
+                alignSelf: "flex-start",
+                color: "#262331",
+                background: "rgba(255,255,255,0.92)",
+                border: `1px solid ${EDGE}`,
+                borderRadius: 20,
+                padding: "12px 15px",
+                maxWidth: "85%",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                fontWeight: 500,
+                lineHeight: 1.55,
+              }}
+            >
+              {typingMsg.slice(0, typingIdx)}
+              <span style={{ opacity: 0.4 }}>▍</span>
+            </div>
+          )}
+
+          {/* Thinking bubble — shown while waiting for GPT response */}
+          {chatIsThinking && !typingMsg && (
+            <div
+              style={{
+                alignSelf: "flex-start",
+                color: "#7d7794",
+                background: "rgba(255,255,255,0.88)",
+                border: `1px solid ${EDGE}`,
+                borderRadius: 20,
+                padding: "12px 18px",
+                maxWidth: "85%",
+                boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                fontWeight: 500,
+                fontSize: "1.2rem",
+                letterSpacing: "0.12em",
+              }}
+            >
+              •••
+            </div>
+          )}
         </div>
 
         {!loading && (
@@ -2121,6 +2197,8 @@ async function generatePosterBPair(runToken) {
               borderRadius: 22,
               padding: 8,
               boxShadow: "0 8px 24px rgba(66,54,120,0.06)",
+              opacity: chatIsThinking || !!typingMsg ? 0.6 : 1,
+              transition: "opacity 0.2s",
             }}
           >
             <button
@@ -2148,7 +2226,7 @@ async function generatePosterBPair(runToken) {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
+              disabled={loading || chatIsThinking || !!typingMsg}
               autoFocus
               placeholder="How can I help you today?"
               aria-label="Your answer"
@@ -2180,7 +2258,7 @@ async function generatePosterBPair(runToken) {
                 cursor: "pointer",
                 flex: "0 0 auto",
               }}
-              disabled={loading}
+              disabled={loading || chatIsThinking || !!typingMsg}
               tabIndex={0}
               aria-label="Send"
             >

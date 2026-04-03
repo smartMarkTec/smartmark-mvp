@@ -274,87 +274,85 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
   const idealCustomer = clean(a.idealCustomer || "");
   const benefit = clean(a.mainBenefit || a.benefit || "");
 
-  // Use GPT-crafted copy when available — creates cohesion between UI copy and image text
   const headline = clean(craftedCopy.headline || "");
   const offer = clean(craftedCopy.offer || a.offer || a.promo || "");
-  const cta = clean(
-    craftedCopy.cta ||
-    a.cta ||
-    (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
-  );
+  const cta = clean(craftedCopy.cta || a.cta || "Learn More");
 
   const p = profile || buildVariantProfile(variationToken, "A", industry);
 
-  // Derive the emotional register from industry so the design feels intentional
   const ind = industry.toLowerCase();
   let emotionalTone;
-  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(ind))      emotionalTone = "warm, inviting, and appetite-stimulating";
-  else if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(ind))     emotionalTone = "sleek, modern, and aspirational";
-  else if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(ind)) emotionalTone = "warm, premium, and lifestyle-driven";
-  else if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(ind))  emotionalTone = "energetic, motivational, and results-driven";
-  else if (/(tech|software|saas|app|digital|marketing|agency|seo)/i.test(ind)) emotionalTone = "clean, capable, and growth-oriented";
-  else if (/(legal|law|attorney|lawyer)/i.test(ind))                         emotionalTone = "trustworthy, authoritative, and reassuring";
-  else if (/(real estate|realty|property|homes for sale)/i.test(ind))        emotionalTone = "premium, aspirational, and community-focused";
-  else if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(ind))            emotionalTone = "reliable, confident, and value-driven";
-  else if (/(beauty|salon|spa|skincare|hair|nail)/i.test(ind))               emotionalTone = "elegant, transformative, and confidence-building";
-  else emotionalTone = "professional, clear, and benefit-focused";
+  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(ind))      emotionalTone = "warm, inviting, appetite-stimulating";
+  else if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(ind))     emotionalTone = "sleek, modern, aspirational";
+  else if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(ind)) emotionalTone = "warm, premium, lifestyle-driven";
+  else if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(ind))  emotionalTone = "energetic, motivational, results-driven";
+  else if (/(tech|software|saas|app|digital|marketing|agency|seo)/i.test(ind)) emotionalTone = "clean, capable, growth-oriented";
+  else if (/(legal|law|attorney|lawyer)/i.test(ind))                         emotionalTone = "trustworthy, authoritative, reassuring";
+  else if (/(real estate|realty|property|homes for sale)/i.test(ind))        emotionalTone = "premium, aspirational, community-focused";
+  else if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(ind))            emotionalTone = "reliable, confident, value-driven";
+  else if (/(beauty|salon|spa|skincare|hair|nail)/i.test(ind))               emotionalTone = "elegant, transformative, confidence-building";
+  else emotionalTone = "professional, clear, benefit-focused";
 
-  // The single core concept this entire ad communicates
-  const coreConcept = headline
-    ? `"${headline}"`
-    : benefit
-    ? benefit
-    : offer
-    ? offer
-    : `trusted ${industry} for ${idealCustomer || "local customers"}`;
+  const coreConcept = headline || benefit || `trusted ${industry} for ${idealCustomer || "people who care"}`;
 
-  const variantBlock = [
-    `VARIANT ${p.variantTag} DESIGN DIRECTION (make this visually distinct — different setting, palette, and composition than other variants):`,
-    `- Visual environment: ${p.setting}`,
-    `- Color palette: ${p.palette}`,
-    `- Composition: ${p.composition}`,
-    `- Lighting: ${p.lighting}`,
-    `- Subject: ${p.subjectMode}`,
-    `- People: ${p.peopleMode} — prefer no people or one person; avoid groups.`,
-  ].join("\n");
+  // Translate spec labels into evocative scene language so the model creates atmosphere, not checklists
+  const sceneNarrative = ({
+    "bright studio backdrop":           "a clean, luminous studio — pure focus on the subject, nothing competing for attention",
+    "modern storefront exterior":       "an inviting exterior that signals quality and approachability",
+    "cozy home interior":               "a warm, well-appointed home interior — comfort and intention",
+    "clean office/workspace":           "a confident, organized workspace — calm and capable",
+    "outdoor lifestyle scene":          "an authentic outdoor moment — real light, real texture, real life",
+    "urban street scene":               "an urban environment with direction and energy",
+    "minimal product-on-table scene":   "a deliberate minimal arrangement — premium negative space, beautiful materials",
+    "soft gradient abstract backdrop":  "a sophisticated abstract gradient — modern, refined, forward-looking",
+    "sleek tech abstract scene":        "a sleek, intelligent abstract environment — sharp and forward-thinking",
+    "modern desk flatlay with devices": "a precisely curated flatlay — editorial, intentional, modern"
+  })[p.setting] || p.setting;
+
+  const paletteNarrative = ({
+    "cool neutrals + teal accents":   "cool, restrained neutrals with teal as a calm authority accent",
+    "warm neutrals + gold accents":   "warm sand and cream tones with gold as the premium accent",
+    "bold high-contrast colors":      "high-contrast, graphic color blocking — visually arresting",
+    "pastel modern palette":          "soft contemporary pastels — modern, light, approachable",
+    "monochrome with one accent color": "near-monochrome palette with one deliberate, bold accent color",
+    "earth tones with natural textures": "rich earth tones — ochre, terracotta, natural organic texture"
+  })[p.palette] || p.palette;
 
   return [
-    `You are a world-class creative director and graphic designer. Design a premium square (1:1) Facebook/Instagram static ad creative.`,
+    `You are an award-winning advertising art director. Create a premium square (1:1) Facebook/Instagram ad that looks like a real brand's paid campaign — not a template, not stock photography, not text placed on top of an image.`,
     ``,
-    `BRAND: ${businessName} | INDUSTRY: ${industry}`,
-    idealCustomer ? `AUDIENCE: ${idealCustomer}` : null,
+    `BRAND: ${businessName} | ${industry}${idealCustomer ? ` | Audience: ${idealCustomer}` : ""}`,
     ``,
-    `CORE CONCEPT — everything in this ad must communicate this single idea:`,
-    coreConcept,
-    `EMOTIONAL REGISTER: ${emotionalTone}`,
+    `THE ONE IDEA THIS AD COMMUNICATES:`,
+    `"${coreConcept}"`,
+    `Tone: ${emotionalTone}`,
     ``,
-    `COPY TO INTEGRATE INTO THE DESIGN:`,
+    `CREATIVE DIRECTION — Variant ${p.variantTag}:`,
+    `Scene: ${sceneNarrative}.`,
+    `Light: ${p.lighting}. Color: ${paletteNarrative}.`,
+    `Composition: ${p.composition}.`,
+    `Subject: ${p.subjectMode}. People: ${p.peopleMode}.`,
+    ``,
+    `COPY — design the visual around these words, do not paste them on top:`,
     headline
-      ? `Headline (the most prominent text — design the visual around this): "${headline}"`
+      ? `Headline (dominant — the visual composition is built around this idea): "${headline}"`
       : benefit
-      ? `Core message (express this visually and typographically): "${benefit}"`
+      ? `Core message (express this both visually and typographically): "${benefit}"`
       : null,
     offer
-      ? `Featured offer (make this visually prominent): "${offer}"`
-      : `No promotional offer. DO NOT use "Sale", "New Arrivals", "Featured Collection", "Limited Time", or any discount language. Use a neutral brand label instead (e.g. "Made Daily", "Trusted Service", "Crafted Locally").`,
-    `CTA button: "${cta}"`,
-    website ? `Website (small, subtle, bottom of design): ${website}` : null,
-    `Business name: "${businessName}" (visible but secondary to headline)`,
+      ? `Offer (bold, credible, unmissable): "${offer}"`
+      : `No offer was provided. Do NOT invent discount language, sale copy, "Limited Time", "New Arrivals", or any promotional text. Omit offer elements entirely — the brand stands on its own.`,
+    `CTA: "${cta}"`,
+    website ? `URL (small, bottom of frame): ${website}` : null,
+    `Brand name "${businessName}" — present but secondary.`,
     ``,
-    `CRITICAL DESIGN MANDATE:`,
-    `Design this as ONE unified visual concept — NOT a photo with text overlaid on top.`,
-    `Typography, imagery, color, and composition must be designed together as a single visual system.`,
-    `The headline text must feel built into the design — integral to the composition, not floating above a background photo.`,
-    `Think: branded print advertisement or premium campaign asset — polished, intentional, and cohesive.`,
-    `The visual must make someone stop scrolling. The message must be clear within 2 seconds.`,
-    `Strong hierarchy: headline dominates, supporting text and CTA follow, brand name anchors.`,
+    `DESIGN STANDARD:`,
+    `Atmosphere first — the mood must communicate before anyone reads a word. Typography feels architectural, designed in, not floating. Color and light carry meaning. This is a unified visual system, not assembled parts.`,
+    `Stop-scroll quality. Message lands in 1.5 seconds. Art direction: as if this ran in a major brand's paid media campaign.`,
     ``,
-    `NO generic stock-photo look. NO template aesthetic. This must look like a real brand's paid creative.`,
-    `NO third-party logos. NO watermarks. NO QR codes. NO fake certifications.`,
+    `NO watermarks. NO QR codes. NO fake badges. NO third-party logos. NO invented prices or deals unless one was provided above.`,
     ``,
-    variantBlock,
-    `Variation token: ${variationToken || Date.now()}`,
-    ``,
+    `Variation seed: ${variationToken || Date.now()}`,
     `Output: one complete, professional square ad image.`,
   ].filter(Boolean).join("\n");
 }
@@ -401,7 +399,7 @@ router.post("/generate-static-ad", async (req, res) => {
         prompt: prompts[0],
         size: "1024x1024",
         output_format: "png",
-        quality: "auto",
+        quality: "high",
         n: 1,
       });
     } else {
@@ -409,14 +407,14 @@ router.post("/generate-static-ad", async (req, res) => {
         prompt: prompts[0],
         size: "1024x1024",
         output_format: "png",
-        quality: "auto",
+        quality: "high",
         n: 1,
       });
       const b2 = await generateOpenAIAdImageBuffers({
         prompt: prompts[1],
         size: "1024x1024",
         output_format: "png",
-        quality: "auto",
+        quality: "high",
         n: 1,
       });
       bufs = [b1[0], b2[0]].filter(Boolean);

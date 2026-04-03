@@ -398,6 +398,7 @@ const system =
   "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
   "Hard rules: NO URLs. NO 'our/we/I' language. NO unverifiable superlatives (best, #1, guaranteed, luxury, fastest, revolutionary). " +
   "Do NOT write filler phrases: 'take your X to the next level', 'designed with you in mind', 'hassle-free', 'seamless experience', 'cutting-edge'. " +
+  "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided. " +
   "Be specific, not generic. The best ad copy makes one person feel: this brand understands exactly what I need.";
 
 
