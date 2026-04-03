@@ -201,10 +201,10 @@ function buildVariantProfile(variationToken = "", variantTag = "A", industryHint
   ];
 
   const compositions = [
-    "tight close-up with typography overlay",
-    "mid-shot with clear subject focus",
-    "wide shot with strong negative space for text",
-    "rule-of-thirds composition with CTA anchored"
+    "bold close-up — subject fills the frame, typography integrated into the design",
+    "mid-shot with subject as clear visual anchor — graphic hierarchy",
+    "wide shot with generous breathing room — subject and type as one unified system",
+    "graphic composition — strong visual hierarchy, type and image inseparable"
   ];
 
   const lighting = [
@@ -219,19 +219,19 @@ function buildVariantProfile(variationToken = "", variantTag = "A", industryHint
 
   // Subject focus: allow more non-people variety (dashboards/charts/graphics) especially for marketing/tech
   const subjectModesTech = [
-    "no-people concept: clean analytics dashboard/charts/graphs visual",
-    "no-people concept: abstract technology/AI/network graphics",
-    "no-people concept: laptop/phone UI mockup showing growth metrics",
-    "one person using a laptop/phone with subtle dashboard overlay",
-    "product/service hero visual with bold typography (no people)"
+    "no-people concept: clean analytics dashboard/chart visual — design-forward",
+    "no-people concept: abstract technology/AI/network graphic — bold and intentional",
+    "no-people concept: laptop/phone UI mockup — screen visible, editorial composition",
+    "one person using a laptop/phone — natural, candid, screen visible",
+    "product/service as the visual hero — strong graphic design, no people"
   ];
 
   const subjectModesGeneral = [
-    "product or service hero visual (no people)",
-    "one person enjoying/using the service",
-    "one person portrait-style lifestyle ad shot",
-    "environment/scene-led creative with strong negative space (no people)",
-    "object/flatlay-led creative with premium textures (no people)"
+    "product or service as the visual hero — no people, design-led",
+    "one person authentically using or enjoying the service — candid, real",
+    "one person — confident portrait-style lifestyle shot",
+    "environment and place lead the story — atmosphere, texture, no people",
+    "object/flatlay — deliberate arrangement, premium materials, editorial"
   ];
 
   const subjectMode = isTechy ? pick(rng, subjectModesTech) : pick(rng, subjectModesGeneral);
@@ -333,24 +333,25 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
     `Composition: ${p.composition}.`,
     `Subject: ${p.subjectMode}. People: ${p.peopleMode}.`,
     ``,
-    `COPY — design the visual around these words, do not paste them on top:`,
+    `COPY CONCEPT — the image should make the viewer feel this idea, expressed through design, not pasted text:`,
     headline
-      ? `Headline (dominant — the visual composition is built around this idea): "${headline}"`
+      ? `Central idea to express: "${headline}" — let this inform the mood, scene, and any typography the art director would naturally place`
       : benefit
-      ? `Core message (express this both visually and typographically): "${benefit}"`
+      ? `Central idea to express: "${benefit}"`
       : null,
     offer
-      ? `Offer (bold, credible, unmissable): "${offer}"`
-      : `No offer was provided. Do NOT invent discount language, sale copy, "Limited Time", "New Arrivals", or any promotional text. Omit offer elements entirely — the brand stands on its own.`,
-    `CTA: "${cta}"`,
-    website ? `URL (small, bottom of frame): ${website}` : null,
-    `Brand name "${businessName}" — present but secondary.`,
+      ? `Include a short, prominent offer element naturally integrated into the design: "${offer}"`
+      : `No promotional offer. Do NOT add any sale, deal, "% off", "Limited Time", or discount element. This brand has no active promotion.`,
+    `Short CTA element (button or typographic callout): "${cta}"`,
+    website ? `Brand URL (small, bottom of frame): ${website}` : null,
+    `Brand name "${businessName}" — woven into the design, not dominant.`,
     ``,
     `DESIGN STANDARD:`,
-    `Atmosphere first — the mood must communicate before anyone reads a word. Typography feels architectural, designed in, not floating. Color and light carry meaning. This is a unified visual system, not assembled parts.`,
-    `Stop-scroll quality. Message lands in 1.5 seconds. Art direction: as if this ran in a major brand's paid media campaign.`,
+    `This is a unified creative — not a background photo with text placed on top. The image, type, color, and light are one system conceived together.`,
+    `Atmosphere first: the mood communicates before anyone reads a word. Typography is architectural — rooted in the composition, not floating above it.`,
+    `Art direction quality: as if this ran in a major brand's paid media campaign. Stop-scroll power. Message lands in 1.5 seconds.`,
     ``,
-    `NO watermarks. NO QR codes. NO fake badges. NO third-party logos. NO invented prices or deals unless one was provided above.`,
+    `NO stock photo aesthetic. NO template layout feel. NO text-on-background-image composition. NO watermarks. NO QR codes. NO fake badges. NO third-party logos. NO invented promotions.`,
     ``,
     `Variation seed: ${variationToken || Date.now()}`,
     `Output: one complete, professional square ad image.`,
