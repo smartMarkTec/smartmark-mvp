@@ -184,7 +184,6 @@ const Signup = () => {
 
       localStorage.setItem("sm_current_user", cleanEmail);
       localStorage.setItem("smartmark_login_username", cleanEmail);
-      localStorage.setItem("smartmark_login_password", cleanPassword);
       localStorage.setItem("sm_signup_full_name", cleanName);
       localStorage.setItem("sm_signup_email", cleanEmail);
       localStorage.setItem("sm_selected_plan", selectedPlan);

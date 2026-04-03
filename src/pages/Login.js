@@ -148,9 +148,7 @@ export default function Login() {
       localStorage.getItem("sm_signup_email") ||
       ""
   );
-  const [password, setPassword] = useState(
-    localStorage.getItem("smartmark_login_password") || ""
-  );
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -225,7 +223,6 @@ export default function Login() {
 
       localStorage.setItem("sm_current_user", backendUsername);
       localStorage.setItem("smartmark_login_username", backendEmail || backendUsername);
-      localStorage.setItem("smartmark_login_password", cleanPassword);
 
       if (backendEmail) {
         const nextMap = {
@@ -432,6 +429,12 @@ export default function Login() {
             style={linkBtn}
           >
             Need an account? Sign up
+          </button>
+          <button
+            onClick={() => navigate("/forgot-password")}
+            style={linkBtn}
+          >
+            Forgot password?
           </button>
         </div>
       </div>

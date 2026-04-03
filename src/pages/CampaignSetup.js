@@ -610,6 +610,17 @@ function lsGet(user, key) {
     const anon = localStorage.getItem(withUser("anon", key));
     if (anon !== null && anon !== undefined) return anon;
 
+    // 2b) FormPage SID namespace fallback.
+    // FormPage calls setUserNS(sid) when whoami resolves as not-logged-in,
+    // so drafts land under u:<sid>:key rather than u:anon:key.
+    // This lets CampaignSetup find those drafts after a Stripe/OAuth redirect
+    // clears sessionStorage and resolvedUser becomes a username.
+    const ns = (localStorage.getItem("sm_user_ns_v1") || "").trim();
+    if (ns && ns !== "anon" && ns !== user) {
+      const nsVal = localStorage.getItem(withUser(ns, key));
+      if (nsVal !== null && nsVal !== undefined) return nsVal;
+    }
+
     // 3) legacy/global
     return localStorage.getItem(key);
   } catch {
@@ -2454,7 +2465,7 @@ function writeEmailUserMap(map) {
 
   /* ===================== LOGIN (simple + works) ===================== */
   const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
-  const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
+  const [loginPass, setLoginPass] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authStatus, setAuthStatus] = useState({ ok: false, msg: "" });
 
@@ -2465,11 +2476,6 @@ useEffect(() => {
   lsSet(resolvedUser, "smartmark_login_username", v, true);
 }, [loginUser, resolvedUser]);
 
-useEffect(() => {
-  const v = String(loginPass || "").trim();
-  if (!v) return; // ✅ don't overwrite with blank
-  lsSet(resolvedUser, "smartmark_login_password", v, true);
-}, [loginPass, resolvedUser]);
 
 
 function normalizeUsername(raw) {
@@ -2521,7 +2527,6 @@ const handleLogin = async () => {
     try {
       localStorage.setItem("sm_current_user", successUser);
       localStorage.setItem("smartmark_login_username", email);
-      localStorage.setItem("smartmark_login_password", password);
     } catch {}
 
     setAuthStatus({ ok: true, msg: "Logged in ✅" });
@@ -3204,11 +3209,16 @@ useEffect(() => {
 
     try {
       if (sessionId) {
-        await stripeFetch(`/api/stripe/sync-checkout-session`, {
+        const syncRes = await stripeFetch(`/api/stripe/sync-checkout-session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId }),
         });
+        const syncJson = await syncRes.json().catch(() => ({}));
+        const newSid = String(syncJson?.newSid || "").trim();
+        if (newSid) {
+          try { localStorage.setItem(SM_SID_LS_KEY, newSid); } catch {}
+        }
       }
 
       const ok = await refreshBillingStatus();
@@ -4967,9 +4977,7 @@ const selectedCampaignCreatives =
 
               try {
                 const u = String(loginUser || "").trim();
-                const p = String(loginPass || "").trim();
                 if (u) localStorage.setItem("smartmark_login_username", u.replace(/^\$/, ""));
-                if (p) localStorage.setItem("smartmark_login_password", p);
               } catch {}
 
               const qs = new URLSearchParams(location.search || "");

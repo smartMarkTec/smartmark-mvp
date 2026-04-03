@@ -303,8 +303,11 @@ async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
   const fallbackUsername = String(fallbackUser?.username || "").trim().toLowerCase();
   const fallbackEmail = String(fallbackUser?.email || "").trim().toLowerCase();
 
-  const email = stripeEmail || fallbackEmail || stripeUsername || fallbackUsername;
-  const username = email || stripeUsername || fallbackUsername || "";
+  // Prefer the authenticated session user as the identity anchor.
+  // stripeEmail is used only when no session exists, preventing ghost user creation
+  // when the user types a different email in Stripe's hosted checkout form.
+  const email = fallbackEmail || stripeEmail || fallbackUsername || stripeUsername;
+  const username = fallbackUsername || email || stripeUsername || "";
 
   const customerId = String(session?.customer || "").trim();
   const subscriptionObj = session?.subscription || null;
@@ -479,6 +482,7 @@ const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
         billingLabel: PLAN_NAME_MAP[planKey],
         offerKey: `public_${planKey}`,
         source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
+        sid: getSidFromReq(req) || "",
       },
       subscription_data: {
         metadata: {
@@ -611,6 +615,7 @@ cancel_url: `${clientUrl}/setup?billing_cancelled=1&plan=${planKey}`,
         billingLabel: PLAN_NAME_MAP[planKey],
         offerKey: `public_${planKey}`,
         source: "campaign_setup",
+        sid: getSidFromReq(req) || "",
       },
       subscription_data: {
         metadata: {
@@ -936,6 +941,7 @@ router.post("/sync-checkout-session", async (req, res) => {
       ok: true,
       synced: true,
       sessionCreated: true,
+      newSid: sid,
       billing: synced.billing,
       user: synced.user,
     });
@@ -970,13 +976,13 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
       case "checkout.session.completed": {
         const session = event.data.object;
 
-        const username = String(session?.metadata?.username || "").trim();
+        const username = String(session?.metadata?.username || "").trim().toLowerCase();
         const email = String(
           session?.customer_details?.email ||
             session?.customer_email ||
             session?.metadata?.email ||
             ""
-        ).trim();
+        ).trim().toLowerCase();
 
         const customerId = String(session?.customer || "").trim();
         const subscriptionId = String(session?.subscription || "").trim();
@@ -1117,8 +1123,8 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const subscription = event.data.object;
         const subscriptionId = String(subscription?.id || "").trim();
         const customerId = String(subscription?.customer || "").trim();
-        const username = String(subscription?.metadata?.username || "").trim();
-        const email = String(subscription?.metadata?.email || "").trim();
+        const username = String(subscription?.metadata?.username || "").trim().toLowerCase();
+        const email = String(subscription?.metadata?.email || "").trim().toLowerCase();
         const priceId = String(subscription?.items?.data?.[0]?.price?.id || "").trim();
         const status = String(subscription?.status || "").trim();
         const currentPeriodEnd = subscription?.current_period_end

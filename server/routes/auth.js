@@ -1945,7 +1945,7 @@ router.post('/login', async (req, res) => {
 router.post('/logout', async (req, res) => {
   try {
     await ensureUsersAndSessions();
-    const sid = req.cookies?.[COOKIE_NAME];
+    const sid = getSidFromReq(req);
     if (sid) {
       db.data.sessions = db.data.sessions.filter((s) => s.sid !== sid);
       await db.write();
@@ -5599,5 +5599,108 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Forgot / Reset password
+// ---------------------------------------------------------------------------
+
+function getResendClient() {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  try {
+    const { Resend } = require('resend');
+    return new Resend(key);
+  } catch {
+    return null;
+  }
+}
+
+router.post('/forgot-password', async (req, res) => {
+  // Always return 200 to prevent email enumeration.
+  const silentOk = () => res.json({ ok: true });
+
+  try {
+    const rawEmail = String(req.body?.email || '').trim().toLowerCase();
+    if (!rawEmail || !/\S+@\S+\.\S+/.test(rawEmail)) return silentOk();
+
+    await ensureUsersAndSessions();
+
+    const user = db.data.users.find((u) => {
+      const uEmail = String(u?.email || '').trim().toLowerCase();
+      const uName = String(u?.username || '').trim().toLowerCase();
+      return uEmail === rawEmail || uName === rawEmail;
+    });
+
+    if (!user) return silentOk(); // no such account — silent success
+
+    // Generate a cryptographically random token; store only its hash.
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
+
+    user.passwordResetToken = tokenHash;
+    user.passwordResetExpires = expiresAt;
+    await db.write();
+
+    const resetUrl = `${process.env.APP_URL || 'https://smartemark.com'}/reset-password?token=${rawToken}`;
+
+    const resend = getResendClient();
+    if (resend) {
+      await resend.emails.send({
+        from: process.env.RESEND_FROM || 'Smartemark <noreply@smartemark.com>',
+        to: user.email,
+        subject: 'Reset your Smartemark password',
+        html: `<p>You requested a password reset.</p>
+<p><a href="${resetUrl}">Click here to reset your password</a></p>
+<p>This link expires in 1 hour. If you did not request this, ignore this email.</p>`,
+      });
+    } else {
+      console.warn('[forgot-password] RESEND_API_KEY not set — email not sent. Reset URL:', resetUrl);
+    }
+
+    return silentOk();
+  } catch (err) {
+    console.error('[forgot-password] error', err?.message);
+    return silentOk(); // still silent to prevent enumeration
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const rawToken = String(req.body?.token || '').trim();
+    const rawPassword = String(req.body?.password || '');
+
+    if (!rawToken || rawPassword.length < 6) {
+      return res.status(400).json({ ok: false, error: 'Token and a password of at least 6 characters are required.' });
+    }
+
+    await ensureUsersAndSessions();
+
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const now = Date.now();
+
+    const user = db.data.users.find((u) => {
+      return (
+        u?.passwordResetToken === tokenHash &&
+        typeof u?.passwordResetExpires === 'number' &&
+        u.passwordResetExpires > now
+      );
+    });
+
+    if (!user) {
+      return res.status(400).json({ ok: false, error: 'Reset link is invalid or has expired.' });
+    }
+
+    user.passwordHash = bcrypt.hashSync(rawPassword, 10);
+    user.passwordResetToken = null;
+    user.passwordResetExpires = null;
+    await db.write();
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[reset-password] error', err?.message);
+    return res.status(500).json({ ok: false, error: 'Password reset failed.' });
+  }
+});
 
 module.exports = router;
