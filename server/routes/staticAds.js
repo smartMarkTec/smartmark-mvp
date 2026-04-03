@@ -267,81 +267,96 @@ function buildVariantProfile(variationToken = "", variantTag = "A", industryHint
   };
 }
 
-function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
+function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, craftedCopy = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = clean(a.industry || "Business");
   const website = clean(a.website || a.url || "");
   const idealCustomer = clean(a.idealCustomer || "");
-  const offer = clean(a.offer || a.promo || "");
   const benefit = clean(a.mainBenefit || a.benefit || "");
+
+  // Use GPT-crafted copy when available — creates cohesion between UI copy and image text
+  const headline = clean(craftedCopy.headline || "");
+  const offer = clean(craftedCopy.offer || a.offer || a.promo || "");
   const cta = clean(
+    craftedCopy.cta ||
     a.cta ||
-      (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
+    (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
   );
 
   const p = profile || buildVariantProfile(variationToken, "A", industry);
 
-  const variationBlock = [
-    `Variation token: "${variationToken || Date.now()}"`,
-    `Variant: ${p.variantTag}`,
-    ``,
-    `Make this creative clearly different from other variants in the same run:`,
-    `- Setting: ${p.setting}`,
+  // Derive the emotional register from industry so the design feels intentional
+  const ind = industry.toLowerCase();
+  let emotionalTone;
+  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(ind))      emotionalTone = "warm, inviting, and appetite-stimulating";
+  else if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(ind))     emotionalTone = "sleek, modern, and aspirational";
+  else if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(ind)) emotionalTone = "warm, premium, and lifestyle-driven";
+  else if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(ind))  emotionalTone = "energetic, motivational, and results-driven";
+  else if (/(tech|software|saas|app|digital|marketing|agency|seo)/i.test(ind)) emotionalTone = "clean, capable, and growth-oriented";
+  else if (/(legal|law|attorney|lawyer)/i.test(ind))                         emotionalTone = "trustworthy, authoritative, and reassuring";
+  else if (/(real estate|realty|property|homes for sale)/i.test(ind))        emotionalTone = "premium, aspirational, and community-focused";
+  else if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(ind))            emotionalTone = "reliable, confident, and value-driven";
+  else if (/(beauty|salon|spa|skincare|hair|nail)/i.test(ind))               emotionalTone = "elegant, transformative, and confidence-building";
+  else emotionalTone = "professional, clear, and benefit-focused";
+
+  // The single core concept this entire ad communicates
+  const coreConcept = headline
+    ? `"${headline}"`
+    : benefit
+    ? benefit
+    : offer
+    ? offer
+    : `trusted ${industry} for ${idealCustomer || "local customers"}`;
+
+  const variantBlock = [
+    `VARIANT ${p.variantTag} DESIGN DIRECTION (make this visually distinct — different setting, palette, and composition than other variants):`,
+    `- Visual environment: ${p.setting}`,
     `- Color palette: ${p.palette}`,
     `- Composition: ${p.composition}`,
     `- Lighting: ${p.lighting}`,
-    `- Subject focus: ${p.subjectMode}`,
-    `- People: ${p.peopleMode}`,
-    ``,
-    `People rules:`,
-    `- Prefer NO people or ONE person most of the time.`,
-    `- Avoid 2–3 people unless it truly fits; groups are rare.`,
-    `- If people appear, keep casting naturally diverse across variants (age/skin tone/gender presentation) without forcing a "one-of-each" look.`,
-    `- Across multiple variants, avoid repeating the exact same-looking model/pose/outfit.`,
-    ``,
-    `Avoid repetition:`,
-    `- Do not reuse the same background, framing, or typography layout across variants.`,
-    `- Change props/background elements to match the industry.`,
+    `- Subject: ${p.subjectMode}`,
+    `- People: ${p.peopleMode} — prefer no people or one person; avoid groups.`,
   ].join("\n");
 
   return [
-    `Create a finished, high-converting square (1:1) social media static advertisement image.`,
-    `It must look like a real paid Facebook/Instagram ad creative a brand would run.`,
+    `You are a world-class creative director and graphic designer. Design a premium square (1:1) Facebook/Instagram static ad creative.`,
     ``,
-    `Business name: "${businessName}"`,
-    `Industry: "${industry}"`,
-    website ? `Website (small, subtle): "${website}"` : `No website line.`,
-    idealCustomer
-      ? `Target customer: "${idealCustomer}"`
-      : `Target customer: typical buyers for this industry.`,
-    benefit
-      ? `Core promise/benefit: "${benefit}"`
-      : `Include a clear believable benefit appropriate to this industry.`,
+    `BRAND: ${businessName} | INDUSTRY: ${industry}`,
+    idealCustomer ? `AUDIENCE: ${idealCustomer}` : null,
+    ``,
+    `CORE CONCEPT — everything in this ad must communicate this single idea:`,
+    coreConcept,
+    `EMOTIONAL REGISTER: ${emotionalTone}`,
+    ``,
+    `COPY TO INTEGRATE INTO THE DESIGN:`,
+    headline
+      ? `Headline (the most prominent text — design the visual around this): "${headline}"`
+      : benefit
+      ? `Core message (express this visually and typographically): "${benefit}"`
+      : null,
     offer
-      ? `Promo/offer to feature prominently: "${offer}"`
-      : [
-          `No promo/discount was provided.`,
-          `DO NOT use promo language like "Featured Collection", "New Arrivals", "Limited Drop", "Sale", "Special Offer", "Deal", "Limited Time".`,
-          `Keep the small pill/label area in the design, but fill it with a neutral descriptor that is NOT a promotion.`,
-          `Neutral descriptor examples (choose ONE, fit to industry/benefit): "Made With Care", "Fresh Daily", "Everyday Essential", "Trusted Service", "Local Favorite", "Crafted By Experts", "Quality You Can Feel", "Simple & Reliable", "Book Today", "Shop The Look" (only if fashion).`
-        ].join(" "),
+      ? `Featured offer (make this visually prominent): "${offer}"`
+      : `No promotional offer. DO NOT use "Sale", "New Arrivals", "Featured Collection", "Limited Time", or any discount language. Use a neutral brand label instead (e.g. "Made Daily", "Trusted Service", "Crafted Locally").`,
+    `CTA button: "${cta}"`,
+    website ? `Website (small, subtle, bottom of design): ${website}` : null,
+    `Business name: "${businessName}" (visible but secondary to headline)`,
     ``,
-    `Layout & typography requirements:`,
-    `- Use modern, premium, clean design with strong visual hierarchy.`,
-    `- Include readable on-image text: business name, a short headline (3–7 words), one supporting line, the offer/promo, and a clear CTA button that says: "${cta}".`,
-    `- Keep typography crisp and legible on mobile. Avoid tiny text.`,
-    `- Use industry-appropriate imagery (commercial photo-real or polished brand style).`,
+    `CRITICAL DESIGN MANDATE:`,
+    `Design this as ONE unified visual concept — NOT a photo with text overlaid on top.`,
+    `Typography, imagery, color, and composition must be designed together as a single visual system.`,
+    `The headline text must feel built into the design — integral to the composition, not floating above a background photo.`,
+    `Think: branded print advertisement or premium campaign asset — polished, intentional, and cohesive.`,
+    `The visual must make someone stop scrolling. The message must be clear within 2 seconds.`,
+    `Strong hierarchy: headline dominates, supporting text and CTA follow, brand name anchors.`,
     ``,
-    `Strict constraints:`,
-    `- NO third-party logos, NO watermarks, NO QR codes.`,
-    `- NO fake certifications, NO policy-violating claims.`,
-    `- Do not include any unrelated brand names.`,
-    `- If no offer/promo is provided above, you MUST NOT include promo phrases (Featured Collection/New Arrivals/Sale/etc). Use a neutral descriptor label instead.`,
+    `NO generic stock-photo look. NO template aesthetic. This must look like a real brand's paid creative.`,
+    `NO third-party logos. NO watermarks. NO QR codes. NO fake certifications.`,
     ``,
-    variationBlock,
+    variantBlock,
+    `Variation token: ${variationToken || Date.now()}`,
     ``,
-    `Output: a single square static ad image.`,
-  ].join("\n");
+    `Output: one complete, professional square ad image.`,
+  ].filter(Boolean).join("\n");
 }
 
 /* ------------------------ /generate-static-ad ------------------------ */
@@ -365,6 +380,9 @@ router.post("/generate-static-ad", async (req, res) => {
     const requestedCount = Number(body.count || body.n || 2);
     const count = Math.max(1, Math.min(2, requestedCount || 2));
 
+    // Pull GPT-crafted copy if FormPage sent it — used to unify image text with UI copy
+    const craftedCopy = (body.copy && typeof body.copy === "object") ? body.copy : {};
+
     // Generate each image with its OWN prompt/profile (more variation than n=2 on one prompt)
     const profiles = [
       buildVariantProfile(variationToken, "A", a.industry || ""),
@@ -372,8 +390,8 @@ router.post("/generate-static-ad", async (req, res) => {
     ];
 
     const prompts = [
-      buildAdPromptFromAnswers(a, variationToken, profiles[0]),
-      buildAdPromptFromAnswers(a, variationToken, profiles[1]),
+      buildAdPromptFromAnswers(a, variationToken, profiles[0], craftedCopy),
+      buildAdPromptFromAnswers(a, variationToken, profiles[1], craftedCopy),
     ];
 
     let bufs = [];

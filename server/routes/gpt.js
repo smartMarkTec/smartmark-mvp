@@ -350,6 +350,19 @@ const safeSubline = (s = "") => {
   return out;
 };
 
+const buildFallbackHeadline = () => {
+  const industry = String(a.industry || "").trim();
+  const benefit = String(a.mainBenefit || a.details || "").trim();
+  const audience = String(a.idealCustomer || "").trim();
+
+  if (benefit) {
+    const words = benefit.split(/\s+/).filter(Boolean).slice(0, 6);
+    return safeHeadline(words.join(" "));
+  }
+  if (industry) return safeHeadline(`${industry} built for ${audience || "you"}`);
+  return safeHeadline("Results that fit your goals");
+};
+
 const buildFallbackSubline = (headline) => {
   const industry = String(a.industry || "").trim();
   const audience = String(a.idealCustomer || "").trim();
@@ -376,14 +389,16 @@ const buildFallbackSubline = (headline) => {
 };
 
 const system =
-  "You are a professional direct-response copywriter. " +
-  "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, optional), " +
-  "bullets (array up to 3), disclaimers (short, optional), cta (2–3 words). " +
-  "Hard rules: NO URLs. NO 'our/we' language. NO brand-superlatives (best, #1, premium, luxury). " +
-  "Write simple, specific copy (not corny). " +
-  "Do NOT copy phrases verbatim from inputs; paraphrase. " +
-  "Headline and subline must not repeat each other. " +
-  "Subline MUST end with complete sentences (no cut-off words).";
+  "You are a senior direct-response copywriter and creative strategist with deep expertise in Facebook and Instagram ads for small and medium businesses. " +
+  "Strategy first: before writing, identify (1) the single most important emotional hook — the specific pain, desire, or aspiration this audience has — and (2) the clearest value the business delivers against that hook. Write everything from that insight. " +
+  "Headline: lead with the value proposition, a specific pain point, or a desire — NOT the business name. Make the reader feel 'this is for me.' 6–8 words. " +
+  "Subline: expand the hook. Be specific and believable. Paint a picture of the outcome the reader wants. Speak to one person, not a crowd. 2–3 sentences. " +
+  "CTA: action verb + specific outcome (e.g. 'Get your free estimate', 'Book a consultation today', 'Start your order'). Avoid vague CTAs like 'Learn More' or 'Click Here'. " +
+  "Bullets (if any): specific, tangible proof points — not generic brand claims. Each should answer 'what does this mean for me?' " +
+  "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
+  "Hard rules: NO URLs. NO 'our/we/I' language. NO unverifiable superlatives (best, #1, guaranteed, luxury, fastest, revolutionary). " +
+  "Do NOT write filler phrases: 'take your X to the next level', 'designed with you in mind', 'hassle-free', 'seamless experience', 'cutting-edge'. " +
+  "Be specific, not generic. The best ad copy makes one person feel: this brand understands exactly what I need.";
 
 
     const user = [
