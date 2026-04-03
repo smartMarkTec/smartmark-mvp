@@ -17,6 +17,9 @@ try {
 
 const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'db.json');
 
+console.log('[db] DATA_DIR:', DATA_DIR);
+console.log('[db] DB_FILE:', DB_FILE);
+
 // lowdb adapter + instance (no top-level await; callers do db.read()/db.write())
 const adapter = new JSONFile(DB_FILE);
 const db = new Low(adapter, {

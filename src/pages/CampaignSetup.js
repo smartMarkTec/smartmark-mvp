@@ -5709,6 +5709,55 @@ const selectedCampaignCreatives =
 
 
 
+          <div
+            style={{
+              border: "1px solid #dbe4ff",
+              borderRadius: 14,
+              padding: 14,
+              background: "#f7f9ff",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+                Facebook Billing
+              </div>
+              <button
+                type="button"
+                onClick={openFbPaymentPopup}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  background: "#5b5cf0",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Open Billing
+              </button>
+            </div>
+
+            <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+              {billingLoading
+                ? "Checking billing status..."
+                : billingInfo?.hasAccess
+                ? "Facebook billing is ready."
+                : "Billing will be completed before launch."}
+            </div>
+          </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
             <input
