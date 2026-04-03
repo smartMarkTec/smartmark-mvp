@@ -631,7 +631,6 @@ router.use(async (req, res, next) => {
       req.path.includes('/launch-campaign')
     ) {
       await ensureUsersAndSessions();
-      await db.read();
     }
   } catch {}
   next();
@@ -1488,10 +1487,11 @@ router.post('/facebook/defaults/select', (req, res) => {
 
 async function ensureUsersAndSessions() {
   await db.read();
-  db.data = db.data || {};
-  db.data.users = db.data.users || [];
-  db.data.sessions = db.data.sessions || [];
-  await db.write();
+  let needsWrite = false;
+  if (!db.data) { db.data = {}; needsWrite = true; }
+  if (!Array.isArray(db.data.users)) { db.data.users = []; needsWrite = true; }
+  if (!Array.isArray(db.data.sessions)) { db.data.sessions = []; needsWrite = true; }
+  if (needsWrite) await db.write();
 }
 
 async function findExactOptimizerCampaignState({ campaignId, accountId, ownerKey = '' }) {

@@ -139,10 +139,11 @@ function derivePlanMetaFromPriceId(priceId) {
 
 async function ensureDbShape() {
   await db.read();
-  db.data = db.data || {};
-  db.data.users = Array.isArray(db.data.users) ? db.data.users : [];
-  db.data.sessions = Array.isArray(db.data.sessions) ? db.data.sessions : [];
-  await db.write();
+  let needsWrite = false;
+  if (!db.data) { db.data = {}; needsWrite = true; }
+  if (!Array.isArray(db.data.users)) { db.data.users = []; needsWrite = true; }
+  if (!Array.isArray(db.data.sessions)) { db.data.sessions = []; needsWrite = true; }
+  if (needsWrite) await db.write();
 }
 
 function getSidFromReq(req) {
