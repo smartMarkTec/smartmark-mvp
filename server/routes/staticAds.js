@@ -267,28 +267,6 @@ function buildVariantProfile(variationToken = "", variantTag = "A", industryHint
   };
 }
 
-function buildTypographyDirection(ind = "") {
-  const i = String(ind).toLowerCase();
-  if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Heavy condensed sans-serif headline — bold, all-caps, full-width. XL primary weight, small light secondary. Tight leading. Type anchors boldly to the lower third or cuts through center. High-contrast, zero decoration.";
-  if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Editorial grotesque or refined thin-to-medium sans — generous letter-spacing on the headline. Single word or short phrase at large scale. Mix of large-light and small-medium for visual contrast. Type is curated, not placed. Generous negative space around every type element.";
-  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Warm bold display serif or confident rounded geometric — headline is large and inviting. One dominant word or phrase at hero scale; minimal supporting text. Type integrates with the warmth and texture of the scene, not stamped on top of it.";
-  if (/(beauty|salon|spa|skincare|hair|nail)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Refined editorial serif or elegant thin grotesque — graceful, not loud. Generous letter-spacing. One dominant headline phrase, one subtle secondary line maximum. Light-to-bold weight contrast. Luxe and restrained — type breathes.";
-  if (/(real estate|realty|property|homes for sale)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Premium editorial serif headline — large, confident, generous leading. Small-caps or widely-spaced subtext for contrast. Two type elements maximum: one commanding, one quietly refined. Type has presence without loudness.";
-  if (/(legal|law|attorney|lawyer)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Authoritative serif headline — substantial, clear, formal. Strong weight. Clean sans-serif secondary at small size. Strict two-level hierarchy: commanding headline, restrained supporting line. No decorative type.";
-  if (/(tech|software|saas|app|digital|marketing|agency|seo|ai|analytics|startup|consult)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Modern grotesque — tight tracking on headline, bold weight. Clear hierarchy: large primary statement, small clean secondary. Headline in bold sentence case or strategic all-caps for emphasis. Type is systematic and intentional, not decorative. Minimal type elements — precision over decoration.";
-  if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Warm editorial serif or refined slab — large, calm, aspirational headline. Generous line-height. Type has weight but feels considered. One dominant line. Secondary text small and subtle. Type color drawn from the palette — not defaulting to white-on-dark.";
-  if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(i))
-    return "TYPOGRAPHY DIRECTION: Bold extended sans-serif — confident, assertive weight. Direct headline, full width. High contrast: XL primary, minimal secondary. Type works with the composition's energy — it doesn't float above it.";
-  return "TYPOGRAPHY DIRECTION: Clean modern grotesque — strong weight hierarchy between headline (bold, large) and any secondary text (small, regular weight). Type is architectural: it drives the visual flow, it doesn't decorate it. Max two type sizes. No decorative effects.";
-}
 
 function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, craftedCopy = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
@@ -302,21 +280,6 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
   const cta = clean(craftedCopy.cta || a.cta || "Learn More");
 
   const p = profile || buildVariantProfile(variationToken, "A", industry);
-
-  const ind = industry.toLowerCase();
-  let emotionalTone;
-  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(ind))      emotionalTone = "warm, inviting, appetite-stimulating";
-  else if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(ind))     emotionalTone = "sleek, modern, aspirational";
-  else if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(ind)) emotionalTone = "warm, premium, lifestyle-driven";
-  else if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(ind))  emotionalTone = "energetic, motivational, results-driven";
-  else if (/(tech|software|saas|app|digital|marketing|agency|seo)/i.test(ind)) emotionalTone = "clean, capable, growth-oriented";
-  else if (/(legal|law|attorney|lawyer)/i.test(ind))                         emotionalTone = "trustworthy, authoritative, reassuring";
-  else if (/(real estate|realty|property|homes for sale)/i.test(ind))        emotionalTone = "premium, aspirational, community-focused";
-  else if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(ind))            emotionalTone = "reliable, confident, value-driven";
-  else if (/(beauty|salon|spa|skincare|hair|nail)/i.test(ind))               emotionalTone = "elegant, transformative, confidence-building";
-  else emotionalTone = "professional, clear, benefit-focused";
-
-  const coreConcept = headline || benefit || `trusted ${industry} for ${idealCustomer || "people who care"}`;
 
   // Translate spec labels into evocative scene language so the model creates atmosphere, not checklists
   const sceneNarrative = ({
@@ -342,45 +305,27 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
   })[p.palette] || p.palette;
 
   return [
-    `You are an AI creative director. Your task: conceive and render a premium 1:1 social ad as one fully integrated artwork — image, typography, color, and light are a single creative decision, not separate layers. There is no background. There is no text overlay. There is one cohesive piece.`,
+    `Create a premium square (1:1) Facebook/Instagram ad for ${businessName}, a ${industry} business.`,
     ``,
-    `BRAND: ${businessName} | ${industry}${idealCustomer ? ` | Audience: ${idealCustomer}` : ""}`,
+    idealCustomer ? `Target audience: ${idealCustomer}.` : null,
+    benefit ? `Key benefit: ${benefit}.` : null,
     ``,
-    `THE ONE CONCEPT:`,
-    `"${coreConcept}"`,
-    `Tone: ${emotionalTone}`,
-    `Every visual decision — composition, light, color, type — expresses this concept. Nothing is placed on top of anything. Everything belongs to the same creative whole.`,
-    ``,
-    `CREATIVE DIRECTION — Variant ${p.variantTag}:`,
     `Scene: ${sceneNarrative}.`,
-    `Light: ${p.lighting}. Color: ${paletteNarrative}.`,
+    `Lighting: ${p.lighting}. Color palette: ${paletteNarrative}.`,
     `Composition: ${p.composition}.`,
     `Subject: ${p.subjectMode}. People: ${p.peopleMode}.`,
     ``,
-    buildTypographyDirection(industry),
-    ``,
-    `INTEGRATED CREATIVE ELEMENTS — these are part of the artwork, not overlaid on it:`,
-    headline
-      ? `Headline: "${headline}" — the dominant typographic statement. Render it according to the TYPOGRAPHY DIRECTION above. It is the visual anchor. The image and the headline should feel like they were born from the same idea.`
-      : benefit
-      ? `Core message: "${benefit}" — render as the primary typographic and visual statement.`
-      : null,
+    headline ? `Headline to include: "${headline}"` : null,
     offer
-      ? `Offer element: "${offer}" — integrated as a designed mark within the composition.`
-      : `No promotional offer. Do NOT add any sale, discount, percentage off, "Limited Time", or deal element. This brand has no active promotion.`,
-    `CTA: "${cta}" — rendered as intentional typographic design. Not a UI button. Not a rounded rectangle. Pure type, purposefully placed.`,
-    website ? `Brand signature: ${website} — quiet, small, a natural part of the lower composition.` : null,
-    `Brand name: "${businessName}" — small, present, confident. Part of the visual system, not dominant.`,
+      ? `Promotional offer to include: "${offer}"`
+      : `Do not add any promotional offer, discount, sale, or deal — this brand has no active promotion.`,
+    `CTA: "${cta}"`,
+    website ? `Brand URL: ${website}` : null,
+    `Brand name: ${businessName}`,
     ``,
-    `QUALITY STANDARD:`,
-    `Think of the best print ad or campaign image you have ever seen — where the visual and the headline feel like they were conceived as one idea, not assembled from parts. That is the benchmark.`,
-    `The mood lands before the eye reaches any text. When the viewer reads the headline, it feels inevitable — as if no other words could have been chosen.`,
-    `Stop-scroll power. The message is understood in 1.5 seconds. Then it rewards a second look.`,
+    `Make it look like a real paid campaign — premium, cohesive, stop-scroll quality. Text and imagery naturally integrated, not a template or stock photo. No watermarks, badges, or third-party logos.`,
     ``,
-    `HARD RULES: No stock photo aesthetic. No template layout. No text-on-background-image construction. No UI buttons or interface elements. No watermarks, QR codes, fake badges, or third-party logos. No invented promotions.`,
-    ``,
-    `Variation seed: ${variationToken || Date.now()}`,
-    `Output: one complete, professional, premium square ad image.`,
+    `Variation: ${variationToken || Date.now()}`,
   ].filter(Boolean).join("\n");
 }
 
