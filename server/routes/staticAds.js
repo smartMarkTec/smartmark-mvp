@@ -267,6 +267,29 @@ function buildVariantProfile(variationToken = "", variantTag = "A", industryHint
   };
 }
 
+function buildTypographyDirection(ind = "") {
+  const i = String(ind).toLowerCase();
+  if (/(fitness|gym|health|wellness|yoga|personal train)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Heavy condensed sans-serif headline — bold, all-caps, full-width. XL primary weight, small light secondary. Tight leading. Type anchors boldly to the lower third or cuts through center. High-contrast, zero decoration.";
+  if (/(fashion|clothing|apparel|boutique|style|wear)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Editorial grotesque or refined thin-to-medium sans — generous letter-spacing on the headline. Single word or short phrase at large scale. Mix of large-light and small-medium for visual contrast. Type is curated, not placed. Generous negative space around every type element.";
+  if (/(restaurant|food|cafe|bakery|diner|pizza|catering)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Warm bold display serif or confident rounded geometric — headline is large and inviting. One dominant word or phrase at hero scale; minimal supporting text. Type integrates with the warmth and texture of the scene, not stamped on top of it.";
+  if (/(beauty|salon|spa|skincare|hair|nail)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Refined editorial serif or elegant thin grotesque — graceful, not loud. Generous letter-spacing. One dominant headline phrase, one subtle secondary line maximum. Light-to-bold weight contrast. Luxe and restrained — type breathes.";
+  if (/(real estate|realty|property|homes for sale)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Premium editorial serif headline — large, confident, generous leading. Small-caps or widely-spaced subtext for contrast. Two type elements maximum: one commanding, one quietly refined. Type has presence without loudness.";
+  if (/(legal|law|attorney|lawyer)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Authoritative serif headline — substantial, clear, formal. Strong weight. Clean sans-serif secondary at small size. Strict two-level hierarchy: commanding headline, restrained supporting line. No decorative type.";
+  if (/(tech|software|saas|app|digital|marketing|agency|seo|ai|analytics|startup|consult)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Modern grotesque — tight tracking on headline, bold weight. Clear hierarchy: large primary statement, small clean secondary. Headline in bold sentence case or strategic all-caps for emphasis. Type is systematic and intentional, not decorative. Minimal type elements — precision over decoration.";
+  if (/(home|decor|furniture|interior|flooring|remodel|renovation)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Warm editorial serif or refined slab — large, calm, aspirational headline. Generous line-height. Type has weight but feels considered. One dominant line. Secondary text small and subtle. Type color drawn from the palette — not defaulting to white-on-dark.";
+  if (/(auto|car|vehicle|mechanic|dealer|truck)/i.test(i))
+    return "TYPOGRAPHY DIRECTION: Bold extended sans-serif — confident, assertive weight. Direct headline, full width. High contrast: XL primary, minimal secondary. Type works with the composition's energy — it doesn't float above it.";
+  return "TYPOGRAPHY DIRECTION: Clean modern grotesque — strong weight hierarchy between headline (bold, large) and any secondary text (small, regular weight). Type is architectural: it drives the visual flow, it doesn't decorate it. Max two type sizes. No decorative effects.";
+}
+
 function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, craftedCopy = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = clean(a.industry || "Business");
@@ -333,11 +356,13 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
     `Composition: ${p.composition}.`,
     `Subject: ${p.subjectMode}. People: ${p.peopleMode}.`,
     ``,
+    buildTypographyDirection(industry),
+    ``,
     `COPY CONCEPT — the image should make the viewer feel this idea, expressed through design, not pasted text:`,
     headline
-      ? `Central idea to express: "${headline}" — let this inform the mood, scene, and any typography the art director would naturally place`
+      ? `Central idea to express: "${headline}" — this exact line should appear as the dominant typographic statement in the ad, set according to the TYPOGRAPHY DIRECTION above. The headline drives the visual hierarchy.`
       : benefit
-      ? `Central idea to express: "${benefit}"`
+      ? `Central idea to express: "${benefit}" — render this as the primary typographic element.`
       : null,
     offer
       ? `Include a short, prominent offer element naturally integrated into the design: "${offer}"`
