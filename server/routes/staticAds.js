@@ -342,13 +342,14 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
   })[p.palette] || p.palette;
 
   return [
-    `You are an award-winning advertising art director. Create a premium square (1:1) Facebook/Instagram ad that looks like a real brand's paid campaign — not a template, not stock photography, not text placed on top of an image.`,
+    `You are an AI creative director. Your task: conceive and render a premium 1:1 social ad as one fully integrated artwork — image, typography, color, and light are a single creative decision, not separate layers. There is no background. There is no text overlay. There is one cohesive piece.`,
     ``,
     `BRAND: ${businessName} | ${industry}${idealCustomer ? ` | Audience: ${idealCustomer}` : ""}`,
     ``,
-    `THE ONE IDEA THIS AD COMMUNICATES:`,
+    `THE ONE CONCEPT:`,
     `"${coreConcept}"`,
     `Tone: ${emotionalTone}`,
+    `Every visual decision — composition, light, color, type — expresses this concept. Nothing is placed on top of anything. Everything belongs to the same creative whole.`,
     ``,
     `CREATIVE DIRECTION — Variant ${p.variantTag}:`,
     `Scene: ${sceneNarrative}.`,
@@ -358,28 +359,28 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, c
     ``,
     buildTypographyDirection(industry),
     ``,
-    `COPY CONCEPT — the image should make the viewer feel this idea, expressed through design, not pasted text:`,
+    `INTEGRATED CREATIVE ELEMENTS — these are part of the artwork, not overlaid on it:`,
     headline
-      ? `Central idea to express: "${headline}" — this exact line should appear as the dominant typographic statement in the ad, set according to the TYPOGRAPHY DIRECTION above. The headline drives the visual hierarchy.`
+      ? `Headline: "${headline}" — the dominant typographic statement. Render it according to the TYPOGRAPHY DIRECTION above. It is the visual anchor. The image and the headline should feel like they were born from the same idea.`
       : benefit
-      ? `Central idea to express: "${benefit}" — render this as the primary typographic element.`
+      ? `Core message: "${benefit}" — render as the primary typographic and visual statement.`
       : null,
     offer
-      ? `Include a short, prominent offer element naturally integrated into the design: "${offer}"`
-      : `No promotional offer. Do NOT add any sale, deal, "% off", "Limited Time", or discount element. This brand has no active promotion.`,
-    `Short CTA element (button or typographic callout): "${cta}"`,
-    website ? `Brand URL (small, bottom of frame): ${website}` : null,
-    `Brand name "${businessName}" — woven into the design, not dominant.`,
+      ? `Offer element: "${offer}" — integrated as a designed mark within the composition.`
+      : `No promotional offer. Do NOT add any sale, discount, percentage off, "Limited Time", or deal element. This brand has no active promotion.`,
+    `CTA: "${cta}" — rendered as intentional typographic design. Not a UI button. Not a rounded rectangle. Pure type, purposefully placed.`,
+    website ? `Brand signature: ${website} — quiet, small, a natural part of the lower composition.` : null,
+    `Brand name: "${businessName}" — small, present, confident. Part of the visual system, not dominant.`,
     ``,
-    `DESIGN STANDARD:`,
-    `This is a unified creative — not a background photo with text placed on top. The image, type, color, and light are one system conceived together.`,
-    `Atmosphere first: the mood communicates before anyone reads a word. Typography is architectural — rooted in the composition, not floating above it.`,
-    `Art direction quality: as if this ran in a major brand's paid media campaign. Stop-scroll power. Message lands in 1.5 seconds.`,
+    `QUALITY STANDARD:`,
+    `Think of the best print ad or campaign image you have ever seen — where the visual and the headline feel like they were conceived as one idea, not assembled from parts. That is the benchmark.`,
+    `The mood lands before the eye reaches any text. When the viewer reads the headline, it feels inevitable — as if no other words could have been chosen.`,
+    `Stop-scroll power. The message is understood in 1.5 seconds. Then it rewards a second look.`,
     ``,
-    `NO stock photo aesthetic. NO template layout feel. NO text-on-background-image composition. NO watermarks. NO QR codes. NO fake badges. NO third-party logos. NO invented promotions.`,
+    `HARD RULES: No stock photo aesthetic. No template layout. No text-on-background-image construction. No UI buttons or interface elements. No watermarks, QR codes, fake badges, or third-party logos. No invented promotions.`,
     ``,
     `Variation seed: ${variationToken || Date.now()}`,
-    `Output: one complete, professional square ad image.`,
+    `Output: one complete, professional, premium square ad image.`,
   ].filter(Boolean).join("\n");
 }
 
