@@ -188,12 +188,17 @@ function pickOne(arr) {
 }
 
 /* Visual emphasis cues — rotated by variation token so each run explores a different
-   composition without hardcoding scenes or demographics. */
+   composition without hardcoding scenes or demographics.
+   People are one valid option among many — not the default. */
 const VISUAL_MOODS = [
-  "people and the service or experience",
-  "the equipment, product, or result",
-  "the environment, setting, or place",
-  "a clean, minimal, or graphic composition",
+  "the equipment or product itself — no people needed, let the hardware or result do the talking",
+  "a comfortable interior space — no technicians, no crew, just the environment",
+  "a close-up detail of the product, material, or finished result",
+  "a clean, minimal composition — strong typography on a simple, well-lit background, no people",
+  "an outdoor setting relevant to the business — environment only, no on-site workers",
+  "a single person in a natural, unposed moment related to the service or outcome",
+  "a professional or lifestyle scene that reflects the brand's typical customer",
+  "a graphic, editorial-style layout — bold and commercial without being literal or cluttered",
 ];
 
 /* Returns true if a string looks like raw user input — first-person company voice,
@@ -321,9 +326,13 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
+  const moodIdx = variationToken
+    ? variationToken.charCodeAt(variationToken.length - 1) % VISUAL_MOODS.length
+    : 0;
+
   return [
     `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
-    `Style: clean, polished, and believable — like a real paid social ad.`,
+    `Style: clean, polished, and believable — like a real paid social ad. No heavy border frames, no thick decorative edges, no flyer or poster layout. The image should feel like a modern social ad, not a printed announcement.`,
     ``,
     `Ad copy:`,
     `  Headline: "${headline}"`,
@@ -335,8 +344,8 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Visual: naturally focus on ${VISUAL_MOODS[variationToken ? variationToken.charCodeAt(variationToken.length - 1) % VISUAL_MOODS.length : 0]} for this business. Keep the ad clean, believable, and ready to run.`,
-    variationToken ? `Variation: ${variationToken}` : null,
+    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
+    variationToken ? `Variation seed: ${variationToken}` : null,
   ]
     .filter(Boolean)
     .join("\n");

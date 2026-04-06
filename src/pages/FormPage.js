@@ -1290,22 +1290,43 @@ useEffect(() => {
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
   const fallbackCopy = useMemo(() => {
-    const biz = (answers?.businessName || "Your Business").toString().trim();
-    const industry = (answers?.industry || "").toString().trim();
-    const offer = (answers?.offer || "").toString().trim();
+    const ind = (answers?.industry || "").toString().trim().toLowerCase();
 
-    const headline =
-      offer
-        ? offer.slice(0, 55)
-        : industry
-        ? `${industry} Specials`.slice(0, 55)
-        : `${biz} Specials`.slice(0, 55);
+    // Industry-keyed marketer defaults — never raw user text, never "X Specials"
+    if (/hvac|heating|cooling|air.?cond/.test(ind))
+      return { headline: "Comfort You Can Count On", body: "Reliable service from local HVAC professionals. Book a visit today." };
+    if (/plumb/.test(ind))
+      return { headline: "Fast Local Plumbers", body: "Responsive service, quality work. Get in touch today." };
+    if (/electr/.test(ind))
+      return { headline: "Reliable Electrical Service", body: "Trusted local electricians for your home or business." };
+    if (/roof/.test(ind))
+      return { headline: "Protect Your Home from the Top", body: "Quality roofing from a team your neighbors already trust." };
+    if (/landscap|lawn/.test(ind))
+      return { headline: "Your Lawn, Our Expertise", body: "Curb appeal that stands out, every season. Get a free quote." };
+    if (/clean|maid/.test(ind))
+      return { headline: "Clean Home, Clear Mind", body: "Thorough, reliable cleaning for homes and businesses." };
+    if (/market|advertis|agency/.test(ind))
+      return { headline: "Marketing That Actually Works", body: "Campaigns built to bring in qualified customers, not just clicks." };
+    if (/restaurant|food|cater/.test(ind))
+      return { headline: "Great Food, Local Flavor", body: "Fresh, local, and ready for you. Come in or order today." };
+    if (/dental|dent/.test(ind))
+      return { headline: "Healthy Smiles Start Here", body: "Gentle, professional care for your whole family." };
+    if (/auto|car|vehicle/.test(ind))
+      return { headline: "Your Car in Good Hands", body: "Honest service from mechanics who take pride in their work." };
+    if (/insur/.test(ind))
+      return { headline: "Coverage You Can Count On", body: "Protect what matters most. Speak with an agent today." };
+    if (/real.?estate|realt/.test(ind))
+      return { headline: "Buy or Sell with Confidence", body: "Local real estate experts ready to guide you every step." };
+    if (/fitness|gym|personal.?train/.test(ind))
+      return { headline: "Reach Your Fitness Goals", body: "Real results, real progress. Start training today." };
+    if (/pest/.test(ind))
+      return { headline: "Keep Pests Out for Good", body: "Effective pest control for homes and businesses. Book today." };
+    if (/salon|hair|beauty/.test(ind))
+      return { headline: "Your Best Look Starts Here", body: "Professional styling you can count on, every visit." };
+    if (/legal|law/.test(ind))
+      return { headline: "Trusted Legal Help", body: "Clear advice, strong representation. Talk to us today." };
 
-    const body = offer
-      ? `Limited-time offer from ${biz}. Tap to learn more.`
-      : `Discover what ${biz} can do for you. Tap to learn more.`;
-
-    return { headline, body };
+    return { headline: "Local Experts, Real Results", body: "See what's possible for your business. Learn more today." };
   }, [answers]);
 
   const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
@@ -1785,7 +1806,14 @@ try {
 async function generatePosterBPair(runToken) {
   const tA = `${runToken}-A`;
 
-  const urlA = await handleGenerateStaticAd("poster_b", null, {
+  // Get AI-written copy first so it informs both the image prompt and the preview.
+  // Falls back to empty strings on error — handleGenerateStaticAd has its own derive logic.
+  const smartCopy = await summarizeAdCopy(answers || {});
+  const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
+  const aiBody = smartCopy?.subline || smartCopy?.body || "";
+  const aiCTA = smartCopy?.cta || answers?.cta || "";
+
+  const urlA = await handleGenerateStaticAd("poster_b", smartCopy || null, {
     regenerateToken: tA,
     silent: true,
   });
@@ -1794,9 +1822,9 @@ async function generatePosterBPair(runToken) {
 
   if (urls[0]) {
     saveImageDraftById(creativeIdFromUrl(urls[0]), {
-      headline: (answers?.mainBenefit || "").slice(0, 55),
-      body: answers?.details || answers?.mainBenefit || "",
-      overlay: normalizeOverlayCTA(answers?.cta || ""),
+      headline: aiHeadline,
+      body: aiBody,
+      overlay: normalizeOverlayCTA(aiCTA),
     });
   }
 
@@ -1804,12 +1832,21 @@ async function generatePosterBPair(runToken) {
   setActiveImage(0);
   setImageUrl(urls[0] || "");
 
+  // Surface AI copy immediately so displayHeadline / displayBody show it.
+  if (aiHeadline || aiBody) {
+    setResult((prev) => ({
+      ...(prev || {}),
+      headline: aiHeadline,
+      body: aiBody,
+    }));
+  }
+
   return {
     urls,
     primary: {
-      headline: (answers?.mainBenefit || "").slice(0, 55),
-      body: answers?.details || answers?.mainBenefit || "",
-      overlay: normalizeOverlayCTA(answers?.cta || ""),
+      headline: aiHeadline,
+      body: aiBody,
+      overlay: normalizeOverlayCTA(aiCTA),
     },
   };
 }
