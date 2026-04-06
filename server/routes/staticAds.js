@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
+const sharp = require("sharp");
 
 /* ------------------------ Paths / URLs ------------------------ */
 
@@ -165,22 +166,127 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", craftedCopy = {})
   const cta = clean(craftedCopy.cta || a.cta || "Learn More");
 
   return [
-    `Create a premium square (1:1) Facebook/Instagram ad for ${businessName}, a ${industry} business.`,
+    `Create a realistic, practical Facebook/Instagram feed ad for "${businessName}", a ${industry} business.`,
     ``,
-    idealCustomer ? `Target audience: ${idealCustomer}.` : null,
-    benefit ? `Key benefit: ${benefit}.` : null,
-    headline ? `Headline to include: "${headline}"` : null,
+    idealCustomer ? `Target customer: ${idealCustomer}.` : null,
+    benefit ? `Key message: ${benefit}.` : null,
+    headline ? `Headline text in the ad: "${headline}"` : null,
     offer
-      ? `Promotional offer to include: "${offer}"`
-      : `Do not add any promotional offer, discount, sale, or deal — this brand has no active promotion.`,
-    `CTA: "${cta}"`,
-    website ? `Brand URL: ${website}` : null,
-    `Brand name: ${businessName}`,
+      ? `Promotional offer to show: "${offer}"`
+      : `Do not invent or display any promotional offer, discount, or deal — this brand has no active promotion.`,
+    `CTA button/text: "${cta}"`,
+    `Brand name visible in the ad: "${businessName}"`,
+    website ? `Website URL shown: ${website}` : null,
     ``,
-    `Make it look like a real paid campaign — premium, cohesive, stop-scroll quality. Text and imagery naturally integrated, not a template or stock photo. No watermarks, badges, or third-party logos.`,
+    `Style: a clean, professional, believable direct-response social ad. Realistic scene or product photo — not abstract art, not stylized poster, not over-designed. Natural layout typical of a real paid Facebook/Instagram ad. Text clearly readable and naturally composed into the design. No stock photo watermarks or unrelated logos.`,
     ``,
     `Variation: ${variationToken || Date.now()}`,
   ].filter(Boolean).join("\n");
+}
+
+/* ------------------------ Logo detection ------------------------ */
+
+async function detectBrandLogo(websiteUrl) {
+  if (!websiteUrl) return null;
+  try {
+    if (!/^https?:\/\//i.test(websiteUrl)) websiteUrl = `https://${websiteUrl}`;
+    const parsed = new URL(websiteUrl);
+    const origin = `${parsed.protocol}//${parsed.host}`;
+
+    // Fetch homepage HTML to find logo candidates
+    let html = "";
+    try {
+      const { status, body } = await fetchUpstream(
+        "GET", websiteUrl,
+        { "User-Agent": "Mozilla/5.0 (compatible; Smartmark/1.0)", "Accept": "text/html" },
+        null, 7000
+      );
+      if (status === 200) html = body.toString("utf8").slice(0, 120000);
+    } catch { /* continue to fallbacks */ }
+
+    const candidates = [];
+
+    if (html) {
+      // <img> tags with "logo" anywhere in the tag attributes
+      for (const m of html.matchAll(/<img[^>]+>/gi)) {
+        const tag = m[0];
+        const src = (tag.match(/src=["']([^"']+)["']/i) || [])[1];
+        if (src && /logo/i.test(tag)) candidates.push(src);
+      }
+      // <link rel="apple-touch-icon"> — highest-quality icon, usually clean
+      for (const m of html.matchAll(/<link[^>]*rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*>/gi)) {
+        const href = (m[0].match(/href=["']([^"']+)["']/i) || [])[1];
+        if (href) candidates.push(href);
+      }
+    }
+
+    // Always try well-known paths as fallbacks
+    candidates.push(
+      `${origin}/logo.png`,
+      `${origin}/logo.jpg`,
+      `${origin}/apple-touch-icon.png`,
+      `${origin}/favicon.png`,
+    );
+
+    for (const src of candidates.slice(0, 8)) {
+      try {
+        let url = src.trim();
+        if (url.startsWith("//")) url = `${parsed.protocol}${url}`;
+        else if (url.startsWith("/")) url = `${origin}${url}`;
+        else if (!/^https?:\/\//i.test(url)) url = `${origin}/${url}`;
+
+        const { status, headers, body: buf } = await fetchUpstream(
+          "GET", url, { "User-Agent": "Mozilla/5.0" }, null, 5000
+        );
+        if (status !== 200 || buf.length < 500) continue;
+
+        const ct = String(headers?.["content-type"] || "").toLowerCase();
+        // Accept PNG, JPEG, WEBP — skip SVG and ICO (complex formats)
+        const isImage = /png|jpeg|jpg|webp/.test(ct) || /\.(png|jpg|jpeg|webp)(\?|$)/i.test(url);
+        if (!isImage) continue;
+
+        console.log(`[logo-detect] found logo at ${url} (${buf.length} bytes)`);
+        return buf;
+      } catch { continue; }
+    }
+  } catch (e) {
+    console.warn("[logo-detect] failed:", e?.message);
+  }
+  return null;
+}
+
+/* ------------------------ Logo compositing ------------------------ */
+
+async function compositeLogoOntoAd(adBuf, logoBuf) {
+  try {
+    const adMeta = await sharp(adBuf).metadata();
+    const adW = adMeta.width || 1024;
+    const adH = adMeta.height || 1024;
+
+    const maxLogoW = Math.round(adW * 0.18);
+    const maxLogoH = Math.round(adH * 0.09);
+    const pad = Math.round(adW * 0.03);
+
+    const logoResized = await sharp(logoBuf)
+      .resize(maxLogoW, maxLogoH, { fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer();
+
+    const logoMeta = await sharp(logoResized).metadata();
+    const lW = logoMeta.width || maxLogoW;
+    const lH = logoMeta.height || maxLogoH;
+
+    const left = adW - lW - pad;
+    const top = adH - lH - pad;
+
+    return await sharp(adBuf)
+      .composite([{ input: logoResized, left, top }])
+      .png()
+      .toBuffer();
+  } catch (e) {
+    console.warn("[logo-composite] failed, returning original:", e?.message);
+    return adBuf;
+  }
 }
 
 /* ------------------------ /generate-static-ad ------------------------ */
@@ -206,6 +312,10 @@ router.post("/generate-static-ad", async (req, res) => {
 
     // Pull GPT-crafted copy if FormPage sent it — used to unify image text with UI copy
     const craftedCopy = (body.copy && typeof body.copy === "object") ? body.copy : {};
+
+    // Start logo detection in parallel — runs while image generation is happening
+    const website = clean(a.website || a.url || "");
+    const logoPromise = website ? detectBrandLogo(website) : Promise.resolve(null);
 
     const prompts = [
       buildAdPromptFromAnswers(a, `${variationToken}-A`, craftedCopy),
@@ -238,6 +348,13 @@ router.post("/generate-static-ad", async (req, res) => {
         n: 1,
       });
       bufs = [b1[0], b2[0]].filter(Boolean);
+    }
+
+    // Composite logo onto each generated image if one was detected
+    const logoBuf = await logoPromise;
+    if (logoBuf && bufs.length) {
+      console.log(`[generate-static-ad] compositing logo onto ${bufs.length} image(s)`);
+      bufs = await Promise.all(bufs.map(b => compositeLogoOntoAd(b, logoBuf)));
     }
 
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
