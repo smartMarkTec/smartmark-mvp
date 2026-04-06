@@ -309,6 +309,9 @@ function deriveCTA(a = {}, craftedCopy = {}) {
 
   if (clean(a.offer || a.promo || craftedCopy.offer || "")) return "Claim Offer";
 
+  // No website but phone provided — use a call-based CTA
+  if (!clean(a.website || a.url || "") && clean(a.phone || "")) return "Call Now";
+
   return "Learn More";
 }
 
@@ -321,6 +324,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
+  const phone = clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
   const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
@@ -339,6 +343,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     supportLine ? `  Support: "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
+    !website && phone ? `  Phone: ${phone}` : null,
     `Brand: "${businessName}"`,
     offer
       ? `Offer: "${offer}"`
@@ -374,51 +379,69 @@ async function generateOpenAIAdImageBuffers({
     n: Math.max(1, Math.min(2, Number(n) || 1)),
   });
 
-  const { status, body: respBuf } = await fetchUpstream(
-    "POST",
-    "https://api.openai.com/v1/images/generations",
-    {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    Buffer.from(payload),
-    120000
-  );
+  const attempt = async (timeoutMs = 150000) => {
+    const { status, body: respBuf } = await fetchUpstream(
+      "POST",
+      "https://api.openai.com/v1/images/generations",
+      {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      Buffer.from(payload),
+      timeoutMs
+    );
 
-  if (status !== 200) {
-    let msg = `OpenAI image HTTP ${status}`;
-    try {
-      msg += ` ${respBuf.toString("utf8").slice(0, 1200)}`;
-    } catch {}
-    throw new Error(msg);
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(respBuf.toString("utf8"));
-  } catch {
-    throw new Error("OpenAI image: failed to parse JSON");
-  }
-
-  const arr = Array.isArray(parsed?.data) ? parsed.data : [];
-  if (!arr.length) {
-    throw new Error("OpenAI image: empty data array");
-  }
-
-  const buffers = [];
-  for (const item of arr) {
-    if (item?.b64_json) {
-      buffers.push(Buffer.from(item.b64_json, "base64"));
+    if (status !== 200) {
+      let msg = `OpenAI image HTTP ${status}`;
+      try {
+        msg += ` ${respBuf.toString("utf8").slice(0, 1200)}`;
+      } catch {}
+      throw new Error(msg);
     }
-  }
 
-  if (!buffers.length) {
-    throw new Error("OpenAI image: missing b64_json");
-  }
+    let parsed;
+    try {
+      parsed = JSON.parse(respBuf.toString("utf8"));
+    } catch {
+      throw new Error("OpenAI image: failed to parse JSON");
+    }
 
-  return buffers;
+    const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+    if (!arr.length) {
+      throw new Error("OpenAI image: empty data array");
+    }
+
+    const buffers = [];
+    for (const item of arr) {
+      if (item?.b64_json) {
+        buffers.push(Buffer.from(item.b64_json, "base64"));
+      } else if (item?.url) {
+        throw new Error("OpenAI image returned URL but server expects b64_json.");
+      }
+    }
+
+    if (!buffers.length) {
+      throw new Error("OpenAI image: missing b64_json");
+    }
+
+    return buffers;
+  };
+
+  try {
+    return await attempt(150000);
+  } catch (firstErr) {
+    const msg = String(firstErr?.message || firstErr);
+    const retryable =
+      /timeout|OpenAI image HTTP 5\d\d|empty data array|failed to parse JSON/i.test(msg);
+
+    if (!retryable) throw firstErr;
+
+    console.warn("[generate-static-ad] first image attempt failed, retrying once:", msg);
+
+    await new Promise((r) => setTimeout(r, 1200));
+    return await attempt(180000);
+  }
 }
-
 /* ------------------------ Logo detection ------------------------ */
 
 function looksLikeLogoUrl(url) {

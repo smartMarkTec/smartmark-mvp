@@ -673,7 +673,7 @@ function extractFirstUrl(s = "") {
 
 function normalizeUrlForCopy(u) {
   let s = String(u || "").trim();
-  if (!s) return "";
+  if (!s || /^none$/i.test(s)) return "";
   if (/^www\./i.test(s)) s = `https://${s}`;
   if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
   return s;
@@ -740,8 +740,13 @@ function isLikelySideChat(s, currentQ) {
   if (!currentQ) return false;
 
   if (currentQ.key === "url") {
+    const isNoWebsite = /^(none|no|n\/a|nope|skip|don'?t have one|no website|not yet)$/i.test(t);
+    if (isNoWebsite) return false;
     const hasUrl = !!extractFirstUrl(t);
     return !hasUrl && t.split(/\s+/).length > 3;
+  }
+  if (currentQ.key === "phone") {
+    return t.length > 40;
   }
   if (currentQ.key === "hasOffer") {
     return !/^(yes|no|y|n)$/i.test(t);
@@ -1625,6 +1630,17 @@ useEffect(() => {
     }
   }
 
+  /* Deliver an onboarding question with a brief thinking pause then typewriter reveal.
+     Uses the same chatIsThinking + typingMsg path as GPT side-chat replies. */
+  function deliverQuestion(text) {
+    setChatIsThinking(true);
+    setTimeout(() => {
+      setChatIsThinking(false);
+      setTypingIdx(0);
+      setTypingMsg(text);
+    }, 350);
+  }
+
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading || chatIsThinking || !!typingMsg) return;
@@ -1641,7 +1657,7 @@ useEffect(() => {
         )
       ) {
         setAwaitingReady(false);
-        setChatHistory((ch) => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
+        deliverQuestion(CONVO_QUESTIONS[0].question);
         setStep(0);
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
@@ -1766,8 +1782,13 @@ try {
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
-        const firstUrl = extractFirstUrl(value);
-        if (firstUrl) answerToSave = firstUrl;
+        const isNoWebsite = /^(none|no|n\/a|nope|skip|don'?t have one|no website|not yet)$/i.test(value.trim());
+        if (isNoWebsite) {
+          answerToSave = "";
+        } else {
+          const firstUrl = extractFirstUrl(value);
+          if (firstUrl) answerToSave = firstUrl;
+        }
 
         // ✅ If URL changed from last run, reset previews so no stale industry/copy shows.
         const prevUrl = (answers?.url || "").toString().trim();
@@ -1777,7 +1798,16 @@ try {
         }
       }
 
-      const newAnswers = { ...answers, [currentQ.key]: answerToSave };
+      if (currentQ.key === "phone") {
+        const cleaned = answerToSave.replace(/[^\d\s\-().+]/g, "").trim();
+        if (cleaned) answerToSave = cleaned;
+      }
+
+      const newAnswers = {
+        ...answers,
+        [currentQ.key]: answerToSave,
+        ...(currentQ.key === "url" ? { noWebsite: !answerToSave ? "yes" : "no" } : {}),
+      };
       setAnswers(newAnswers);
 
       let nextStep = step + 1;
@@ -1790,16 +1820,13 @@ try {
       }
 
       if (!CONVO_QUESTIONS[nextStep]) {
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" },
-        ]);
+        deliverQuestion("Are you ready for me to generate your campaign? (yes/no)");
         setStep(nextStep);
         return;
       }
 
       setStep(nextStep);
-      setChatHistory((ch) => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
+      deliverQuestion(CONVO_QUESTIONS[nextStep].question);
     }
   }
 
@@ -2691,11 +2718,12 @@ async function generatePosterBPair(runToken) {
 
 /* ===== Conversation questions ===== */
 const CONVO_QUESTIONS = [
-  { key: "url", question: "What's your website URL?" },
+  { key: "url", question: "What's your website or landing page URL? (If you don't have one yet, just type 'none')" },
+  { key: "phone", question: "Got it — what phone number should people use to reach you?", conditional: { key: "noWebsite", value: "yes" } },
   { key: "industry", question: "What industry is your business in?" },
   { key: "businessName", question: "What's your business name?" },
-  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
-  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
-  { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
+  { key: "idealCustomer", question: "Who is your ideal customer? Describe them in one sentence." },
+  { key: "hasOffer", question: "Do you have a special offer or promo right now? (yes/no)" },
+  { key: "offer", question: "What is your offer or promo?", conditional: { key: "hasOffer", value: "yes" } },
+  { key: "mainBenefit", question: "What's the main benefit or service you want the ad to highlight?" },
 ];
