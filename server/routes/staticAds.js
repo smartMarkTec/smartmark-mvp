@@ -382,7 +382,7 @@ async function generateOpenAIAdImageBuffers({
       "Content-Type": "application/json",
     },
     Buffer.from(payload),
-    45000
+    120000
   );
 
   if (status !== 200) {
@@ -686,10 +686,13 @@ router.post("/generate-static-ad", async (req, res) => {
   } catch (err) {
     console.error("[generate-static-ad]", err);
 
-    return res.status(400).json({
-      ok: false,
-      error: String(err?.message || err),
-    });
+  const msg = String(err?.message || err);
+const statusCode = /timeout|OpenAI image HTTP 5\d\d/i.test(msg) ? 502 : 400;
+
+return res.status(statusCode).json({
+  ok: false,
+  error: msg,
+});
   }
 });
 
