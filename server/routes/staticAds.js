@@ -124,39 +124,106 @@ function inferIndustry(a = {}) {
   return clean(a.industry || a.businessType || a.niche || "business");
 }
 
+/* Keyword → finished ad copy pairs.
+   Used to transform raw user benefit text into polished marketing language. */
+const OUTCOME_PATTERNS = [
+  { re: /\b(leads?|inquir|prospect)\b/i,
+    headline: "More Leads, Less Guesswork",
+    support: "Campaigns built to bring in qualified customers for your business." },
+  { re: /\b(roi|return.on.invest|revenue|profit)\b/i,
+    headline: "Marketing That Pays Off",
+    support: "Strategies built to deliver measurable returns on every dollar you spend." },
+  { re: /\b(sales|conversions?|customer|client)\b/i,
+    headline: "Grow Your Customer Base",
+    support: "Smart campaigns that turn attention into real, paying customers." },
+  { re: /\b(traffic|clicks?|visits?|web)\b/i,
+    headline: "More Clicks, More Business",
+    support: "Drive the right visitors to your site with focused, targeted campaigns." },
+  { re: /\b(awareness|visib|brand|recognit)\b/i,
+    headline: "Get Noticed Locally",
+    support: "Build real presence where your customers already spend their time." },
+  { re: /\b(time|effic|automat|faster|quicker)\b/i,
+    headline: "Save Time, Grow Faster",
+    support: "Streamlined marketing that lets you focus on running your business." },
+  { re: /\b(savings?|cost|budget|afford)\b/i,
+    headline: "Smarter Marketing, Better Value",
+    support: "Get stronger results without overspending on your marketing budget." },
+  { re: /\b(trust|credib|reputation|review|refer)\b/i,
+    headline: "Build Trust That Converts",
+    support: "A stronger local reputation drives more referrals and repeat business." },
+  { re: /\b(calls?|phone|book|appoint|schedul)\b/i,
+    headline: "More Calls, More Jobs",
+    support: "Reach customers who are ready to book or call you right now." },
+  { re: /\b(rank|seo|search|google|found)\b/i,
+    headline: "Show Up Where It Counts",
+    support: "Get discovered by local customers searching for exactly what you offer." },
+  { re: /\b(grow|growth|scal|expand)\b/i,
+    headline: "Built for Business Growth",
+    support: "A marketing approach designed to scale with you as your business grows." },
+  { re: /\b(result|outcome|perform|success)\b/i,
+    headline: "Results You Can Measure",
+    support: "Clear goals, real tracking, and campaigns built to actually perform." },
+  { re: /\b(comfort|cool|warm|temperat|indoor)\b/i,
+    headline: "Comfort You Can Count On",
+    support: "Reliable service that keeps your home comfortable all year long." },
+  { re: /\b(clean|spotless|fresh|tidy)\b/i,
+    headline: "Clean Home, Clear Mind",
+    support: "Professional cleaning you can count on for every room, every time." },
+  { re: /\b(safe|secur|protect|peace.of.mind)\b/i,
+    headline: "Peace of Mind, Guaranteed",
+    support: "Trusted professionals keeping your home and family protected." },
+];
+
+function matchOutcomePattern(rawText) {
+  const s = clean(rawText).toLowerCase();
+  for (const p of OUTCOME_PATTERNS) {
+    if (p.re.test(s)) return { headline: p.headline, support: p.support };
+  }
+  return null;
+}
+
 function deriveHeadline(a = {}, craftedCopy = {}) {
-  // Use pre-crafted headline if available — clip to ad-headline length
+  // 1. Pre-crafted headline wins
   const copyHeadline = clean(craftedCopy.headline || "");
   if (copyHeadline) return clip(copyHeadline, 45);
 
-  // Only use mainBenefit if it is short enough to work as a headline (≤5 words)
-  // Long benefit sentences ("we promise a 10% increase in leads") must never become headlines
   const mainBenefit = clean(a.mainBenefit || a.benefit || "");
-  const benefitWordCount = mainBenefit.split(/\s+/).filter(Boolean).length;
-  if (mainBenefit && benefitWordCount <= 5) return clip(titleCase(mainBenefit), 45);
 
-  // Industry-specific short headlines
+  // 2. Try keyword → marketing pattern match first
+  if (mainBenefit) {
+    const match = matchOutcomePattern(mainBenefit);
+    if (match) return match.headline;
+  }
+
+  // 3. Use benefit verbatim only if it's ≤4 words and sounds clean (not a claim/sentence)
+  const benefitWords = mainBenefit.split(/\s+/).filter(Boolean);
+  const soundsLikeClaim = /promise|guarantee|we |our |you will|percent|%/i.test(mainBenefit);
+  if (mainBenefit && benefitWords.length <= 4 && !soundsLikeClaim) {
+    return clip(titleCase(mainBenefit), 45);
+  }
+
+  // 4. Industry-specific short headlines
   const ind = inferIndustry(a).toLowerCase();
-  if (/hvac|heating|cooling|air.?cond/.test(ind))       return "Trusted HVAC Service";
-  if (/plumb/.test(ind))                                 return "Reliable Plumbing Service";
+  if (/hvac|heating|cooling|air.?cond/.test(ind))      return "Trusted HVAC Service";
+  if (/plumb/.test(ind))                                return "Reliable Plumbing Service";
   if (/electr/.test(ind))                               return "Professional Electrical";
-  if (/roof/.test(ind))                                  return "Trusted Roofing Experts";
+  if (/roof/.test(ind))                                 return "Trusted Roofing Experts";
   if (/landscap|lawn/.test(ind))                        return "Beautiful Yards, Every Season";
   if (/restaurant|food|cater/.test(ind))                return "Great Food, Local Flavor";
   if (/market|advertis|agency/.test(ind))               return "More Leads, Less Guesswork";
-  if (/insur/.test(ind))                                 return "Coverage You Can Count On";
+  if (/insur/.test(ind))                                return "Coverage You Can Count On";
   if (/dental|dent/.test(ind))                          return "Healthy Smiles Start Here";
   if (/legal|law/.test(ind))                            return "Trusted Legal Help";
   if (/auto|car|vehicle/.test(ind))                     return "Reliable Auto Service";
   if (/clean|maid/.test(ind))                           return "Clean Home, Clear Mind";
-  if (/pest/.test(ind))                                  return "Pest-Free Living";
+  if (/pest/.test(ind))                                 return "Pest-Free Living";
   if (/real.?estate|realt/.test(ind))                   return "Find Your Next Home";
   if (/fitness|gym|personal.?train/.test(ind))          return "Train Smarter, Live Better";
   if (/salon|hair|beauty/.test(ind))                    return "Look Good, Feel Great";
   if (/pet|animal|vet/.test(ind))                       return "Care You Can Trust";
   if (/child|kid|daycare|school/.test(ind))             return "Nurturing Young Minds";
 
-  // Short business name as last resort before generic
+  // 5. Short business name as final fallback
   const businessName = clean(a.businessName || a.brand || "");
   if (businessName && businessName.split(/\s+/).length <= 3) return clip(businessName, 45);
 
@@ -164,17 +231,36 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 }
 
 function deriveSupportLine(a = {}, craftedCopy = {}) {
-  // Pre-crafted subline preferred — keep it concise
+  // 1. Pre-crafted subline wins
   const subline = clean(craftedCopy.subline || craftedCopy.body || "");
   if (subline) return clip(subline, 80);
 
-  // Only use idealCustomer if it reads like a short phrase, not a paragraph
-  const idealCustomer = clean(a.idealCustomer || "");
-  if (idealCustomer && idealCustomer.length <= 60) return clip(idealCustomer, 80);
+  const mainBenefit = clean(a.mainBenefit || a.benefit || "");
 
-  // Only use mainBenefit as support if it's a concise phrase (≤10 words)
-  const benefit = clean(a.mainBenefit || a.benefit || "");
-  if (benefit && benefit.split(/\s+/).filter(Boolean).length <= 10) return clip(benefit, 80);
+  // 2. Try keyword → marketing pattern match for a clean support line
+  if (mainBenefit) {
+    const match = matchOutcomePattern(mainBenefit);
+    if (match) return match.support;
+  }
+
+  // 3. Use idealCustomer only if it's short and not a raw claim
+  const idealCustomer = clean(a.idealCustomer || "");
+  const claimPattern = /promise|guarantee|we |our |percent|%/i;
+  if (idealCustomer && idealCustomer.length <= 55 && !claimPattern.test(idealCustomer)) {
+    return clip(idealCustomer, 80);
+  }
+
+  // 4. Use benefit only if ≤8 words and not a claim sentence
+  if (mainBenefit && mainBenefit.split(/\s+/).filter(Boolean).length <= 8 && !claimPattern.test(mainBenefit)) {
+    return clip(mainBenefit, 80);
+  }
+
+  // 5. Industry-based fallback support lines
+  const ind = inferIndustry(a).toLowerCase();
+  if (/market|advertis|agency/.test(ind))  return "Practical marketing built for local businesses that want real results.";
+  if (/hvac|heating|cooling/.test(ind))    return "Fast, reliable service from technicians you can trust.";
+  if (/plumb/.test(ind))                   return "Local plumbers ready to help when you need it most.";
+  if (/clean|maid/.test(ind))              return "Professional cleaning you can count on, every visit.";
 
   return "";
 }
@@ -219,8 +305,6 @@ function buildAdPromptFromAnswers(a = {}, variationIndex = 0, craftedCopy = {}) 
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
-  const idealCustomer = clip(a.idealCustomer || "", 120);
-  const benefit = clip(a.mainBenefit || a.benefit || "", 120);
   const offer = clip(deriveOffer(a, craftedCopy), 70);
   const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
@@ -236,18 +320,16 @@ function buildAdPromptFromAnswers(a = {}, variationIndex = 0, craftedCopy = {}) 
     `Do not make it abstract, surreal, fake-looking, poster-like, overly stylized, or over-designed.`,
     `Do not make it look like a generic template.`,
     ``,
-    `Use this headline naturally in the ad: "${headline}".`,
-    supportLine ? `Use this short support line naturally in the ad: "${supportLine}".` : null,
-    `Use this CTA naturally in the ad: "${cta}".`,
-    website ? `If a website appears in small text, use: ${website}` : null,
-    idealCustomer ? `Target customer: ${idealCustomer}.` : null,
-    benefit ? `Primary customer benefit: ${benefit}.` : null,
+    `Include this headline as polished marketing copy — short, prominent, readable: "${headline}".`,
+    supportLine ? `Include this short supporting line below the headline: "${supportLine}".` : null,
+    `Include this CTA as a clear button or call-out: "${cta}".`,
+    website ? `Show this website URL in small subtle text: ${website}` : null,
     offer
-      ? `There is a real offer. Use it naturally if it fits: "${offer}".`
+      ? `There is a real promotional offer. Include it naturally: "${offer}".`
       : `Do not invent any promo, discount, sale, free trial, or special offer.`,
-    `If brand text appears, use "${businessName}".`,
-    `The ad text should feel integrated into the image, not pasted awkwardly on top.`,
-    `Keep all text readable and limited to what a real ad would use.`,
+    `If a brand name appears, use "${businessName}".`,
+    `Text hierarchy: headline is the most prominent element, supporting line is smaller, CTA is clear, website is subtle.`,
+    `Do not render any raw user sentences as ad copy. All text on the ad should look like it was written by a marketer.`,
     `No gibberish. No fake logos. No watermarks. No irrelevant UI mockups.`,
   ]
     .filter(Boolean)
