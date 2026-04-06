@@ -820,6 +820,7 @@ const INITIAL_CHAT = [
 export default function FormPage() {
   const navigate = useNavigate();
   const chatBoxRef = useRef();
+  const inputRef = useRef();
 
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
@@ -872,6 +873,13 @@ export default function FormPage() {
   useEffect(() => {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory, chatIsThinking, typingMsg]);
+
+  /* Re-focus the chat input whenever the disabled state clears */
+  useEffect(() => {
+    if (!chatIsThinking && !typingMsg && !loading) {
+      inputRef.current?.focus();
+    }
+  }, [chatIsThinking, typingMsg, loading]);
 
   /* Typewriter animation: advance ~4 chars every 15ms */
   useEffect(() => {
@@ -2270,6 +2278,7 @@ async function generatePosterBPair(runToken) {
             </button>
 
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={loading || chatIsThinking || !!typingMsg}
