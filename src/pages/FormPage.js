@@ -679,6 +679,13 @@ function normalizeUrlForCopy(u) {
   return s;
 }
 
+function formatPhoneDisplay(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits[0] === "1") return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return String(raw || "").trim(); // return as-is if format not recognized
+}
+
 function appendUrlToCopy(body, url) {
   const u = normalizeUrlForCopy(url);
   const b = String(body || "").trim();
@@ -1814,7 +1821,7 @@ try {
 
       if (currentQ.key === "phone") {
         const cleaned = answerToSave.replace(/[^\d\s\-().+]/g, "").trim();
-        if (cleaned) answerToSave = cleaned;
+        if (cleaned) answerToSave = formatPhoneDisplay(cleaned);
       }
       if (currentQ.key === "state") {
         // Normalize: accept full state names or abbreviations; store as 2-letter uppercase if recognizable

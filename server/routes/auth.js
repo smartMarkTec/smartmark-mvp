@@ -2373,48 +2373,77 @@ const rawState = String(bodyAnswers.state || '').trim();
 
 if (rawCity && rawState) {
   try {
-    const geoSearchQuery = `${rawCity} ${rawState}`.trim();
+    // Map 2-letter US state abbreviation to full name for reliable region matching.
+    // Meta's API returns region as the full state name (e.g. "Texas"), not the abbreviation.
+    const US_STATE_ABBR = {
+      AL:'Alabama', AK:'Alaska', AZ:'Arizona', AR:'Arkansas', CA:'California',
+      CO:'Colorado', CT:'Connecticut', DE:'Delaware', FL:'Florida', GA:'Georgia',
+      HI:'Hawaii', ID:'Idaho', IL:'Illinois', IN:'Indiana', IA:'Iowa',
+      KS:'Kansas', KY:'Kentucky', LA:'Louisiana', ME:'Maine', MD:'Maryland',
+      MA:'Massachusetts', MI:'Michigan', MN:'Minnesota', MS:'Mississippi', MO:'Missouri',
+      MT:'Montana', NE:'Nebraska', NV:'Nevada', NH:'New Hampshire', NJ:'New Jersey',
+      NM:'New Mexico', NY:'New York', NC:'North Carolina', ND:'North Dakota', OH:'Ohio',
+      OK:'Oklahoma', OR:'Oregon', PA:'Pennsylvania', RI:'Rhode Island', SC:'South Carolina',
+      SD:'South Dakota', TN:'Tennessee', TX:'Texas', UT:'Utah', VT:'Vermont',
+      VA:'Virginia', WA:'Washington', WV:'West Virginia', WI:'Wisconsin', WY:'Wyoming',
+      DC:'District of Columbia',
+    };
+    const stateAbbr = rawState.toUpperCase().replace(/[^A-Z]/g, '');
+    const stateFullName = US_STATE_ABBR[stateAbbr] || rawState; // fallback to raw if unknown
+
+    // Search by city name only; country_code param limits to US results at the API level.
     const geoRes = await axios.get('https://graph.facebook.com/v18.0/search', {
       params: {
         access_token: userToken,
         type: 'adgeolocation',
-        q: geoSearchQuery,
+        q: rawCity,
         location_types: JSON.stringify(['city']),
-        limit: 5,
+        country_code: 'US',
+        limit: 10,
       },
       timeout: 8000,
     });
 
     const geoData = geoRes.data?.data || [];
-    // Find the best match: a city whose name matches rawCity (case-insensitive)
-    // and whose region_id or region matches the state abbreviation.
-    const stateUpper = rawState.toUpperCase().replace(/[^A-Z]/g, '');
+
+    // Pass 1: US city + full state name match
     const match = geoData.find((item) => {
       if (String(item.type || '').toLowerCase() !== 'city') return false;
+      if (String(item.country_code || '').toUpperCase() !== 'US') return false;
       const nameMatch = String(item.name || '').toLowerCase() === rawCity.toLowerCase();
-      const regionMatch =
-        String(item.region_id || '').toUpperCase() === stateUpper ||
-        String(item.country_code || '').toUpperCase() === stateUpper ||
-        String(item.region || '').toLowerCase().includes(rawState.toLowerCase());
+      const regionMatch = String(item.region || '').toLowerCase().includes(stateFullName.toLowerCase());
       return nameMatch && regionMatch;
-    }) || geoData.find((item) =>
+    }) ||
+    // Pass 2: US + city name only (state not in response, but country is correct)
+    geoData.find((item) =>
       String(item.type || '').toLowerCase() === 'city' &&
+      String(item.country_code || '').toUpperCase() === 'US' &&
       String(item.name || '').toLowerCase() === rawCity.toLowerCase()
-    ) || geoData[0];
+    ) ||
+    // Pass 3: any city name match as last resort (non-US excluded unless nothing else found)
+    geoData.find((item) =>
+      String(item.type || '').toLowerCase() === 'city' &&
+      String(item.name || '').toLowerCase() === rawCity.toLowerCase() &&
+      String(item.country_code || '').toUpperCase() === 'US'
+    ) || null; // do not fall back to geoData[0] — risk of wrong-country match
 
     if (match && match.key) {
       targeting.geo_locations = {
-        cities: [{ key: String(match.key), radius: 25, distance_unit: 'mile' }],
+        cities: [{ key: String(match.key), radius: 60, distance_unit: 'mile' }],
       };
       console.log('[LAUNCH][geo] city targeting resolved', {
-        query: geoSearchQuery,
+        query: rawCity,
+        stateFullName,
         matchedKey: match.key,
         matchedName: match.name,
         matchedRegion: match.region,
+        matchedCountry: match.country_code,
       });
     } else {
       console.log('[LAUNCH][geo] city lookup returned no usable match, keeping default targeting', {
-        query: geoSearchQuery,
+        city: rawCity,
+        state: rawState,
+        stateFullName,
         results: geoData.length,
       });
     }

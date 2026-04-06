@@ -393,6 +393,7 @@ const system =
   "Write clear, practical, believable copy. Sound like a competent marketer — not a hype artist. The goal is to communicate what the business offers and why it is worth paying attention to, without drama or exaggeration. " +
   "Headline: state the main benefit or angle directly. Short and specific. 5–8 words. No dramatic fragments, no emotional manipulation. Good examples: 'Marketing built to generate better leads.' / 'Reliable HVAC service when you need it.' / 'A simpler way to run your campaigns.' " +
   "Subline: 2–3 sentences that support the headline. Be specific about what the business does and who benefits. Practical and professional. 20–40 words total. Do not exaggerate outcomes or dramatize the reader's situation. " +
+  "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number. Examples: 'Call (713) 555-1234 to book service.' / 'Questions? Call (713) 555-1234.' / 'Reach us at (713) 555-1234.' Never invent a phone number. Never use a placeholder." +
   "CTA: a clear action phrase (e.g. 'Get a free estimate', 'Book a consultation', 'See how it works'). " +
   "Bullets (if any): short, specific facts about what the business offers. No exaggeration. " +
   "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
@@ -401,6 +402,7 @@ const system =
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
 
 
+    const phoneForCopy = String(a.phone || "").trim();
     const user = [
       `Industry: ${a.industry || ""}`,
       `Business: ${a.businessName || ""}`,
@@ -409,6 +411,8 @@ const system =
       `Main benefit: ${a.mainBenefit || a.details || ""}`,
       `Offer: ${a.offer || a.saveAmount || ""}`,
       `Secondary: ${a.secondary || a.financingLine || ""}`,
+      ...(phoneForCopy ? [`Phone: ${phoneForCopy}`] : []),
+      ...(String(a.noWebsite || "").trim().toLowerCase() === "yes" ? ["No website: this is a call-only business. Include the phone number naturally in the subline."] : []),
     ].join("\n");
 
     const completion = await client.chat.completions.create({
@@ -486,7 +490,30 @@ const system =
     cta = cta.replace(/[.]+$/g, "").trim();
     if (!cta) cta = "Learn more";
 
- 
+    // Post-process: if phone was provided but the AI didn't include it in the subline, append naturally.
+    // Check by comparing raw digit strings to handle any formatting variation.
+    if (phoneForCopy) {
+      const phoneDigits = phoneForCopy.replace(/\D/g, "");
+      const sublineDigits = subline.replace(/\D/g, "");
+      if (phoneDigits && !sublineDigits.includes(phoneDigits)) {
+        const callLine = `Call ${phoneForCopy} to get started.`;
+        const candidate = `${subline.replace(/[.!?]\s*$/, "")}. ${callLine}`;
+        const wordCount = candidate.trim().split(/\s+/).filter(Boolean).length;
+        if (wordCount <= 50) {
+          subline = candidate.trim();
+        } else {
+          // subline too long to append — replace last sentence instead
+          const sents = subline.split(/(?<=[.!?])\s+/).filter(Boolean);
+          if (sents.length > 1) {
+            sents[sents.length - 1] = callLine;
+            subline = sents.join(" ");
+          } else {
+            subline = callLine; // last resort: just the call line
+          }
+        }
+      }
+    }
+
 const finalizeSubline = (s = "", maxWords = 45) => {
   let out = String(s || "").replace(/\s+/g, " ").trim();
 
