@@ -1872,8 +1872,8 @@ async function generatePosterBPair(runToken) {
         : []) || [];
 
     const craftedCopy = {
-      headline: (fromAssets.headline || displayHeadline || a.mainBenefit || a.businessName || "").toString(),
-      subline: (fromAssets.subline || displayBody || a.details || a.mainBenefit || "").toString(),
+      headline: (fromAssets.headline || editHeadline || result?.headline || "").toString(),
+      subline: (fromAssets.subline || editBody || result?.body || "").toString(),
       offer: (fromAssets.offer || a.offer || a.saveAmount || "").toString(),
       secondary: (fromAssets.secondary || "").toString(),
       bullets: baseBullets,
