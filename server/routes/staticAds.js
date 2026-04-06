@@ -278,30 +278,8 @@ function deriveOffer(a = {}, craftedCopy = {}) {
   return clean(craftedCopy.offer || a.offer || a.promo || "");
 }
 
-function selectVisualAngle(a = {}, variationIndex = 0) {
-  const industry = inferIndustry(a);
 
-  if (/hvac/i.test(industry)) {
-    const hvacAngles = [
-      "a real HVAC technician servicing a residential air conditioning unit outside a home",
-      "a clean home comfort scene showing cool air, family comfort, and trustworthy HVAC service",
-      "a thermostat and efficient HVAC system angle focused on comfort and energy savings",
-      "a seasonal HVAC tune-up scene with a technician inspecting equipment professionally",
-      "an emergency repair style HVAC scene that still feels realistic, practical, and premium",
-      "an HVAC installation or replacement scene showing professionalism and reliability",
-    ];
-    return hvacAngles[variationIndex % hvacAngles.length];
-  }
-
-  const genericAngles = [
-    "a realistic service-business marketing scene",
-    "a clean, practical local business scene",
-    "a believable customer-benefit scene for a paid social ad",
-  ];
-  return genericAngles[variationIndex % genericAngles.length];
-}
-
-function buildAdPromptFromAnswers(a = {}, variationIndex = 0, craftedCopy = {}) {
+function buildAdPromptFromAnswers(a = {}, craftedCopy = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
@@ -309,28 +287,22 @@ function buildAdPromptFromAnswers(a = {}, variationIndex = 0, craftedCopy = {}) 
   const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
-  const visualAngle = selectVisualAngle(a, variationIndex);
 
   return [
-    `Create a square 1:1 photorealistic social media ad for "${businessName}", a ${industry} business.`,
-    `The ad should feel like a real Facebook or Instagram ad a local business would actually run.`,
-    `Show ${visualAngle}.`,
-    `Make it clean, practical, premium, believable, and direct-response.`,
-    `Keep the style natural and commercially useful.`,
-    `Do not make it abstract, surreal, fake-looking, poster-like, overly stylized, or over-designed.`,
-    `Do not make it look like a generic template.`,
+    `Create a finished square 1:1 Facebook/Instagram ad creative for "${businessName}", a ${industry} business.`,
+    `Style: polished, premium, believable — like a real paid social ad a local business would run.`,
     ``,
-    `Include this headline as polished marketing copy — short, prominent, readable: "${headline}".`,
-    supportLine ? `Include this short supporting line below the headline: "${supportLine}".` : null,
-    `Include this CTA as a clear button or call-out: "${cta}".`,
-    website ? `Show this website URL in small subtle text: ${website}` : null,
+    `Ad copy to include:`,
+    `  Headline: "${headline}"`,
+    supportLine ? `  Support: "${supportLine}"` : null,
+    `  CTA: "${cta}"`,
+    website ? `  Website: ${website}` : null,
+    `Brand name: "${businessName}"`,
     offer
-      ? `There is a real promotional offer. Include it naturally: "${offer}".`
-      : `Do not invent any promo, discount, sale, free trial, or special offer.`,
-    `If a brand name appears, use "${businessName}".`,
-    `Text hierarchy: headline is the most prominent element, supporting line is smaller, CTA is clear, website is subtle.`,
-    `Do not render any raw user sentences as ad copy. All text on the ad should look like it was written by a marketer.`,
-    `No gibberish. No fake logos. No watermarks. No irrelevant UI mockups.`,
+      ? `Offer: "${offer}"`
+      : `Do not invent any promotional offer, sale, or discount.`,
+    ``,
+    `Design layout and imagery naturally for a polished social ad. Keep it clean, complete, and ad-ready. Avoid surreal, malformed, or gimmicky output.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -610,11 +582,7 @@ router.post("/generate-static-ad", async (req, res) => {
       ? detectBrandLogo(website).catch(() => null)
       : Promise.resolve(null);
 
-    // Build one prompt for single output, or a second grounded variation if 2 requested.
-    const prompt =
-      count === 1
-        ? buildAdPromptFromAnswers(a, 0, craftedCopy)
-        : `${buildAdPromptFromAnswers(a, 0, craftedCopy)}\n\nCreate 2 distinct variations with different realistic layouts/scenes. Both should still look like real ads for the same business.`;
+    const prompt = buildAdPromptFromAnswers(a, craftedCopy);
 
     // Single OpenAI call for speed and lower failure risk.
     let imageBuffers = await generateOpenAIAdImageBuffers({
