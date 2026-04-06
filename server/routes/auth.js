@@ -2646,7 +2646,7 @@ const { data: adsetData } = await axios.post(
     billing_event: 'IMPRESSIONS',
     optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
+    destination_type: 'WEBSITE',
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
     start_time: startISO,
     ...(endISO ? { end_time: endISO } : {}),
@@ -2676,13 +2676,23 @@ const { data: adsetData } = await axios.post(
      const creativeMessage = String(form.adCopy || adCopy || '').trim();
 const creativeTitle = String(form.headline || form.campaignName || campaignName || 'Learn More').trim();
 
-// No-website: use CALL_NOW with tel: link; page URL as the link_data.link (required valid URL).
-// Website: use LEARN_MORE with the destination URL as usual.
+// No-website: CALL_NOW CTA with tel: phone link.
+// link_data.link must be a real external HTTPS URL even for call ads — Meta rejects facebook.com URLs
+// and tel: URLs in this field. destinationUrl already falls back to 'https://smartemark.com' for
+// no-website users, which is a valid external URL Meta will accept.
+// Website: LEARN_MORE with the destination URL as usual.
 const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
 const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
-const creativeLinkDataLink = isNoWebsiteLaunch
-  ? `https://www.facebook.com/${pageIdFinal}`
-  : destinationUrl;
+const creativeLinkDataLink = destinationUrl; // same for both paths — always a real HTTPS URL
+
+if (isNoWebsiteLaunch) {
+  console.log('[LAUNCH][no-website creative shape]', {
+    ctaType: creativeCtaType,
+    ctaLink: creativeCtaLink,
+    linkDataLink: creativeLinkDataLink,
+    pageId: pageIdFinal,
+  });
+}
 
 const cr = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
