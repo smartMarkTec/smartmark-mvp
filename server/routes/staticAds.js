@@ -263,11 +263,25 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
   return "Local Experts, Real Results";
 }
 
+/* Trim AI-generated support copy to a length that renders cleanly inside the image.
+   Prefers a complete first sentence (≤12 words). If the first sentence is too long,
+   falls back to the first 9 words — no ellipsis, so there is no cut-off artifact. */
+function imageSafeSupport(s) {
+  const full = clean(s);
+  if (!full) return "";
+  const firstSentMatch = full.match(/^(.+?[.!?])(?:\s|$)/);
+  if (firstSentMatch) {
+    const sent = firstSentMatch[1].trim();
+    if (sent.split(/\s+/).filter(Boolean).length <= 12) return sent;
+  }
+  return full.split(/\s+/).filter(Boolean).slice(0, 9).join(" ");
+}
+
 function deriveSupportLine(a = {}, craftedCopy = {}) {
   const subline = clean(craftedCopy.subline || craftedCopy.body || "");
 
-  // 1. Use pre-crafted subline only if it doesn't look like raw user input
-  if (subline && !looksLikeRawClaim(subline)) return clip(subline, 80);
+  // 1. Use pre-crafted subline trimmed to image-safe length
+  if (subline && !looksLikeRawClaim(subline)) return imageSafeSupport(subline);
 
   // Combine incoming copy + raw benefit as source material for pattern matching
   const rawPool = subline || clean(a.mainBenefit || a.benefit || "");
@@ -340,7 +354,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     ``,
     `Ad copy:`,
     `  Headline: "${headline}"`,
-    supportLine ? `  Support: "${supportLine}"` : null,
+    supportLine ? `  Support (one short line, render it complete and readable): "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
     !website && phone ? `  Phone: ${phone}` : null,
