@@ -1785,14 +1785,7 @@ try {
 async function generatePosterBPair(runToken) {
   const tA = `${runToken}-A`;
 
-  const rawA = await summarizeAdCopy(answers, {
-    regenerateToken: tA,
-    variant: "A",
-  });
-
-  const copyA = normalizeSmartCopy(rawA, answers);
-
-  const urlA = await handleGenerateStaticAd("poster_b", copyA, {
+  const urlA = await handleGenerateStaticAd("poster_b", null, {
     regenerateToken: tA,
     silent: true,
   });
@@ -1801,9 +1794,9 @@ async function generatePosterBPair(runToken) {
 
   if (urls[0]) {
     saveImageDraftById(creativeIdFromUrl(urls[0]), {
-      headline: (copyA.headline || "").slice(0, 55),
-      body: copyA.subline || "",
-      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+      headline: (answers?.mainBenefit || "").slice(0, 55),
+      body: answers?.details || answers?.mainBenefit || "",
+      overlay: normalizeOverlayCTA(answers?.cta || ""),
     });
   }
 
@@ -1814,9 +1807,9 @@ async function generatePosterBPair(runToken) {
   return {
     urls,
     primary: {
-      headline: (copyA.headline || "").slice(0, 55),
-      body: copyA.subline || "",
-      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+      headline: (answers?.mainBenefit || "").slice(0, 55),
+      body: answers?.details || answers?.mainBenefit || "",
+      overlay: normalizeOverlayCTA(answers?.cta || ""),
     },
   };
 }
@@ -1887,17 +1880,6 @@ async function generatePosterBPair(runToken) {
       disclaimers: (fromAssets.disclaimers || "").toString(),
       cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
     };
-
-    if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
-      const ind = (a.industry || "services").toString().trim().toLowerCase();
-      if (ind.includes("fashion")) {
-        craftedCopy.bullets = ["New arrivals weekly", "Everyday fits", "Easy returns"];
-      } else if (ind.includes("restaurant") || ind.includes("food")) {
-        craftedCopy.bullets = ["Fresh ingredients", "Fast pickup", "Local favorites"];
-      } else {
-        craftedCopy.bullets = ["Clear offer", "Clean design", "Strong call to action"];
-      }
-    }
 
     const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
     const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);

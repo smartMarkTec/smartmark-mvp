@@ -154,167 +154,21 @@ function clean(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
 
-function hashSeed(str = "") {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-function mulberry32(a) {
-  return function () {
-    let t = (a += 0x6D2B79F5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-function buildVariantProfile(variationToken = "", variantTag = "A", industryHint = "") {
-  const rng = mulberry32(hashSeed(`${variationToken}|${variantTag}`));
-  const ind = String(industryHint || "").toLowerCase();
-
-  const settings = [
-    "bright studio backdrop",
-    "modern storefront exterior",
-    "cozy home interior",
-    "clean office/workspace",
-    "outdoor lifestyle scene",
-    "urban street scene",
-    "minimal product-on-table scene",
-    "soft gradient abstract backdrop",
-    "sleek tech abstract scene",
-    "modern desk flatlay with devices"
-  ];
-
-  const palettes = [
-    "cool neutrals + teal accents",
-    "warm neutrals + gold accents",
-    "bold high-contrast colors",
-    "pastel modern palette",
-    "monochrome with one accent color",
-    "earth tones with natural textures"
-  ];
-
-  const compositions = [
-    "bold close-up — subject fills the frame, typography integrated into the design",
-    "mid-shot with subject as clear visual anchor — graphic hierarchy",
-    "wide shot with generous breathing room — subject and type as one unified system",
-    "graphic composition — strong visual hierarchy, type and image inseparable"
-  ];
-
-  const lighting = [
-    "soft natural light",
-    "bright commercial lighting",
-    "cinematic rim lighting",
-    "even studio lighting"
-  ];
-
-  const isTechy =
-    /(marketing|agency|advertis|branding|seo|saas|software|tech|ai|analytics|data|startup|consult)/i.test(ind);
-
-  // Subject focus: allow more non-people variety (dashboards/charts/graphics) especially for marketing/tech
-  const subjectModesTech = [
-    "no-people concept: clean analytics dashboard/chart visual — design-forward",
-    "no-people concept: abstract technology/AI/network graphic — bold and intentional",
-    "no-people concept: laptop/phone UI mockup — screen visible, editorial composition",
-    "one person using a laptop/phone — natural, candid, screen visible",
-    "product/service as the visual hero — strong graphic design, no people"
-  ];
-
-  const subjectModesGeneral = [
-    "product or service as the visual hero — no people, design-led",
-    "one person authentically using or enjoying the service — candid, real",
-    "one person — confident portrait-style lifestyle shot",
-    "environment and place lead the story — atmosphere, texture, no people",
-    "object/flatlay — deliberate arrangement, premium materials, editorial"
-  ];
-
-  const subjectMode = isTechy ? pick(rng, subjectModesTech) : pick(rng, subjectModesGeneral);
-
-  // People: more often none or 1 person; 2 people sometimes; groups rare
-  const peoplePoolTech = [
-    "no people (use tech/graphics/charts/dashboards instead)",
-    "no people (use tech/graphics/charts/dashboards instead)",
-    "one person",
-    "one person",
-    "two people (only if it naturally fits)"
-  ];
-
-  const peoplePoolGeneral = [
-    "no people (product/service focused)",
-    "one person",
-    "one person",
-    "one person",
-    "two people (only if it naturally fits)",
-    "small group (3–5) ONLY if it truly fits the scenario"
-  ];
-
-  const peopleMode = pick(rng, isTechy ? peoplePoolTech : peoplePoolGeneral);
-
-  return {
-    variantTag,
-    setting: pick(rng, settings),
-    palette: pick(rng, palettes),
-    composition: pick(rng, compositions),
-    lighting: pick(rng, lighting),
-    subjectMode,
-    peopleMode
-  };
-}
-
-
-function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null, craftedCopy = {}) {
+function buildAdPromptFromAnswers(a = {}, variationToken = "", craftedCopy = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = clean(a.industry || "Business");
   const website = clean(a.website || a.url || "");
   const idealCustomer = clean(a.idealCustomer || "");
   const benefit = clean(a.mainBenefit || a.benefit || "");
-
   const headline = clean(craftedCopy.headline || "");
   const offer = clean(craftedCopy.offer || a.offer || a.promo || "");
   const cta = clean(craftedCopy.cta || a.cta || "Learn More");
-
-  const p = profile || buildVariantProfile(variationToken, "A", industry);
-
-  // Translate spec labels into evocative scene language so the model creates atmosphere, not checklists
-  const sceneNarrative = ({
-    "bright studio backdrop":           "a clean, luminous studio — pure focus on the subject, nothing competing for attention",
-    "modern storefront exterior":       "an inviting exterior that signals quality and approachability",
-    "cozy home interior":               "a warm, well-appointed home interior — comfort and intention",
-    "clean office/workspace":           "a confident, organized workspace — calm and capable",
-    "outdoor lifestyle scene":          "an authentic outdoor moment — real light, real texture, real life",
-    "urban street scene":               "an urban environment with direction and energy",
-    "minimal product-on-table scene":   "a deliberate minimal arrangement — premium negative space, beautiful materials",
-    "soft gradient abstract backdrop":  "a sophisticated abstract gradient — modern, refined, forward-looking",
-    "sleek tech abstract scene":        "a sleek, intelligent abstract environment — sharp and forward-thinking",
-    "modern desk flatlay with devices": "a precisely curated flatlay — editorial, intentional, modern"
-  })[p.setting] || p.setting;
-
-  const paletteNarrative = ({
-    "cool neutrals + teal accents":   "cool, restrained neutrals with teal as a calm authority accent",
-    "warm neutrals + gold accents":   "warm sand and cream tones with gold as the premium accent",
-    "bold high-contrast colors":      "high-contrast, graphic color blocking — visually arresting",
-    "pastel modern palette":          "soft contemporary pastels — modern, light, approachable",
-    "monochrome with one accent color": "near-monochrome palette with one deliberate, bold accent color",
-    "earth tones with natural textures": "rich earth tones — ochre, terracotta, natural organic texture"
-  })[p.palette] || p.palette;
 
   return [
     `Create a premium square (1:1) Facebook/Instagram ad for ${businessName}, a ${industry} business.`,
     ``,
     idealCustomer ? `Target audience: ${idealCustomer}.` : null,
     benefit ? `Key benefit: ${benefit}.` : null,
-    ``,
-    `Scene: ${sceneNarrative}.`,
-    `Lighting: ${p.lighting}. Color palette: ${paletteNarrative}.`,
-    `Composition: ${p.composition}.`,
-    `Subject: ${p.subjectMode}. People: ${p.peopleMode}.`,
-    ``,
     headline ? `Headline to include: "${headline}"` : null,
     offer
       ? `Promotional offer to include: "${offer}"`
@@ -353,15 +207,9 @@ router.post("/generate-static-ad", async (req, res) => {
     // Pull GPT-crafted copy if FormPage sent it — used to unify image text with UI copy
     const craftedCopy = (body.copy && typeof body.copy === "object") ? body.copy : {};
 
-    // Generate each image with its OWN prompt/profile (more variation than n=2 on one prompt)
-    const profiles = [
-      buildVariantProfile(variationToken, "A", a.industry || ""),
-      buildVariantProfile(variationToken, "B", a.industry || ""),
-    ];
-
     const prompts = [
-      buildAdPromptFromAnswers(a, variationToken, profiles[0], craftedCopy),
-      buildAdPromptFromAnswers(a, variationToken, profiles[1], craftedCopy),
+      buildAdPromptFromAnswers(a, `${variationToken}-A`, craftedCopy),
+      buildAdPromptFromAnswers(a, `${variationToken}-B`, craftedCopy),
     ];
 
     let bufs = [];
