@@ -182,23 +182,37 @@ function matchOutcomePattern(rawText) {
   return null;
 }
 
+/* Returns true if a string looks like raw user input — first-person voice,
+   explicit claims/promises, or percentage figures. These should never pass
+   directly to the image prompt as ad copy. */
+function looksLikeRawClaim(s = "") {
+  const t = clean(s).toLowerCase();
+  return (
+    /\b(our|we\b|us\b|my\b)\b/.test(t) ||
+    /\b(promise|guarantee|will give|will produce|will provide|will increase|will grow|will help|will boost|will get you)\b/.test(t) ||
+    /\d+\s*%/.test(t)
+  );
+}
+
 function deriveHeadline(a = {}, craftedCopy = {}) {
-  // 1. Pre-crafted headline wins
   const copyHeadline = clean(craftedCopy.headline || "");
-  if (copyHeadline) return clip(copyHeadline, 45);
 
-  const mainBenefit = clean(a.mainBenefit || a.benefit || "");
+  // 1. Use pre-crafted headline only if it doesn't look like raw user input
+  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return clip(copyHeadline, 45);
 
-  // 2. Try keyword → marketing pattern match first
-  if (mainBenefit) {
-    const match = matchOutcomePattern(mainBenefit);
+  // Combine incoming copy + raw benefit as source material for pattern matching
+  const rawPool = copyHeadline || clean(a.mainBenefit || a.benefit || "");
+
+  // 2. Try keyword → marketing pattern match
+  if (rawPool) {
+    const match = matchOutcomePattern(rawPool);
     if (match) return match.headline;
   }
 
-  // 3. Use benefit verbatim only if it's ≤4 words and sounds clean (not a claim/sentence)
+  // 3. Use benefit verbatim only if ≤4 words and not a claim
+  const mainBenefit = clean(a.mainBenefit || a.benefit || "");
   const benefitWords = mainBenefit.split(/\s+/).filter(Boolean);
-  const soundsLikeClaim = /promise|guarantee|we |our |you will|percent|%/i.test(mainBenefit);
-  if (mainBenefit && benefitWords.length <= 4 && !soundsLikeClaim) {
+  if (mainBenefit && benefitWords.length <= 4 && !looksLikeRawClaim(mainBenefit)) {
     return clip(titleCase(mainBenefit), 45);
   }
 
@@ -231,27 +245,29 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 }
 
 function deriveSupportLine(a = {}, craftedCopy = {}) {
-  // 1. Pre-crafted subline wins
   const subline = clean(craftedCopy.subline || craftedCopy.body || "");
-  if (subline) return clip(subline, 80);
 
-  const mainBenefit = clean(a.mainBenefit || a.benefit || "");
+  // 1. Use pre-crafted subline only if it doesn't look like raw user input
+  if (subline && !looksLikeRawClaim(subline)) return clip(subline, 80);
 
-  // 2. Try keyword → marketing pattern match for a clean support line
-  if (mainBenefit) {
-    const match = matchOutcomePattern(mainBenefit);
+  // Combine incoming copy + raw benefit as source material for pattern matching
+  const rawPool = subline || clean(a.mainBenefit || a.benefit || "");
+
+  // 2. Try keyword → marketing pattern match
+  if (rawPool) {
+    const match = matchOutcomePattern(rawPool);
     if (match) return match.support;
   }
 
   // 3. Use idealCustomer only if it's short and not a raw claim
   const idealCustomer = clean(a.idealCustomer || "");
-  const claimPattern = /promise|guarantee|we |our |percent|%/i;
-  if (idealCustomer && idealCustomer.length <= 55 && !claimPattern.test(idealCustomer)) {
+  if (idealCustomer && idealCustomer.length <= 55 && !looksLikeRawClaim(idealCustomer)) {
     return clip(idealCustomer, 80);
   }
 
-  // 4. Use benefit only if ≤8 words and not a claim sentence
-  if (mainBenefit && mainBenefit.split(/\s+/).filter(Boolean).length <= 8 && !claimPattern.test(mainBenefit)) {
+  // 4. Use mainBenefit only if ≤8 words and not a claim
+  const mainBenefit = clean(a.mainBenefit || a.benefit || "");
+  if (mainBenefit && mainBenefit.split(/\s+/).filter(Boolean).length <= 8 && !looksLikeRawClaim(mainBenefit)) {
     return clip(mainBenefit, 80);
   }
 
@@ -279,7 +295,7 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 }
 
 
-function buildAdPromptFromAnswers(a = {}, craftedCopy = {}) {
+function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "") {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
@@ -289,20 +305,21 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}) {
   const cta = deriveCTA(a, craftedCopy);
 
   return [
-    `Create a finished square 1:1 Facebook/Instagram ad creative for "${businessName}", a ${industry} business.`,
-    `Style: polished, premium, believable — like a real paid social ad a local business would run.`,
+    `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
+    `Style: clean, polished, and believable — like a real paid social ad.`,
     ``,
-    `Ad copy to include:`,
+    `Ad copy:`,
     `  Headline: "${headline}"`,
     supportLine ? `  Support: "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
-    `Brand name: "${businessName}"`,
+    `Brand: "${businessName}"`,
     offer
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Design layout and imagery naturally for a polished social ad. Keep it clean, complete, and ad-ready. Avoid surreal, malformed, or gimmicky output.`,
+    `Use natural imagery — people, objects, a place, or a graphic scene — whatever fits this business best. Keep the ad clean, believable, and ready to run.`,
+    variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -582,7 +599,10 @@ router.post("/generate-static-ad", async (req, res) => {
       ? detectBrandLogo(website).catch(() => null)
       : Promise.resolve(null);
 
-    const prompt = buildAdPromptFromAnswers(a, craftedCopy);
+    const variationToken = String(
+      body.regenerateToken || body.variant || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    );
+    const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken);
 
     // Single OpenAI call for speed and lower failure risk.
     let imageBuffers = await generateOpenAIAdImageBuffers({
