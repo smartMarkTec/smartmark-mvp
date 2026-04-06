@@ -182,13 +182,27 @@ function matchOutcomePattern(rawText) {
   return null;
 }
 
-/* Returns true if a string looks like raw user input — first-person voice,
-   explicit claims/promises, or percentage figures. These should never pass
+/* Random pick from a small array — used to vary copy and visual mood across runs. */
+function pickOne(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/* Visual emphasis cues — rotated by variation token so each run explores a different
+   composition without hardcoding scenes or demographics. */
+const VISUAL_MOODS = [
+  "people and the service or experience",
+  "the equipment, product, or result",
+  "the environment, setting, or place",
+  "a clean, minimal, or graphic composition",
+];
+
+/* Returns true if a string looks like raw user input — first-person company voice,
+   explicit claim/promise language, or percentage figures. These should not pass
    directly to the image prompt as ad copy. */
 function looksLikeRawClaim(s = "") {
   const t = clean(s).toLowerCase();
   return (
-    /\b(our|we\b|us\b|my\b)\b/.test(t) ||
+    /\b(our|we)\b/.test(t) ||
     /\b(promise|guarantee|will give|will produce|will provide|will increase|will grow|will help|will boost|will get you)\b/.test(t) ||
     /\d+\s*%/.test(t)
   );
@@ -216,26 +230,26 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
     return clip(titleCase(mainBenefit), 45);
   }
 
-  // 4. Industry-specific short headlines
+  // 4. Industry-specific short headlines (randomized to avoid repetition)
   const ind = inferIndustry(a).toLowerCase();
-  if (/hvac|heating|cooling|air.?cond/.test(ind))      return "Trusted HVAC Service";
-  if (/plumb/.test(ind))                                return "Reliable Plumbing Service";
-  if (/electr/.test(ind))                               return "Professional Electrical";
-  if (/roof/.test(ind))                                 return "Trusted Roofing Experts";
-  if (/landscap|lawn/.test(ind))                        return "Beautiful Yards, Every Season";
-  if (/restaurant|food|cater/.test(ind))                return "Great Food, Local Flavor";
-  if (/market|advertis|agency/.test(ind))               return "More Leads, Less Guesswork";
-  if (/insur/.test(ind))                                return "Coverage You Can Count On";
-  if (/dental|dent/.test(ind))                          return "Healthy Smiles Start Here";
-  if (/legal|law/.test(ind))                            return "Trusted Legal Help";
-  if (/auto|car|vehicle/.test(ind))                     return "Reliable Auto Service";
-  if (/clean|maid/.test(ind))                           return "Clean Home, Clear Mind";
-  if (/pest/.test(ind))                                 return "Pest-Free Living";
-  if (/real.?estate|realt/.test(ind))                   return "Find Your Next Home";
-  if (/fitness|gym|personal.?train/.test(ind))          return "Train Smarter, Live Better";
-  if (/salon|hair|beauty/.test(ind))                    return "Look Good, Feel Great";
-  if (/pet|animal|vet/.test(ind))                       return "Care You Can Trust";
-  if (/child|kid|daycare|school/.test(ind))             return "Nurturing Young Minds";
+  if (/hvac|heating|cooling|air.?cond/.test(ind))      return pickOne(["Trusted HVAC Service", "Comfort All Year Round", "Your Local HVAC Experts", "Heating & Cooling Done Right", "Stay Comfortable, Year-Round"]);
+  if (/plumb/.test(ind))                                return pickOne(["Reliable Plumbing Service", "Fast Local Plumbers", "Plumbing You Can Count On", "Fix It Right the First Time"]);
+  if (/electr/.test(ind))                               return pickOne(["Professional Electrical", "Reliable Electrical Service", "Local Electricians You Trust"]);
+  if (/roof/.test(ind))                                 return pickOne(["Trusted Roofing Experts", "Quality Roofing, Every Time", "Protect Your Home from the Top"]);
+  if (/landscap|lawn/.test(ind))                        return pickOne(["Beautiful Yards, Every Season", "Curb Appeal That Stands Out", "Your Lawn, Our Expertise"]);
+  if (/restaurant|food|cater/.test(ind))                return pickOne(["Great Food, Local Flavor", "Fresh Food, Every Time", "Taste the Difference Locally"]);
+  if (/market|advertis|agency/.test(ind))               return pickOne(["More Leads, Less Guesswork", "Marketing That Actually Works", "Grow Your Business Smarter"]);
+  if (/insur/.test(ind))                                return pickOne(["Coverage You Can Count On", "Protect What Matters Most", "Insurance Made Simple"]);
+  if (/dental|dent/.test(ind))                          return pickOne(["Healthy Smiles Start Here", "A Smile Worth Showing Off", "Your Comfort, Our Priority"]);
+  if (/legal|law/.test(ind))                            return pickOne(["Trusted Legal Help", "Your Rights, Our Focus", "Legal Advice You Can Trust"]);
+  if (/auto|car|vehicle/.test(ind))                     return pickOne(["Reliable Auto Service", "Your Car in Good Hands", "Expert Auto Care, Every Visit"]);
+  if (/clean|maid/.test(ind))                           return pickOne(["Clean Home, Clear Mind", "Spotless, Every Single Time", "Professional Cleaning You'll Love"]);
+  if (/pest/.test(ind))                                 return pickOne(["Pest-Free Living", "Keep Pests Out for Good", "Your Home, Pest-Free"]);
+  if (/real.?estate|realt/.test(ind))                   return pickOne(["Find Your Next Home", "Local Real Estate Experts", "Buy or Sell with Confidence"]);
+  if (/fitness|gym|personal.?train/.test(ind))          return pickOne(["Train Smarter, Live Better", "Reach Your Fitness Goals", "Real Results, Real Progress"]);
+  if (/salon|hair|beauty/.test(ind))                    return pickOne(["Look Good, Feel Great", "Beauty That Turns Heads", "Your Best Look Starts Here"]);
+  if (/pet|animal|vet/.test(ind))                       return pickOne(["Care You Can Trust", "Your Pet Deserves the Best", "Compassionate Pet Care"]);
+  if (/child|kid|daycare|school/.test(ind))             return pickOne(["Nurturing Young Minds", "Where Kids Thrive", "A Safe Place to Grow"]);
 
   // 5. Short business name as final fallback
   const businessName = clean(a.businessName || a.brand || "");
@@ -271,12 +285,15 @@ function deriveSupportLine(a = {}, craftedCopy = {}) {
     return clip(mainBenefit, 80);
   }
 
-  // 5. Industry-based fallback support lines
+  // 5. Industry-based fallback support lines (randomized to avoid repetition)
   const ind = inferIndustry(a).toLowerCase();
-  if (/market|advertis|agency/.test(ind))  return "Practical marketing built for local businesses that want real results.";
-  if (/hvac|heating|cooling/.test(ind))    return "Fast, reliable service from technicians you can trust.";
-  if (/plumb/.test(ind))                   return "Local plumbers ready to help when you need it most.";
-  if (/clean|maid/.test(ind))              return "Professional cleaning you can count on, every visit.";
+  if (/market|advertis|agency/.test(ind))  return pickOne(["Practical marketing built for local businesses that want real results.", "Campaigns designed to bring in qualified customers, not just clicks.", "Focused strategies that grow your business without the guesswork."]);
+  if (/hvac|heating|cooling/.test(ind))    return pickOne(["Fast, reliable service from technicians you can trust.", "Same-day service from local HVAC professionals.", "Keep your home comfortable with experienced local technicians.", "Certified technicians ready when your system needs attention."]);
+  if (/plumb/.test(ind))                   return pickOne(["Local plumbers ready to help when you need it most.", "Fast response, quality work, honest pricing."]);
+  if (/clean|maid/.test(ind))              return pickOne(["Professional cleaning you can count on, every visit.", "Thorough, reliable cleaning for homes and businesses."]);
+  if (/roof/.test(ind))                    return pickOne(["Expert roofing from a team your neighbors already trust.", "Quality materials, professional installation, lasting results."]);
+  if (/dental|dent/.test(ind))             return pickOne(["Gentle, professional care for your whole family.", "Comfortable dental visits for patients of all ages."]);
+  if (/auto|car|vehicle/.test(ind))        return pickOne(["Honest service from mechanics who take pride in their work.", "Fast, reliable auto repair from your local experts."]);
 
   return "";
 }
@@ -318,7 +335,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Use natural imagery — people, objects, a place, or a graphic scene — whatever fits this business best. Keep the ad clean, believable, and ready to run.`,
+    `Visual: naturally focus on ${VISUAL_MOODS[variationToken ? variationToken.charCodeAt(variationToken.length - 1) % VISUAL_MOODS.length : 0]} for this business. Keep the ad clean, believable, and ready to run.`,
     variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
