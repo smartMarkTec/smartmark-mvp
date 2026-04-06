@@ -125,30 +125,56 @@ function inferIndustry(a = {}) {
 }
 
 function deriveHeadline(a = {}, craftedCopy = {}) {
+  // Use pre-crafted headline if available — clip to ad-headline length
   const copyHeadline = clean(craftedCopy.headline || "");
-  if (copyHeadline) return clip(copyHeadline, 60);
+  if (copyHeadline) return clip(copyHeadline, 45);
 
+  // Only use mainBenefit if it is short enough to work as a headline (≤5 words)
+  // Long benefit sentences ("we promise a 10% increase in leads") must never become headlines
   const mainBenefit = clean(a.mainBenefit || a.benefit || "");
-  if (mainBenefit) return clip(titleCase(mainBenefit), 60);
+  const benefitWordCount = mainBenefit.split(/\s+/).filter(Boolean).length;
+  if (mainBenefit && benefitWordCount <= 5) return clip(titleCase(mainBenefit), 45);
 
-  const industry = inferIndustry(a);
-  if (/hvac/i.test(industry)) return "Trusted HVAC Service";
+  // Industry-specific short headlines
+  const ind = inferIndustry(a).toLowerCase();
+  if (/hvac|heating|cooling|air.?cond/.test(ind))       return "Trusted HVAC Service";
+  if (/plumb/.test(ind))                                 return "Reliable Plumbing Service";
+  if (/electr/.test(ind))                               return "Professional Electrical";
+  if (/roof/.test(ind))                                  return "Trusted Roofing Experts";
+  if (/landscap|lawn/.test(ind))                        return "Beautiful Yards, Every Season";
+  if (/restaurant|food|cater/.test(ind))                return "Great Food, Local Flavor";
+  if (/market|advertis|agency/.test(ind))               return "More Leads, Less Guesswork";
+  if (/insur/.test(ind))                                 return "Coverage You Can Count On";
+  if (/dental|dent/.test(ind))                          return "Healthy Smiles Start Here";
+  if (/legal|law/.test(ind))                            return "Trusted Legal Help";
+  if (/auto|car|vehicle/.test(ind))                     return "Reliable Auto Service";
+  if (/clean|maid/.test(ind))                           return "Clean Home, Clear Mind";
+  if (/pest/.test(ind))                                  return "Pest-Free Living";
+  if (/real.?estate|realt/.test(ind))                   return "Find Your Next Home";
+  if (/fitness|gym|personal.?train/.test(ind))          return "Train Smarter, Live Better";
+  if (/salon|hair|beauty/.test(ind))                    return "Look Good, Feel Great";
+  if (/pet|animal|vet/.test(ind))                       return "Care You Can Trust";
+  if (/child|kid|daycare|school/.test(ind))             return "Nurturing Young Minds";
 
+  // Short business name as last resort before generic
   const businessName = clean(a.businessName || a.brand || "");
-  if (businessName) return clip(businessName, 60);
+  if (businessName && businessName.split(/\s+/).length <= 3) return clip(businessName, 45);
 
-  return "Trusted Local Service";
+  return "Local Experts, Real Results";
 }
 
 function deriveSupportLine(a = {}, craftedCopy = {}) {
+  // Pre-crafted subline preferred — keep it concise
   const subline = clean(craftedCopy.subline || craftedCopy.body || "");
-  if (subline) return clip(subline, 90);
+  if (subline) return clip(subline, 80);
 
+  // Only use idealCustomer if it reads like a short phrase, not a paragraph
   const idealCustomer = clean(a.idealCustomer || "");
-  if (idealCustomer) return clip(idealCustomer, 90);
+  if (idealCustomer && idealCustomer.length <= 60) return clip(idealCustomer, 80);
 
+  // Only use mainBenefit as support if it's a concise phrase (≤10 words)
   const benefit = clean(a.mainBenefit || a.benefit || "");
-  if (benefit) return clip(benefit, 90);
+  if (benefit && benefit.split(/\s+/).filter(Boolean).length <= 10) return clip(benefit, 80);
 
   return "";
 }
@@ -234,13 +260,13 @@ async function generateOpenAIAdImageBuffers({
   prompt,
   size = "1024x1024",
   output_format = "png",
-  quality = "high",
+  quality = "auto",
   n = 1,
 }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
 
   const payload = JSON.stringify({
     model,
@@ -513,7 +539,7 @@ router.post("/generate-static-ad", async (req, res) => {
       prompt,
       size: "1024x1024",
       output_format: "png",
-      quality: "high",
+      quality: "auto",
       n: count,
     });
 
