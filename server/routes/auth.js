@@ -2032,6 +2032,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
+  function normalizePhone(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    return null;
+  }
+
   function normalizeImageUrl(u) {
     const s = String(u || '').trim();
     if (!s) return '';
@@ -2351,6 +2358,16 @@ if (aiAudience?.fbInterestIds?.length) {
 const bodyAnswers = req.body.answers && typeof req.body.answers === 'object'
   ? req.body.answers
   : {};
+
+const isNoWebsiteLaunch = String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes';
+const normalizedPhone = normalizePhone(bodyAnswers.phone || form.phone || '');
+
+if (isNoWebsiteLaunch && !normalizedPhone) {
+  return res.status(400).json({
+    error: 'No website on file and no valid phone number provided. Add a phone number to launch a call-focused ad.',
+  });
+}
+
 const rawCity = String(bodyAnswers.city || '').trim();
 const rawState = String(bodyAnswers.state || '').trim();
 
@@ -2600,7 +2617,7 @@ const { data: adsetData } = await axios.post(
     billing_event: 'IMPRESSIONS',
     optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    destination_type: 'WEBSITE',
+    destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
     start_time: startISO,
     ...(endISO ? { end_time: endISO } : {}),
@@ -2630,6 +2647,14 @@ const { data: adsetData } = await axios.post(
      const creativeMessage = String(form.adCopy || adCopy || '').trim();
 const creativeTitle = String(form.headline || form.campaignName || campaignName || 'Learn More').trim();
 
+// No-website: use CALL_NOW with tel: link; page URL as the link_data.link (required valid URL).
+// Website: use LEARN_MORE with the destination URL as usual.
+const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
+const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
+const creativeLinkDataLink = isNoWebsiteLaunch
+  ? `https://www.facebook.com/${pageIdFinal}`
+  : destinationUrl;
+
 const cr = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
   {
@@ -2637,14 +2662,14 @@ const cr = await axios.post(
     object_story_spec: {
       page_id: pageIdFinal,
       link_data: {
-        link: destinationUrl,
+        link: creativeLinkDataLink,
         message: creativeMessage,
         name: creativeTitle,
         image_hash: hash,
         call_to_action: {
-          type: 'LEARN_MORE',
+          type: creativeCtaType,
           value: {
-            link: destinationUrl,
+            link: creativeCtaLink,
           },
         },
       },

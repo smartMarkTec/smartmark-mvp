@@ -4234,8 +4234,17 @@ const finalBody = (
 if (!acctId) throw new Error("Please select a Facebook ad account.");
 if (!pageId) throw new Error("Please select a Facebook page.");
 
+const isNoWebsite = String(answers?.noWebsite || '').trim().toLowerCase() === 'yes';
+const launchPhone = String(answers?.phone || form?.phone || '').trim();
+
 if (!isValidHttpUrl(websiteUrl)) {
-  throw new Error("Please enter a valid website URL starting with http:// or https://");
+  if (isNoWebsite && launchPhone) {
+    // No-website + phone present: pass through to backend CALL_NOW path
+  } else if (isNoWebsite) {
+    throw new Error("No website on file. Please add a phone number — we'll launch a call-focused ad for you.");
+  } else {
+    throw new Error("Please enter a valid website URL starting with http:// or https://");
+  }
 }
 
 const isRenderMediaUrl = (u) => {
