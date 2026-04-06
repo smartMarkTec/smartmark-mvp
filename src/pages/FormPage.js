@@ -751,6 +751,12 @@ function isLikelySideChat(s, currentQ) {
   if (currentQ.key === "hasOffer") {
     return !/^(yes|no|y|n)$/i.test(t);
   }
+  if (currentQ.key === "city") {
+    return t.length > 60;
+  }
+  if (currentQ.key === "state") {
+    return t.length > 30;
+  }
   if (currentQ.key === "industry" || currentQ.key === "businessName") {
     return t.length > 80;
   }
@@ -1810,6 +1816,15 @@ try {
         const cleaned = answerToSave.replace(/[^\d\s\-().+]/g, "").trim();
         if (cleaned) answerToSave = cleaned;
       }
+      if (currentQ.key === "state") {
+        // Normalize: accept full state names or abbreviations; store as 2-letter uppercase if recognizable
+        const abbr = answerToSave.trim().toUpperCase().replace(/[^A-Z]/g, "");
+        if (abbr.length === 2) answerToSave = abbr;
+        else answerToSave = answerToSave.trim();
+      }
+      if (currentQ.key === "city") {
+        answerToSave = answerToSave.trim();
+      }
 
       const newAnswers = {
         ...answers,
@@ -2731,6 +2746,8 @@ const CONVO_QUESTIONS = [
   { key: "phone", question: "Got it — what phone number should people use to reach you?", conditional: { key: "noWebsite", value: "yes" } },
   { key: "industry", question: "What industry is your business in?" },
   { key: "businessName", question: "What's your business name?" },
+  { key: "city", question: "What city is your business based in?" },
+  { key: "state", question: "What state? (e.g. TX, CA, FL)" },
   { key: "idealCustomer", question: "Who is your ideal customer? Describe them in one sentence." },
   { key: "hasOffer", question: "Do you have a special offer or promo right now? (yes/no)" },
   { key: "offer", question: "What is your offer or promo?", conditional: { key: "hasOffer", value: "yes" } },

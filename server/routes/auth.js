@@ -2344,6 +2344,74 @@ if (aiAudience?.fbInterestIds?.length) {
   ];
 }
 
+// ---- Local city/state targeting ----
+// If the customer provided a city + state during onboarding, look up the Meta
+// geo key and apply city-level targeting. Falls back silently on any failure
+// so the launch is never blocked by a geo lookup problem.
+const bodyAnswers = req.body.answers && typeof req.body.answers === 'object'
+  ? req.body.answers
+  : {};
+const rawCity = String(bodyAnswers.city || '').trim();
+const rawState = String(bodyAnswers.state || '').trim();
+
+if (rawCity && rawState) {
+  try {
+    const geoSearchQuery = `${rawCity} ${rawState}`.trim();
+    const geoRes = await axios.get('https://graph.facebook.com/v18.0/search', {
+      params: {
+        access_token: userToken,
+        type: 'adgeolocation',
+        q: geoSearchQuery,
+        location_types: JSON.stringify(['city']),
+        limit: 5,
+      },
+      timeout: 8000,
+    });
+
+    const geoData = geoRes.data?.data || [];
+    // Find the best match: a city whose name matches rawCity (case-insensitive)
+    // and whose region_id or region matches the state abbreviation.
+    const stateUpper = rawState.toUpperCase().replace(/[^A-Z]/g, '');
+    const match = geoData.find((item) => {
+      if (String(item.type || '').toLowerCase() !== 'city') return false;
+      const nameMatch = String(item.name || '').toLowerCase() === rawCity.toLowerCase();
+      const regionMatch =
+        String(item.region_id || '').toUpperCase() === stateUpper ||
+        String(item.country_code || '').toUpperCase() === stateUpper ||
+        String(item.region || '').toLowerCase().includes(rawState.toLowerCase());
+      return nameMatch && regionMatch;
+    }) || geoData.find((item) =>
+      String(item.type || '').toLowerCase() === 'city' &&
+      String(item.name || '').toLowerCase() === rawCity.toLowerCase()
+    ) || geoData[0];
+
+    if (match && match.key) {
+      targeting.geo_locations = {
+        cities: [{ key: String(match.key), radius: 25, distance_unit: 'mile' }],
+      };
+      console.log('[LAUNCH][geo] city targeting resolved', {
+        query: geoSearchQuery,
+        matchedKey: match.key,
+        matchedName: match.name,
+        matchedRegion: match.region,
+      });
+    } else {
+      console.log('[LAUNCH][geo] city lookup returned no usable match, keeping default targeting', {
+        query: geoSearchQuery,
+        results: geoData.length,
+      });
+    }
+  } catch (geoErr) {
+    // Non-fatal: log and continue with the default targeting already set above
+    console.warn('[LAUNCH][geo] city targeting lookup failed, using default targeting', {
+      city: rawCity,
+      state: rawState,
+      error: geoErr?.response?.data?.error?.message || geoErr?.message || 'unknown',
+    });
+  }
+}
+// ---- End local city/state targeting ----
+
 const ownerUser = await findUserByOwnerKey(ownerKey);
 const billingPlanKey = normalizeBillingPlanKey(ownerUser?.billing?.planKey || 'starter');
 const launchPlanLimits = getLaunchPlanLimits(billingPlanKey);
@@ -2663,6 +2731,9 @@ const optimizerPayload = {
   currentWinner: null,
   activeTestType: '',
   publicSummary: makeInitialPublicSummary(),
+  // Persist the customer's onboarding answers so future optimizer actions
+  // (challenger creative generation, copy refresh, strategy) stay on-brand.
+  businessContext: bodyAnswers && typeof bodyAnswers === 'object' ? bodyAnswers : {},
 };
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);

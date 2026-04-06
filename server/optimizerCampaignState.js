@@ -110,6 +110,7 @@ async function upsertOptimizerCampaignState(input = {}) {
     pageId: normalizeId(input.pageId),
     campaignName: String(input.campaignName || '').trim(),
     niche: String(input.niche || '').trim(),
+    businessContext: safeObject(input.businessContext, {}),
     currentStatus: String(input.currentStatus || 'ACTIVE').trim(),
     optimizationEnabled:
       typeof input.optimizationEnabled === 'boolean'
@@ -237,6 +238,10 @@ async function updateOptimizerCampaignState(campaignId, patch = {}) {
 
   if ('latestCreativeMeta' in normalizedPatch) {
     normalizedPatch.latestCreativeMeta = safeObject(normalizedPatch.latestCreativeMeta, {});
+  }
+
+  if ('businessContext' in normalizedPatch) {
+    normalizedPatch.businessContext = safeObject(normalizedPatch.businessContext, {});
   }
 
   const merged = {
