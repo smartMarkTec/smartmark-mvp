@@ -1846,8 +1846,14 @@ try {
       }
 
       if (currentQ.key === "phone") {
-        const cleaned = answerToSave.replace(/[^\d\s\-().+]/g, "").trim();
-        if (cleaned) answerToSave = formatPhoneDisplay(cleaned);
+        // Allow "skip", "none", "no", "n/a" etc. to mean no phone
+        const isSkip = /^(skip|none|no|n\/a|nope|not now|no thanks|no thank you)$/i.test(answerToSave.trim());
+        if (isSkip) {
+          answerToSave = "";
+        } else {
+          const cleaned = answerToSave.replace(/[^\d\s\-().+]/g, "").trim();
+          if (cleaned) answerToSave = formatPhoneDisplay(cleaned);
+        }
       }
       if (currentQ.key === "state") {
         // Normalize: accept full state names or abbreviations; store as 2-letter uppercase if recognizable
@@ -2776,7 +2782,7 @@ async function generatePosterBPair(runToken) {
 /* ===== Conversation questions ===== */
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website or landing page URL? (If you don't have one yet, just type 'none')" },
-  { key: "phone", question: "Got it — what phone number should people use to reach you?", conditional: { key: "noWebsite", value: "yes" } },
+  { key: "phone", question: "What's a phone number people can use to reach you? (Optional — skip if you'd rather not include one)" },
   { key: "industry", question: "What industry is your business in?" },
   { key: "businessName", question: "What's your business name?" },
   { key: "city", question: "What city is your business based in?" },

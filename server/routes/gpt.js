@@ -402,11 +402,10 @@ const system =
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
 
 
-    // Phone must only appear in copy when the run is a no-website/call-only flow.
-    // If a website is present, never inject a phone even if a.phone is stale from a prior run.
-    const websiteForCopy = String(a.website || a.url || "").trim();
+    // Phone is now asked for all users (website and no-website alike).
+    // Use whatever the user actually provided this run; empty string means no phone.
     const isNoWebsiteRun = String(a.noWebsite || "").trim().toLowerCase() === "yes";
-    const phoneForCopy = (!websiteForCopy || isNoWebsiteRun) ? String(a.phone || "").trim() : "";
+    const phoneForCopy = String(a.phone || "").trim();
 
     const user = [
       `Industry: ${a.industry || ""}`,

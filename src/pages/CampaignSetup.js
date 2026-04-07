@@ -2749,6 +2749,7 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
 
     // 1) Try load the actual draft object (session/user/anon/backup)
     let baseDraft = null;
+    let baseDraftExisted = false; // track whether any draft obj was found, even if ctx-mismatched
     try {
       const raw =
         sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
@@ -2756,7 +2757,10 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
         lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
         localStorage.getItem("sm_setup_creatives_backup_v1");
 
-      if (raw) baseDraft = JSON.parse(raw || "null");
+      if (raw) {
+        baseDraft = JSON.parse(raw || "null");
+        baseDraftExisted = !!baseDraft;
+      }
     } catch {
       baseDraft = null;
     }
@@ -2770,11 +2774,15 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
       }
     }
 
-    // 2) Fallback: last 2 from imageDrafts (only if draft object didn’t hydrate)
-    const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
-    if (fallbackUrls && fallbackUrls.length) {
-      const ctx = (baseDraft && String(baseDraft?.ctxKey || "").trim()) || (getActiveCtx(resolvedUser) || "").trim();
-      setDraftFromImages(fallbackUrls, ctx);
+    // 2) Fallback: last 2 from imageDrafts — ONLY when no draft object was found at all.
+    // If a draft existed but was ctx-mismatched (stale session), do NOT fall through here —
+    // that is exactly the ghost-creative scenario we are preventing.
+    if (!baseDraftExisted) {
+      const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
+      if (fallbackUrls && fallbackUrls.length) {
+        const ctx = (getActiveCtx(resolvedUser) || "").trim();
+        setDraftFromImages(fallbackUrls, ctx);
+      }
     }
   }, [resolvedUser, draftCreatives?.images?.length]);
 
@@ -5736,6 +5744,11 @@ const selectedCampaignCreatives =
   const det = campaignSettingsMap[detId] || {};
   const fmtBudget = (v) => v && v !== "—" ? `$${v}/day` : "—";
   const fmtDate = (v) => v && v !== "—" ? v : "—";
+  const rows = [
+    { label: "Budget", value: fmtBudget(det.budget) },
+    { label: "Start date", value: fmtDate(det.startDate) },
+    { label: "End date", value: fmtDate(det.endDate) },
+  ];
   return (
     <div
       style={{
@@ -5752,16 +5765,13 @@ const selectedCampaignCreatives =
       <div style={{ color: "#111827", fontWeight: 900, fontSize: 13, marginBottom: 2 }}>
         Campaign Details
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 18px" }}>
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>Original budget</div>
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>Current budget</div>
-        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtBudget(det.originalBudget)}</div>
-        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtBudget(det.budget)}</div>
-
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginTop: 4 }}>Original end date</div>
-        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginTop: 4 }}>Current end date</div>
-        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtDate(det.originalEndDate)}</div>
-        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtDate(det.endDate)}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map(({ label, value }) => (
+          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>{label}</span>
+            <span style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

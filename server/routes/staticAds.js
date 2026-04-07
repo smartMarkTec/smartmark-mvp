@@ -191,14 +191,16 @@ function pickOne(arr) {
    composition without hardcoding scenes or demographics.
    People are one valid option among many — not the default. */
 const VISUAL_MOODS = [
-  "the equipment or product itself — no people needed, let the hardware or result do the talking",
-  "a comfortable interior space — no technicians, no crew, just the environment",
-  "a close-up detail of the product, material, or finished result",
-  "a clean, minimal composition — strong typography on a simple, well-lit background, no people",
-  "an outdoor setting relevant to the business — environment only, no on-site workers",
-  "a single person in a natural, unposed moment related to the service or outcome",
-  "a professional or lifestyle scene that reflects the brand's typical customer",
-  "a graphic, editorial-style layout — bold and commercial without being literal or cluttered",
+  "the equipment, vehicle, or product itself as the hero — no people, let the hardware do the talking",
+  "a building exterior, storefront, or job-site environment — architecture and setting, no workers",
+  "a comfortable finished interior relevant to the business — clean, well-lit, no crew or staff",
+  "a close-up detail of the product, material, tool, or finished result — texture and craft foreground",
+  "a clean, minimal graphic composition — strong type on a simple well-lit background, no people",
+  "an outdoor environment relevant to the business — yard, roof, street, or landscape, no workers",
+  "a single person in a natural, unposed moment — used sparingly and only when people clearly fit",
+  "a commercial or editorial graphic layout — bold, modern, type-forward with supporting imagery",
+  "a wide environmental scene showing the business context — before/after, setting, or worksite without people",
+  "a product or service in use in a realistic context — show the result or the environment, not the worker",
 ];
 
 /* Returns true if a string looks like raw user input — first-person company voice,
@@ -264,17 +266,17 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 }
 
 /* Trim AI-generated support copy to a length that renders cleanly inside the image.
-   Prefers a complete first sentence (≤12 words). If the first sentence is too long,
-   falls back to the first 9 words — no ellipsis, so there is no cut-off artifact. */
+   Prefers a complete first sentence (≤8 words). If the first sentence is too long,
+   falls back to the first 7 words — no ellipsis, so there is no cut-off artifact. */
 function imageSafeSupport(s) {
   const full = clean(s);
   if (!full) return "";
   const firstSentMatch = full.match(/^(.+?[.!?])(?:\s|$)/);
   if (firstSentMatch) {
     const sent = firstSentMatch[1].trim();
-    if (sent.split(/\s+/).filter(Boolean).length <= 12) return sent;
+    if (sent.split(/\s+/).filter(Boolean).length <= 8) return sent;
   }
-  return full.split(/\s+/).filter(Boolean).slice(0, 9).join(" ");
+  return full.split(/\s+/).filter(Boolean).slice(0, 7).join(" ");
 }
 
 function deriveSupportLine(a = {}, craftedCopy = {}) {
@@ -400,7 +402,8 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
+    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout. Keep it believable and ready to run as a paid ad. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
+    `Copy rendering: the support line must be brief — keep it short enough to fit cleanly in the layout without truncating. Do not let it trail off or end mid-word.`,
     `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
