@@ -382,6 +382,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
     `Visual direction: ${VISUAL_MOODS[moodIdx]}. ${FRAMING_CUES[framingIdx]} Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
+    `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
     .filter(Boolean)
