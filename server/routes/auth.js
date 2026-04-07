@@ -2650,6 +2650,13 @@ console.log('[LAUNCH][adset create]', {
   targeting,
 });
 
+// Instagram: only for website users who explicitly opted in.
+// CALL_NOW / no-website path never gets Instagram — incompatible CTA type.
+const includeInstagram = !!req.body.includeInstagram && !isNoWebsiteLaunch;
+const adsetTargeting = includeInstagram
+  ? { ...targeting, publisher_platforms: ['facebook', 'instagram'] }
+  : targeting;
+
 const { data: adsetData } = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
   {
@@ -2663,7 +2670,7 @@ const { data: adsetData } = await axios.post(
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
     start_time: startISO,
     ...(endISO ? { end_time: endISO } : {}),
-    targeting,
+    targeting: adsetTargeting,
   },
   { params: mkParams() }
 );
@@ -2870,6 +2877,66 @@ const optimizerPayload = {
     res.status(500).json({ error: errorMsg, detail });
   }
 });
+
+// ---- Update live ad set: budget and/or end date ----
+// Budget and scheduling live on the ad set, not the campaign object.
+router.post('/facebook/adaccount/:accountId/update-adset', async (req, res) => {
+  const { accountId } = req.params;
+
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    accountId,
+    preferredOwnerKey: String(
+      req.body?.ownerKey || req.body?.owner_key || req.query?.ownerKey || ''
+    ).trim(),
+  });
+
+  const userToken = String(resolved?.userToken || '').trim();
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
+  const adsetId = String(req.body?.adsetId || '').trim();
+  if (!adsetId) {
+    return res.status(400).json({ error: 'adsetId is required' });
+  }
+
+  const rawBudget = req.body?.daily_budget;
+  const rawEndTime = req.body?.end_time;
+
+  const update = {};
+
+  if (rawBudget !== undefined && rawBudget !== null && rawBudget !== '') {
+    const cents = Math.max(100, Math.round(Number(rawBudget) * 100));
+    if (!isNaN(cents)) update.daily_budget = cents;
+  }
+
+  if (rawEndTime) {
+    try {
+      const d = new Date(rawEndTime);
+      if (!isNaN(d.getTime())) update.end_time = d.toISOString();
+    } catch {}
+  }
+
+  if (!Object.keys(update).length) {
+    return res.status(400).json({ error: 'No updatable fields provided (daily_budget, end_time)' });
+  }
+
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${adsetId}`,
+      update,
+      { params: { access_token: userToken } }
+    );
+
+    console.log('[update-adset] success', { adsetId, update });
+    return res.json({ ok: true, adsetId, updated: update });
+  } catch (err) {
+    const fbMsg = err?.response?.data?.error?.message || err?.message || 'Meta API error';
+    console.error('[update-adset] failed', { adsetId, update, error: fbMsg });
+    return res.status(500).json({ ok: false, error: fbMsg });
+  }
+});
+
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;

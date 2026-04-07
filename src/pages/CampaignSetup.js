@@ -2644,6 +2644,7 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     startDate: "",
     endDate: "",
   });
+  const [includeInstagram, setIncludeInstagram] = useState(false);
 
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
@@ -4346,6 +4347,9 @@ const payload = {
   flightStart: startISO,
   flightEnd: endISO,
 
+  // Instagram: only sent for website users. Backend enforces no-Instagram for CALL_NOW path.
+  includeInstagram: !isNoWebsite && includeInstagram,
+
   overrideCountPerType: {
     images: Math.min(2, filteredImages.length),
   },
@@ -4391,15 +4395,16 @@ console.log("[SM][launch payload]", {
           time: Date.now(),
           expiresAt,
           name: form.campaignName || "Untitled",
-        meta: {
-  headline: String(finalHeadline || "").trim(),
-  body: String(finalBody || "").trim(),
-  link:
-    String(websiteUrl || "").trim() ||
-    String(previewCopy?.link || inferredLink || "").trim() ||
-    "https://your-smartmark-site.com",
-},
-
+          // Persist adset ID so post-launch edits (budget/date) can target the correct Meta entity.
+          adsetId: String(Array.isArray(json.adSetIds) ? json.adSetIds[0] || "" : ""),
+          meta: {
+            headline: String(finalHeadline || "").trim(),
+            body: String(finalBody || "").trim(),
+            link:
+              String(websiteUrl || "").trim() ||
+              String(previewCopy?.link || inferredLink || "").trim() ||
+              "https://your-smartmark-site.com",
+          },
         };
         writeCreativeMap(resolvedUser, acctId, map);
       }
@@ -4669,11 +4674,17 @@ const selectedCampaignCreatives =
     setShowEditCampaignModal(true);
   };
 
-  const saveCurrentCampaignSettings = () => {
+  const saveCurrentCampaignSettings = async () => {
     if (!selectedLiveCampaign) return;
 
     const id = String(selectedLiveCampaign.id || "").trim();
+    const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
 
+    // Retrieve the stored adset ID for this campaign (written at launch time).
+    const creativeMapEntry = readCreativeMap(resolvedUser, acctId)[id] || {};
+    const adsetId = String(creativeMapEntry.adsetId || "").trim();
+
+    // Persist to local state first so the UI reflects the change immediately.
     setCampaignSettingsMap((prev) => ({
       ...prev,
       [id]: {
@@ -4684,6 +4695,51 @@ const selectedCampaignCreatives =
     }));
 
     setShowEditCampaignModal(false);
+
+    if (!adsetId) {
+      // No adset ID on record — likely a campaign launched before this feature.
+      // Local state is already updated; we cannot sync to Meta without the adset ID.
+      console.warn("[CampaignSetup] No adset ID on record for campaign", id, "— cannot sync to Meta.");
+      return;
+    }
+
+    // Build the update payload — only include fields the user actually filled in.
+    const updateBody = { adsetId };
+
+    const budgetVal = Number(editCampaignForm?.budget || 0);
+    if (budgetVal > 0) updateBody.daily_budget = budgetVal;
+
+    const endDateVal = String(editCampaignForm?.endDate || "").trim();
+    if (endDateVal) {
+      try {
+        const d = new Date(`${endDateVal}T18:00:00`);
+        if (!isNaN(d.getTime())) updateBody.end_time = d.toISOString();
+      } catch {}
+    }
+
+    if (!updateBody.daily_budget && !updateBody.end_time) return; // nothing to sync
+
+    try {
+      setLoading(true);
+      const res = await authFetch(`/facebook/adaccount/${acctId}/update-adset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updateBody),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const msg = json?.error || `HTTP ${res.status}`;
+        alert(`Could not update campaign on Facebook: ${msg}`);
+      } else {
+        console.log("[CampaignSetup] ad set updated on Meta", json);
+      }
+    } catch (err) {
+      alert(`Could not update campaign on Facebook: ${err?.message || "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
   };
   /* ================================ UI ================================ */
   return (
@@ -5833,6 +5889,38 @@ const selectedCampaignCreatives =
               />
             </div>
           </div>
+
+          {/* Instagram placement toggle — website users only */}
+          {String(answers?.noWebsite || "").toLowerCase() !== "yes" && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #dbe4ff",
+                background: "#f7f9ff",
+                cursor: "pointer",
+              }}
+              onClick={() => setIncludeInstagram((v) => !v)}
+            >
+              <input
+                type="checkbox"
+                checked={includeInstagram}
+                onChange={(e) => setIncludeInstagram(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#5b5cf0" }}
+              />
+              <div>
+                <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>
+                  Also run on Instagram
+                </div>
+                <div style={{ color: "#667085", fontWeight: 600, fontSize: 11, marginTop: 2 }}>
+                  Requires an Instagram account linked to your Facebook Page.
+                </div>
+              </div>
+            </div>
+          )}
 
           {!getUserFromStorage() && (
             <div

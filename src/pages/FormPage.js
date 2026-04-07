@@ -207,7 +207,7 @@ async function cacheImagesFor24h(ctxKey, urls) {
   return payload;
 }
 
-// ✅ If saved creatives don't match activeCtx, purge them (NAMESPACED)
+// ✅ If saved creatives don't match activeCtx, purge them (NAMESPACED + global fallback cleanup)
 function purgeCreativeDraftKeys() {
   try {
     lsRemove(CREATIVE_DRAFT_KEY);
@@ -219,6 +219,32 @@ function purgeCreativeDraftKeys() {
       sessionStorage.removeItem("draft_form_creatives");
       sessionStorage.removeItem("draft_form_creatives_v2");
     } catch {}
+  } catch {}
+
+  // Remove bare global keys that survive namespace-scoped lsRemove.
+  // These are the primary source of stale draft creatives reappearing in CampaignSetup
+  // when the user's namespace (SID) has changed between sessions.
+  try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
+  try { localStorage.removeItem(IMAGE_DRAFTS_KEY); } catch {}
+  try { localStorage.removeItem("sm_setup_creatives_backup_v1"); } catch {}
+
+  // Remove any stale SID-namespaced keys from old sessions (u:oldSid:draft_form_creatives_v3).
+  // Safe to iterate here: we only remove exact suffix matches on draft/image-drafts keys.
+  try {
+    const draftSuffix = `:${CREATIVE_DRAFT_KEY}`;
+    const imageSuffix = `:${IMAGE_DRAFTS_KEY}`;
+    const backupSuffix = `:sm_setup_creatives_backup_v1`;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (
+        k.endsWith(draftSuffix) ||
+        k.endsWith(imageSuffix) ||
+        k.endsWith(backupSuffix)
+      ) {
+        localStorage.removeItem(k);
+      }
+    }
   } catch {}
 }
 
