@@ -4892,9 +4892,9 @@ const selectedCampaignCreatives =
     style={{
       width: isMobile ? "100%" : 220,
       minWidth: isMobile ? "100%" : 220,
-      background: "#ffffff",
-      borderRight: isMobile ? "none" : "1px solid #e5e7eb",
-      borderBottom: isMobile ? "1px solid #e5e7eb" : "none",
+      background: "linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%)",
+      borderRight: isMobile ? "none" : "1px solid rgba(93,89,234,0.10)",
+      borderBottom: isMobile ? "1px solid rgba(93,89,234,0.10)" : "none",
       padding: isMobile ? "14px" : "18px 14px",
       display: "flex",
       flexDirection: isMobile ? "row" : "column",
@@ -4942,8 +4942,10 @@ const selectedCampaignCreatives =
             textAlign: "left",
             borderRadius: 14,
             padding: isMobile ? "12px 10px" : "12px 12px",
-            border: active ? "1px solid #c7d2fe" : "1px solid transparent",
-            background: active ? "#eef2ff" : "transparent",
+            border: active ? "1px solid rgba(93,89,234,0.22)" : "1px solid transparent",
+            background: active
+              ? "linear-gradient(120deg, #eef2ff 0%, #e4e8ff 100%)"
+              : "transparent",
             cursor: "pointer",
             transition: "all 180ms ease",
           }}
@@ -4957,10 +4959,13 @@ const selectedCampaignCreatives =
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: active ? "#4f46e5" : "#f1f5f9",
+              background: active
+                ? "linear-gradient(135deg, #5b57e8 0%, #6b66ff 100%)"
+                : "linear-gradient(135deg, #f1f5f9 0%, #e9ebf2 100%)",
               color: active ? "#ffffff" : "#475569",
               fontWeight: 900,
               fontSize: 11,
+              boxShadow: active ? "0 2px 8px rgba(91,87,232,0.28)" : "none",
             }}
           >
             {item.step}
@@ -4999,7 +5004,7 @@ const selectedCampaignCreatives =
   <div
     style={{
       flex: 1,
-      background: "#f8fafc",
+      background: "linear-gradient(180deg, #f7f8ff 0%, #f8fafc 55%, #f9fbff 100%)",
       padding: isMobile ? "16px" : "24px",
       display: "flex",
       flexDirection: "column",
@@ -5020,8 +5025,8 @@ const selectedCampaignCreatives =
 
         <div
           style={{
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
+            background: "linear-gradient(150deg, #ffffff 0%, #f7f8ff 60%, #f0f3ff 100%)",
+            border: "1px solid rgba(93,89,234,0.13)",
             borderRadius: 20,
             padding: isMobile ? 18 : 28,
             display: "flex",
@@ -5030,6 +5035,7 @@ const selectedCampaignCreatives =
             minHeight: 520,
             justifyContent: "center",
             alignItems: "center",
+            boxShadow: "0 8px 32px rgba(91,87,232,0.07)",
           }}
         >
           <div
@@ -5040,10 +5046,12 @@ const selectedCampaignCreatives =
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "#eef2ff",
+              background: "linear-gradient(135deg, #eef2ff 0%, #dde3ff 100%)",
+              border: "1px solid rgba(93,89,234,0.18)",
               color: "#4f46e5",
               fontSize: 30,
               fontWeight: 900,
+              boxShadow: "0 6px 22px rgba(93,89,234,0.16)",
             }}
           >
             f
@@ -5156,10 +5164,11 @@ const selectedCampaignCreatives =
           >
             <div
               style={{
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
+                background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+                border: "1px solid rgba(93,89,234,0.12)",
                 borderRadius: 16,
                 padding: 18,
+                boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
               }}
             >
               <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
@@ -5175,10 +5184,11 @@ const selectedCampaignCreatives =
 
             <div
               style={{
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
+                background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+                border: "1px solid rgba(93,89,234,0.12)",
                 borderRadius: 16,
                 padding: 18,
+                boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
               }}
             >
               <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
@@ -5209,14 +5219,15 @@ const selectedCampaignCreatives =
 
     <div
       style={{
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
+        background: "linear-gradient(150deg, #ffffff 0%, #f7f8ff 70%, #f0f3ff 100%)",
+        border: "1px solid rgba(93,89,234,0.12)",
         borderRadius: 20,
         padding: 22,
         display: "flex",
         flexDirection: "column",
         gap: 18,
         minHeight: 520,
+        boxShadow: "0 8px 32px rgba(91,87,232,0.07)",
       }}
     >
       {selectedCampaignId ? (
@@ -5285,10 +5296,11 @@ const selectedCampaignCreatives =
                       <div
                         key={`${img}-${idx}`}
                         style={{
-                          border: "1px solid #e5e7eb",
+                          border: "1px solid rgba(93,89,234,0.12)",
                           borderRadius: 18,
                           overflow: "hidden",
                           background: "#f8fafc",
+                          boxShadow: "0 4px 16px rgba(91,87,232,0.07)",
                         }}
                       >
                         <div
@@ -5390,10 +5402,10 @@ const selectedCampaignCreatives =
 
                 <div
                   style={{
-                    border: "1px solid #e5e7eb",
+                    border: "1px solid rgba(93,89,234,0.10)",
                     borderRadius: 16,
                     padding: 16,
-                    background: "#f8fafc",
+                    background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)",
                     display: "flex",
                     flexDirection: "column",
                     gap: 8,
@@ -5462,15 +5474,15 @@ const selectedCampaignCreatives =
         >
           <div
             style={{
-              background: "#ffffff",
-              border: "1px solid #dbe4ff",
+              background: "linear-gradient(160deg, #ffffff 0%, #f7f8ff 50%, #f0f3ff 100%)",
+              border: "1px solid rgba(93,89,234,0.14)",
               borderRadius: 22,
               padding: 22,
               display: "flex",
               flexDirection: "column",
               gap: 18,
               minHeight: 620,
-              boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
+              boxShadow: "0 16px 48px rgba(91,87,232,0.10), inset 0 1px 0 rgba(255,255,255,0.95)",
             }}
           >
            <div
@@ -6440,22 +6452,23 @@ const selectedCampaignCreatives =
 
     <div
       style={{
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
+        background: "linear-gradient(150deg, #ffffff 0%, #f7f8ff 70%, #f0f3ff 100%)",
+        border: "1px solid rgba(93,89,234,0.12)",
         borderRadius: 20,
         padding: 22,
         display: "flex",
         flexDirection: "column",
         gap: 16,
         minHeight: 520,
+        boxShadow: "0 8px 32px rgba(91,87,232,0.07)",
       }}
     >
       <div
         style={{
-          border: "1px solid #e5e7eb",
+          border: "1px solid rgba(93,89,234,0.10)",
           borderRadius: 14,
           padding: 16,
-          background: "#f8fafc",
+          background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)",
         }}
       >
         <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
@@ -6468,10 +6481,10 @@ const selectedCampaignCreatives =
 
       <div
         style={{
-          border: "1px solid #e5e7eb",
+          border: "1px solid rgba(93,89,234,0.10)",
           borderRadius: 14,
           padding: 16,
-          background: "#f8fafc",
+          background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)",
         }}
       >
         <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>
@@ -6487,10 +6500,10 @@ const selectedCampaignCreatives =
 
       <div
         style={{
-          border: "1px solid #e5e7eb",
+          border: "1px solid rgba(93,89,234,0.10)",
           borderRadius: 14,
           padding: 16,
-          background: "#f8fafc",
+          background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)",
         }}
       >
         <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>

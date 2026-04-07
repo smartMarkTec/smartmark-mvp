@@ -209,6 +209,14 @@ export default function Landing() {
           0%, 100% { transform: translate(0px, 0px) scale(1); }
           50%       { transform: translate(30px, 38px) scale(1.03); }
         }
+        @keyframes smPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.42; transform: scale(0.82); }
+        }
+        @keyframes smSheen {
+          0%   { transform: translateX(-120%) skewX(-12deg); }
+          100% { transform: translateX(280%) skewX(-12deg); }
+        }
       `}</style>
       <div style={{ position: "relative", overflow: "hidden" }}>
         {/* Static base radials — kept faint since blobs carry the glow now */}
@@ -401,6 +409,29 @@ export default function Landing() {
                 pointerEvents: "none",
               }}
             />
+            {/* Slow animated glass sheen */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                borderRadius: "inherit",
+                overflow: "hidden",
+                pointerEvents: "none",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-60%",
+                  left: 0,
+                  width: "35%",
+                  height: "220%",
+                  background:
+                    "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)",
+                  animation: "smSheen 9s ease-in-out infinite",
+                }}
+              />
+            </div>
             <div
               style={{
                 padding: isMobile ? "32px 24px 32px" : "60px 56px 60px",
@@ -477,17 +508,31 @@ export default function Landing() {
                 <div
                   style={{
                     background:
-                      "linear-gradient(140deg, rgba(255,255,255,0.82) 0%, rgba(245,246,255,0.90) 40%, rgba(141,134,255,0.12) 100%)",
-                    border: `1px solid ${BORDER}`,
+                      "linear-gradient(140deg, rgba(255,255,255,0.88) 0%, rgba(240,242,255,0.96) 50%, rgba(141,134,255,0.18) 100%)",
+                    border: "1px solid rgba(93,89,234,0.18)",
                     borderRadius: 28,
                     padding: 16,
-                    boxShadow: SOFT_SHADOW,
+                    boxShadow: "0 14px 42px rgba(83,77,212,0.12), inset 0 1px 0 rgba(255,255,255,0.94)",
+                    position: "relative",
                   }}
                 >
                   <div
                     style={{
-                      background: PANEL_STRONG,
-                      border: `1px solid ${BORDER}`,
+                      position: "absolute",
+                      top: 0,
+                      left: "10%",
+                      right: "10%",
+                      height: 1,
+                      background:
+                        "linear-gradient(90deg, transparent, rgba(123,114,255,0.28), transparent)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <div
+                    style={{
+                      background:
+                        "linear-gradient(145deg, rgba(255,255,255,0.99) 0%, rgba(246,247,255,0.97) 100%)",
+                      border: "1px solid rgba(93,89,234,0.10)",
                       borderRadius: 22,
                       padding: 20,
                     }}
@@ -525,17 +570,80 @@ export default function Landing() {
 
                       <div
                         style={{
-                          padding: "6px 11px",
+                          padding: "5px 11px 5px 8px",
                           borderRadius: 999,
                           background: "rgba(93,89,234,0.09)",
                           color: PURPLE,
                           fontWeight: 600,
                           fontSize: 11,
                           letterSpacing: "0.02em",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
                         }}
                       >
+                        <div
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: "#22c55e",
+                            flexShrink: 0,
+                            animation: "smPulse 2.4s ease-in-out infinite",
+                          }}
+                        />
                         Live
                       </div>
+                    </div>
+
+                    {/* Mini sparkline chart */}
+                    <div
+                      style={{
+                        marginBottom: 14,
+                        borderRadius: 12,
+                        background: "linear-gradient(135deg, #f5f6ff 0%, #eef0ff 100%)",
+                        border: "1px solid rgba(93,89,234,0.08)",
+                        padding: "10px 14px 8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: "#7b849f",
+                          fontWeight: 500,
+                          fontSize: 10,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          marginBottom: 8,
+                        }}
+                      >
+                        CTR trend — last 7 days
+                      </div>
+                      <svg
+                        width="100%"
+                        height="42"
+                        viewBox="0 0 280 42"
+                        preserveAspectRatio="none"
+                        style={{ display: "block" }}
+                      >
+                        <defs>
+                          <linearGradient id="smChartFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#5d59ea" stopOpacity="0.22" />
+                            <stop offset="100%" stopColor="#5d59ea" stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          d="M0,36 C30,34 55,30 85,24 C115,18 135,14 165,10 C195,6 230,4 280,2"
+                          fill="none"
+                          stroke="#5d59ea"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M0,36 C30,34 55,30 85,24 C115,18 135,14 165,10 C195,6 230,4 280,2 L280,42 L0,42 Z"
+                          fill="url(#smChartFill)"
+                        />
+                        <circle cx="280" cy="2" r="3" fill="#5d59ea" />
+                      </svg>
                     </div>
 
                     <div
