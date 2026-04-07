@@ -2153,6 +2153,29 @@ async function generatePosterBPair(runToken) {
             <FaArrowLeft />
             Back
           </button>
+
+          <button
+            onClick={() => navigate("/setup")}
+            style={{
+              background: "rgba(255,255,255,0.74)",
+              color: "#4c63ff",
+              border: "1px solid rgba(76,99,255,0.18)",
+              borderRadius: "1.2rem",
+              padding: "11px 18px",
+              fontWeight: 800,
+              fontSize: "1rem",
+              cursor: "pointer",
+              boxShadow: "0 8px 24px rgba(66,54,120,0.08)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+            }}
+            aria-label="Dashboard"
+          >
+            Dashboard
+          </button>
         </div>
 
         <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>

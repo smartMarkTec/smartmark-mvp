@@ -153,11 +153,24 @@ function FAQItem({ item, open, onToggle }) {
 export default function Landing() {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
   const [openFaq, setOpenFaq] = useState(-1);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 920);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const ns =
+        sessionStorage.getItem("sm_user_ns_v1") ||
+        localStorage.getItem("sm_user_ns_v1") ||
+        "anon";
+      setIsLoggedIn(!!ns && ns !== "anon");
+    } catch {
+      setIsLoggedIn(false);
+    }
   }, []);
 
   const goToForm = () => {
@@ -245,21 +258,41 @@ export default function Landing() {
                 Pricing
               </button>
 
-              <button
-                onClick={() => (window.location.href = "/login")}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: TEXT_SOFT,
-                  fontWeight: 800,
-                  fontSize: 15,
-                  cursor: "pointer",
-                  fontFamily: FONT,
-                  padding: "10px 6px",
-                }}
-              >
-                Login
-              </button>
+              {isLoggedIn ? (
+                <button
+                  onClick={() => (window.location.href = "/setup")}
+                  style={{
+                    background: "rgba(255,255,255,0.82)",
+                    border: `1px solid ${BORDER}`,
+                    color: PURPLE,
+                    fontWeight: 800,
+                    fontSize: 15,
+                    cursor: "pointer",
+                    fontFamily: FONT,
+                    padding: "10px 18px",
+                    borderRadius: 999,
+                    boxShadow: "0 4px 14px rgba(93,89,234,0.10)",
+                  }}
+                >
+                  Dashboard
+                </button>
+              ) : (
+                <button
+                  onClick={() => (window.location.href = "/login")}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: TEXT_SOFT,
+                    fontWeight: 800,
+                    fontSize: 15,
+                    cursor: "pointer",
+                    fontFamily: FONT,
+                    padding: "10px 6px",
+                  }}
+                >
+                  Login
+                </button>
+              )}
 
               <button
                 onClick={scrollToFaq}
