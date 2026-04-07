@@ -351,37 +351,51 @@ const safeSubline = (s = "") => {
 };
 
 const buildFallbackHeadline = () => {
-  const industry = String(a.industry || "").trim();
-  const benefit = String(a.mainBenefit || a.details || "").trim();
-  const audience = String(a.idealCustomer || "").trim();
+  // Derive from industry + location only — never from raw benefit text (too echo-prone).
+  const industry = String(a.industry || "").trim().toLowerCase();
+  const city = String(a.city || "").trim();
 
-  if (benefit) {
-    const words = benefit.split(/\s+/).filter(Boolean).slice(0, 6);
-    return safeHeadline(words.join(" "));
-  }
-  if (industry) return safeHeadline(`${industry} built for ${audience || "you"}`);
-  return safeHeadline("Results that fit your goals");
+  if (/hvac|heating|cooling|air/.test(industry))   return city ? `HVAC service in ${city}` : "Trusted local HVAC service";
+  if (/plumb/.test(industry))                       return city ? `Plumbing repairs in ${city}` : "Local plumbers ready to help";
+  if (/electr/.test(industry))                      return city ? `Electrical work in ${city}` : "Electrical work done right";
+  if (/roof/.test(industry))                        return city ? `Roofing in ${city}` : "Expert roofing, every job";
+  if (/landscap|lawn/.test(industry))               return city ? `Lawn care in ${city}` : "Yard work done professionally";
+  if (/clean|maid/.test(industry))                  return city ? `Cleaning service in ${city}` : "Professional cleaning done right";
+  if (/pest/.test(industry))                        return city ? `Pest control in ${city}` : "Pest-free home, guaranteed";
+  if (/market|advertis|agency/.test(industry))      return "Marketing that brings in real customers";
+  if (/dental|dent/.test(industry))                 return city ? `Dental care in ${city}` : "Dental care you can trust";
+  if (/legal|law/.test(industry))                   return city ? `Legal help in ${city}` : "Trusted legal advice";
+  if (/auto|car|vehicle/.test(industry))            return city ? `Auto repair in ${city}` : "Auto service done right";
+  if (/insur/.test(industry))                       return "Coverage that fits your situation";
+  if (/real.?estate|realt/.test(industry))          return city ? `Real estate in ${city}` : "Find the right home";
+  if (/restaurant|food|cater/.test(industry))       return city ? `Great food in ${city}` : "Fresh food, real flavor";
+  if (/fitness|gym|train/.test(industry))           return "Fitness results that actually stick";
+  if (/salon|hair|beauty/.test(industry))           return "Look great, feel confident";
+  if (/pet|animal|vet/.test(industry))              return "Compassionate care for your pet";
+  if (industry) return safeHeadline(city ? `${industry} service in ${city}` : `Professional ${industry} service`);
+  return "Local experts you can count on";
 };
 
 const buildFallbackSubline = (headline) => {
-  const industry = String(a.industry || "").trim();
-  const audience = String(a.idealCustomer || "").trim();
-  const benefit = String(a.mainBenefit || a.details || "").trim();
+  // Build from industry + audience + offer — never from raw benefit text (too echo-prone).
+  const industry = String(a.industry || "").trim().toLowerCase();
+  const audience = String(a.idealCustomer || "").trim().toLowerCase();
+  const city = String(a.city || "").trim();
   const offer = String(a.offer || a.saveAmount || "").trim();
 
-  const s1 = benefit
-    ? `Get ${benefit.toLowerCase()} without extra hassle.`
-    : industry
-      ? `Modern ${industry.toLowerCase()} designed to match your needs.`
-      : "A clean, modern option designed to match your needs.";
+  const s1 = industry
+    ? city
+      ? `Professional ${industry} service serving ${city} and the surrounding area.`
+      : `A professional ${industry} service built around what local customers actually need.`
+    : "A professional local service built around what customers actually need.";
 
   const s2 = audience
-    ? `Made for ${audience.toLowerCase()} who want a simple, reliable experience.`
-    : "Built for people who want a simple, reliable experience.";
+    ? `Ideal for ${audience} looking for reliable, honest service they can count on.`
+    : "Straightforward service, honest pricing, and quality that speaks for itself.";
 
   const s3 = offer
-    ? `If it fits, take advantage of the offer and get started.`
-    : "See what’s included and take the next step today.";
+    ? "Take advantage of the current offer and get in touch today."
+    : "Get in touch to learn what’s included and take the next step.";
 
   let out = `${s1} ${s2} ${s3}`.replace(/\s+/g, " ").trim();
   if (headline && norm(out).startsWith(norm(headline))) out = out.slice(headline.length).trim();
@@ -389,16 +403,19 @@ const buildFallbackSubline = (headline) => {
 };
 
 const system =
-  "You are a professional marketing copywriter who writes Facebook and Instagram ads for small and medium businesses. " +
-  "Write clear, specific, punchy copy. Sound like a competent marketer who knows the industry — not a generic template writer. Vary the angle: try problem-first one time, benefit-first another, outcome-focused another. Be concrete. " +
-  "Headline: state the main benefit or angle directly. 5–9 words. Be specific — name the service, outcome, or audience when you can. No vague fragments, no emotional manipulation. Good examples: 'Get faster HVAC repair without the runaround.' / 'Local plumbers ready when your pipes fail.' / 'Campaigns that bring in more qualified leads.' " +
-  "Subline: 2–3 sentences. Be specific about what the business does and who benefits. Use direct, concrete language. 20–50 words total. Vary sentence structure. Do not exaggerate outcomes or dramatize the reader's situation. " +
-  "PHONE RULE: If a Phone field is provided in the inputs, end the subline with a natural call phrase using that exact number. Examples: 'Call (713) 555-1234 to book service.' / 'Questions? Call (713) 555-1234.' Never invent a phone number. Never use a placeholder. " +
-  "CTA: a clear action phrase (e.g. 'Get a free estimate', 'Book a consultation', 'See how it works'). " +
-  "Bullets (if any): short, specific facts about what the business offers. No exaggeration. " +
-  "Return strict JSON with keys: headline (<=9 words), subline (2–3 sentences, 20–50 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
-  "Hard rules: NO URLs. NO 'our/we/I' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
-  "Do NOT write hype: 'transform', 'game-changer', 'effortlessly', 'no stress', 'fill your pipeline', 'just results that matter', 'imagine effortlessly', 'next level', 'take your X to the next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind'. " +
+  "You are an expert Facebook/Instagram ad copywriter for small and medium local businesses. " +
+  "CRITICAL RULE: The inputs below are raw business context — they are NOT ad copy. Do NOT summarize, restate, or echo words from the inputs. Use them only to understand what the business does and who it serves, then write fresh copy as a skilled copywriter would. " +
+  "Think: what does the customer want? What problem are they trying to solve? What would make them stop scrolling? Write from THAT angle. " +
+  "BAD (echoing input): 'Efficient HVAC service in San Antonio' — 'High-quality HVAC services, efficient and effective' — 'Professional marketing for businesses.' " +
+  "GOOD (writing like a copywriter): 'AC breaks in summer — we fix it today.' — 'Plumbers who answer the phone and show up.' — 'More leads in 30 days, or you know exactly why not.' " +
+  "Headline: 5–9 words. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
+  "Subline: 2–3 sentences, 20–50 words. Say what the business actually does, who it helps, and what makes it worth calling. Use plain, direct language a real customer would respond to. Vary sentence structure. No drama or exaggeration. " +
+  "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number — e.g. 'Call (713) 555-1234 to schedule.' / 'Reach us at (713) 555-1234.' Never invent or placeholder a phone number. " +
+  "CTA: a clear, specific action (e.g. 'Get a free quote', 'Book today', 'See how it works'). " +
+  "Bullets (if any): short, specific facts — not restatements of the headline. No exaggeration. " +
+  "Return strict JSON with keys: headline (<=9 words), subline (2–3 sentences, 20–50 words), offer (short if provided, else empty string), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
+  "Hard rules: NO URLs. NO 'our/we/I/my' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
+  "Do NOT write: 'transform', 'game-changer', 'effortlessly', 'no stress', 'next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind', 'fill your pipeline', 'just results that matter', 'take your X to the next level'. " +
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
 
 

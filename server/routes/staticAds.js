@@ -359,14 +359,14 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
 
   // Structural framing varies independently of mood so subject/layout diverge each run.
   const FRAMING_CUES = [
-    "Lead with the subject — make it the clear visual anchor, copy plays a supporting role.",
-    "Lead with the environment — let the setting establish mood before product or text appears prominently.",
-    "Lead with the copy — headline text is the primary element, imagery fills the background.",
-    "Lead with a close-up detail — bring texture, craft, or a finished result to the foreground.",
-    "Balanced split composition — image fills one half, copy block occupies the other with equal visual weight.",
-    "Full-bleed image with copy overlaid in the bottom third only — image dominates, text anchors low.",
-    "Minimal layout — mostly negative space, one strong visual element, copy small and precise.",
-    "Dynamic arrangement — subject and text placed on a diagonal or asymmetric axis for visual energy.",
+    "Lead with the subject as the clear visual anchor — headline sits bold and prominent over or below it.",
+    "Lead with the environment — let the setting fill the frame, headline overlaid large and legible on top.",
+    "Lead with the copy — headline text is the primary element, rendered large, with imagery as the background.",
+    "Lead with a close-up detail in the foreground — headline placed clearly above or below with strong contrast.",
+    "Balanced split composition — image fills one half, copy block with bold headline occupies the other.",
+    "Full-bleed image with a high-contrast copy bar anchored to the bottom third — headline large and clear.",
+    "Minimal layout — one strong visual element plus large, confident headline text with breathing room around it.",
+    "Dynamic diagonal or asymmetric arrangement — subject and bold headline balanced across a tilted axis.",
   ];
   const framingIdx = variationToken
     ? (tokenHash(variationToken + "framing") % FRAMING_CUES.length)
@@ -402,8 +402,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
+    `Typography: render the headline in large, bold, high-contrast type — it must be the most visually prominent element on the ad. Support text should be noticeably smaller. CTA should stand out as a distinct, readable element. Never let the headline be faint, small, or easy to overlook.`,
     `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout. Keep it believable and ready to run as a paid ad. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
-    `Copy rendering: the support line must be brief — keep it short enough to fit cleanly in the layout without truncating. Do not let it trail off or end mid-word.`,
+    `Copy rendering: the support line must be brief and complete — short enough to fit cleanly without truncating, and must end at a natural stopping point, not mid-thought or mid-word.`,
     `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
