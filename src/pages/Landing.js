@@ -12,7 +12,6 @@ const BORDER = "rgba(93, 89, 234, 0.12)";
 const PANEL_STRONG = "rgba(255,255,255,0.96)";
 const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
 const BTN_HOVER = "linear-gradient(135deg, #4358f4 0%, #554ce4 56%, #6f63fc 100%)";
-const SHADOW = "0 16px 42px rgba(83, 77, 212, 0.11)";
 const SOFT_SHADOW = "0 8px 24px rgba(83, 77, 212, 0.07)";
 
 const FAQS = [
@@ -195,14 +194,75 @@ export default function Landing() {
         color: TEXT,
       }}
     >
+      <style>{`
+        @keyframes smDrift1 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          33%       { transform: translate(38px, -30px) scale(1.06); }
+          66%       { transform: translate(-20px, 18px) scale(0.97); }
+        }
+        @keyframes smDrift2 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          40%       { transform: translate(-46px, 28px) scale(1.04); }
+          72%       { transform: translate(24px, -16px) scale(0.98); }
+        }
+        @keyframes smDrift3 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          50%       { transform: translate(30px, 38px) scale(1.03); }
+        }
+      `}</style>
       <div style={{ position: "relative", overflow: "hidden" }}>
+        {/* Static base radials — kept faint since blobs carry the glow now */}
         <div
           style={{
             position: "absolute",
             inset: 0,
             pointerEvents: "none",
             background:
-              "radial-gradient(circle at 12% 8%, rgba(123,114,255,0.09), transparent 32%), radial-gradient(circle at 84% 16%, rgba(93,89,234,0.08), transparent 30%)",
+              "radial-gradient(circle at 12% 8%, rgba(123,114,255,0.05), transparent 32%), radial-gradient(circle at 84% 16%, rgba(93,89,234,0.04), transparent 30%)",
+          }}
+        />
+
+        {/* Animated ambient blobs */}
+        <div
+          style={{
+            position: "absolute",
+            top: "-18%",
+            left: "-14%",
+            width: 700,
+            height: 700,
+            borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(118,108,255,0.17) 0%, transparent 68%)",
+            filter: "blur(56px)",
+            animation: "smDrift1 20s ease-in-out infinite",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "-10%",
+            right: "-16%",
+            width: 580,
+            height: 580,
+            borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(78,88,240,0.13) 0%, transparent 70%)",
+            filter: "blur(64px)",
+            animation: "smDrift2 27s ease-in-out infinite",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "28%",
+            left: "32%",
+            width: 480,
+            height: 480,
+            borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(148,138,255,0.09) 0%, transparent 70%)",
+            filter: "blur(72px)",
+            animation: "smDrift3 34s ease-in-out infinite",
+            pointerEvents: "none",
           }}
         />
 
@@ -321,13 +381,26 @@ export default function Landing() {
           {/* Hero */}
           <section
             style={{
-              background: "linear-gradient(135deg, rgba(255,255,255,0.86), rgba(255,255,255,0.72))",
-              border: `1px solid ${BORDER}`,
+              background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(255,255,255,0.76))",
+              border: "1px solid rgba(123,114,255,0.18)",
               borderRadius: 32,
               overflow: "hidden",
-              boxShadow: SHADOW,
+              boxShadow: "0 24px 64px rgba(83,77,212,0.13), inset 0 1px 0 rgba(255,255,255,0.95)",
+              position: "relative",
             }}
           >
+            {/* Top-edge light line for glass depth */}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: "6%",
+                right: "6%",
+                height: 1,
+                background: "linear-gradient(90deg, transparent, rgba(123,114,255,0.38), transparent)",
+                pointerEvents: "none",
+              }}
+            />
             <div
               style={{
                 padding: isMobile ? "32px 24px 32px" : "60px 56px 60px",
@@ -615,7 +688,7 @@ export default function Landing() {
                 <div
                   key={item.n}
                   style={{
-                    background: PANEL_STRONG,
+                    background: "linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(245,246,255,0.94) 100%)",
                     border: `1px solid ${BORDER}`,
                     borderRadius: 26,
                     padding: 24,
@@ -630,7 +703,8 @@ export default function Landing() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "rgba(93,89,234,0.08)",
+                      background: "linear-gradient(135deg, rgba(93,89,234,0.13) 0%, rgba(123,114,255,0.07) 100%)",
+                      border: "1px solid rgba(93,89,234,0.10)",
                       color: PURPLE,
                       fontWeight: 600,
                       fontSize: 13,
