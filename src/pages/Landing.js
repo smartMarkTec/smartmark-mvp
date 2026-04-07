@@ -4,16 +4,16 @@ import { FaBolt, FaChevronDown } from "react-icons/fa";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
-const BG = "linear-gradient(180deg, #cfd3ff 0%, #e6e8ff 42%, #f4f5ff 100%)";
+const BG = "linear-gradient(180deg, #edf0ff 0%, #f5f6ff 60%, #fafbff 100%)";
 const TEXT = "#101426";
 const TEXT_SOFT = "#626b86";
 const PURPLE = "#5d59ea";
-const BORDER = "rgba(93, 89, 234, 0.13)";
-const PANEL_STRONG = "rgba(255,255,255,0.94)";
+const BORDER = "rgba(93, 89, 234, 0.12)";
+const PANEL_STRONG = "rgba(255,255,255,0.96)";
 const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
 const BTN_HOVER = "linear-gradient(135deg, #4358f4 0%, #554ce4 56%, #6f63fc 100%)";
-const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.14)";
-const SOFT_SHADOW = "0 10px 28px rgba(83, 77, 212, 0.09)";
+const SHADOW = "0 16px 42px rgba(83, 77, 212, 0.11)";
+const SOFT_SHADOW = "0 8px 24px rgba(83, 77, 212, 0.07)";
 
 const FAQS = [
   {
@@ -48,13 +48,14 @@ function CTAButton({ children, onClick }) {
         background: hover ? BTN_HOVER : BTN,
         color: "#fff",
         borderRadius: 999,
-        padding: "15px 24px",
-        fontSize: 16,
-        fontWeight: 800,
+        padding: "13px 28px",
+        fontSize: 15,
+        fontWeight: 700,
         cursor: "pointer",
         fontFamily: FONT,
-        boxShadow: "0 12px 28px rgba(93,89,234,0.20)",
+        boxShadow: "0 8px 22px rgba(93,89,234,0.18)",
         transition: "all 160ms ease",
+        letterSpacing: "-0.01em",
       }}
     >
       {children}
@@ -68,14 +69,15 @@ function SectionTag({ children }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 8,
-        padding: "9px 14px",
+        gap: 7,
+        padding: "7px 13px",
         borderRadius: 999,
         border: `1px solid ${BORDER}`,
-        background: "rgba(255,255,255,0.58)",
+        background: "rgba(255,255,255,0.65)",
         color: PURPLE,
-        fontWeight: 800,
-        fontSize: 13,
+        fontWeight: 500,
+        fontSize: 12,
+        letterSpacing: "0.01em",
       }}
     >
       {children}
@@ -89,7 +91,7 @@ function FAQItem({ item, open, onToggle }) {
       style={{
         background: PANEL_STRONG,
         border: `1px solid ${BORDER}`,
-        borderRadius: 22,
+        borderRadius: 20,
         overflow: "hidden",
         boxShadow: SOFT_SHADOW,
       }}
@@ -101,7 +103,7 @@ function FAQItem({ item, open, onToggle }) {
           background: "transparent",
           border: "none",
           cursor: "pointer",
-          padding: "22px 22px",
+          padding: "22px 24px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -113,9 +115,9 @@ function FAQItem({ item, open, onToggle }) {
         <span
           style={{
             color: TEXT,
-            fontSize: 18,
-            fontWeight: 800,
-            lineHeight: 1.35,
+            fontSize: 16,
+            fontWeight: 600,
+            lineHeight: 1.4,
           }}
         >
           {item.q}
@@ -127,6 +129,7 @@ function FAQItem({ item, open, onToggle }) {
             flex: "0 0 auto",
             transform: open ? "rotate(180deg)" : "rotate(0deg)",
             transition: "transform 180ms ease",
+            opacity: 0.7,
           }}
         >
           <FaChevronDown />
@@ -136,11 +139,11 @@ function FAQItem({ item, open, onToggle }) {
       {open && (
         <div
           style={{
-            padding: "0 22px 22px",
+            padding: "0 24px 22px",
             color: TEXT_SOFT,
             fontSize: 15,
-            fontWeight: 600,
-            lineHeight: 1.75,
+            fontWeight: 400,
+            lineHeight: 1.8,
           }}
         >
           {item.a}
@@ -199,7 +202,7 @@ export default function Landing() {
             inset: 0,
             pointerEvents: "none",
             background:
-              "radial-gradient(circle at 10% 10%, rgba(123,114,255,0.18), transparent 28%), radial-gradient(circle at 86% 18%, rgba(93,89,234,0.16), transparent 26%), linear-gradient(125deg, rgba(255,255,255,0.16) 30%, rgba(123,114,255,0.10) 58%, rgba(93,89,234,0.12) 100%)",
+              "radial-gradient(circle at 12% 8%, rgba(123,114,255,0.09), transparent 32%), radial-gradient(circle at 84% 16%, rgba(93,89,234,0.08), transparent 30%)",
           }}
         />
 
@@ -207,11 +210,12 @@ export default function Landing() {
           style={{
             maxWidth: 1220,
             margin: "0 auto",
-            padding: isMobile ? "18px 18px 72px" : "20px 26px 88px",
+            padding: isMobile ? "18px 18px 80px" : "24px 32px 100px",
             position: "relative",
             zIndex: 1,
           }}
         >
+          {/* Nav */}
           <div
             style={{
               display: "flex",
@@ -219,16 +223,16 @@ export default function Landing() {
               alignItems: "center",
               gap: 18,
               flexWrap: "wrap",
-              marginBottom: isMobile ? 26 : 34,
-              padding: "8px 4px",
+              marginBottom: isMobile ? 32 : 52,
+              padding: "6px 0",
             }}
           >
             <div
               style={{
-                fontSize: 30,
-                fontWeight: 900,
+                fontSize: 22,
+                fontWeight: 700,
                 color: TEXT,
-                letterSpacing: -1.1,
+                letterSpacing: -0.6,
               }}
             >
               Smartemark
@@ -237,7 +241,7 @@ export default function Landing() {
             <div
               style={{
                 display: "flex",
-                gap: 12,
+                gap: 4,
                 flexWrap: "wrap",
                 alignItems: "center",
               }}
@@ -248,11 +252,11 @@ export default function Landing() {
                   background: "transparent",
                   border: "none",
                   color: TEXT_SOFT,
-                  fontWeight: 800,
-                  fontSize: 15,
+                  fontWeight: 500,
+                  fontSize: 14,
                   cursor: "pointer",
                   fontFamily: FONT,
-                  padding: "10px 6px",
+                  padding: "10px 14px",
                 }}
               >
                 Pricing
@@ -262,16 +266,16 @@ export default function Landing() {
                 <button
                   onClick={() => (window.location.href = "/setup")}
                   style={{
-                    background: "rgba(255,255,255,0.82)",
+                    background: "rgba(255,255,255,0.80)",
                     border: `1px solid ${BORDER}`,
                     color: PURPLE,
-                    fontWeight: 800,
-                    fontSize: 15,
+                    fontWeight: 600,
+                    fontSize: 14,
                     cursor: "pointer",
                     fontFamily: FONT,
-                    padding: "10px 18px",
+                    padding: "9px 18px",
                     borderRadius: 999,
-                    boxShadow: "0 4px 14px rgba(93,89,234,0.10)",
+                    boxShadow: "0 3px 10px rgba(93,89,234,0.08)",
                   }}
                 >
                   Dashboard
@@ -283,11 +287,11 @@ export default function Landing() {
                     background: "transparent",
                     border: "none",
                     color: TEXT_SOFT,
-                    fontWeight: 800,
-                    fontSize: 15,
+                    fontWeight: 500,
+                    fontSize: 14,
                     cursor: "pointer",
                     fontFamily: FONT,
-                    padding: "10px 6px",
+                    padding: "10px 14px",
                   }}
                 >
                   Login
@@ -300,11 +304,11 @@ export default function Landing() {
                   background: "transparent",
                   border: "none",
                   color: TEXT_SOFT,
-                  fontWeight: 800,
-                  fontSize: 15,
+                  fontWeight: 500,
+                  fontSize: 14,
                   cursor: "pointer",
                   fontFamily: FONT,
-                  padding: "10px 6px",
+                  padding: "10px 14px",
                 }}
               >
                 FAQ
@@ -314,22 +318,23 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* Hero */}
           <section
             style={{
-              background: "linear-gradient(135deg, rgba(255,255,255,0.82), rgba(255,255,255,0.68))",
+              background: "linear-gradient(135deg, rgba(255,255,255,0.86), rgba(255,255,255,0.72))",
               border: `1px solid ${BORDER}`,
-              borderRadius: 36,
+              borderRadius: 32,
               overflow: "hidden",
               boxShadow: SHADOW,
             }}
           >
             <div
               style={{
-                padding: isMobile ? "28px 22px 28px" : "44px 44px 44px",
+                padding: isMobile ? "32px 24px 32px" : "60px 56px 60px",
                 display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.1fr) minmax(390px, 0.9fr)",
-                gap: isMobile ? 28 : 32,
-                alignItems: "stretch",
+                gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.1fr) minmax(380px, 0.9fr)",
+                gap: isMobile ? 32 : 48,
+                alignItems: "center",
               }}
             >
               <div
@@ -347,13 +352,13 @@ export default function Landing() {
 
                 <h1
                   style={{
-                    margin: "22px 0 18px",
-                    fontSize: isMobile ? 48 : 72,
-                    lineHeight: isMobile ? 1.0 : 0.96,
+                    margin: "24px 0 20px",
+                    fontSize: isMobile ? 44 : 68,
+                    lineHeight: 1.04,
                     letterSpacing: "-0.05em",
                     fontWeight: 500,
                     color: TEXT,
-                    maxWidth: 700,
+                    maxWidth: 680,
                   }}
                 >
                   Launch ads
@@ -364,11 +369,11 @@ export default function Landing() {
                 <div
                   style={{
                     color: TEXT_SOFT,
-                    fontSize: isMobile ? 18 : 20,
-                    lineHeight: 1.7,
-                    fontWeight: 500,
-                    maxWidth: 760,
-                    marginBottom: 24,
+                    fontSize: isMobile ? 17 : 18,
+                    lineHeight: 1.8,
+                    fontWeight: 400,
+                    maxWidth: 520,
+                    marginBottom: 28,
                   }}
                 >
                   Smartemark learns your business, generates your creatives, launches campaigns,
@@ -380,13 +385,14 @@ export default function Landing() {
                     display: "flex",
                     gap: 14,
                     flexWrap: "wrap",
-                    marginBottom: 28,
+                    marginBottom: 8,
                   }}
                 >
                   <CTAButton onClick={goToForm}>Launch Campaign</CTAButton>
                 </div>
               </div>
 
+              {/* Mock dashboard card */}
               <div
                 style={{
                   minWidth: 0,
@@ -398,10 +404,10 @@ export default function Landing() {
                 <div
                   style={{
                     background:
-                      "linear-gradient(140deg, rgba(255,255,255,0.80) 0%, rgba(245,246,255,0.88) 40%, rgba(141,134,255,0.18) 100%)",
+                      "linear-gradient(140deg, rgba(255,255,255,0.82) 0%, rgba(245,246,255,0.90) 40%, rgba(141,134,255,0.12) 100%)",
                     border: `1px solid ${BORDER}`,
-                    borderRadius: 34,
-                    padding: 20,
+                    borderRadius: 28,
+                    padding: 16,
                     boxShadow: SOFT_SHADOW,
                   }}
                 >
@@ -409,7 +415,7 @@ export default function Landing() {
                     style={{
                       background: PANEL_STRONG,
                       border: `1px solid ${BORDER}`,
-                      borderRadius: 28,
+                      borderRadius: 22,
                       padding: 20,
                     }}
                   >
@@ -426,9 +432,9 @@ export default function Landing() {
                         <div
                           style={{
                             color: TEXT,
-                            fontSize: 18,
-                            fontWeight: 900,
-                            marginBottom: 4,
+                            fontSize: 15,
+                            fontWeight: 700,
+                            marginBottom: 3,
                           }}
                         >
                           AI ad manager
@@ -436,8 +442,8 @@ export default function Landing() {
                         <div
                           style={{
                             color: TEXT_SOFT,
-                            fontSize: 14,
-                            fontWeight: 700,
+                            fontSize: 13,
+                            fontWeight: 400,
                           }}
                         >
                           Campaign automation in motion
@@ -446,12 +452,13 @@ export default function Landing() {
 
                       <div
                         style={{
-                          padding: "8px 12px",
+                          padding: "6px 11px",
                           borderRadius: 999,
-                          background: "rgba(93,89,234,0.10)",
+                          background: "rgba(93,89,234,0.09)",
                           color: PURPLE,
-                          fontWeight: 900,
-                          fontSize: 12,
+                          fontWeight: 600,
+                          fontSize: 11,
+                          letterSpacing: "0.02em",
                         }}
                       >
                         Live
@@ -462,21 +469,21 @@ export default function Landing() {
                       style={{
                         display: "grid",
                         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 12,
+                        gap: 10,
                       }}
                     >
                       <div
                         style={{
                           background: "#ffffff",
                           border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
+                          borderRadius: 16,
+                          padding: 14,
                         }}
                       >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 11, marginBottom: 8, letterSpacing: "0.02em", textTransform: "uppercase" }}>
                           Impressions
                         </div>
-                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                        <div style={{ color: TEXT, fontWeight: 600, fontSize: 26, marginBottom: 2 }}>
                           34.2K
                         </div>
                       </div>
@@ -485,14 +492,14 @@ export default function Landing() {
                         style={{
                           background: "#ffffff",
                           border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
+                          borderRadius: 16,
+                          padding: 14,
                         }}
                       >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 11, marginBottom: 8, letterSpacing: "0.02em", textTransform: "uppercase" }}>
                           CTR
                         </div>
-                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                        <div style={{ color: TEXT, fontWeight: 600, fontSize: 26, marginBottom: 2 }}>
                           4.3%
                         </div>
                       </div>
@@ -501,14 +508,14 @@ export default function Landing() {
                         style={{
                           background: "#ffffff",
                           border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
+                          borderRadius: 16,
+                          padding: 14,
                         }}
                       >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 11, marginBottom: 8, letterSpacing: "0.02em", textTransform: "uppercase" }}>
                           Clicks
                         </div>
-                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
+                        <div style={{ color: TEXT, fontWeight: 600, fontSize: 26, marginBottom: 2 }}>
                           1,472
                         </div>
                       </div>
@@ -517,14 +524,14 @@ export default function Landing() {
                         style={{
                           background: "#ffffff",
                           border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
+                          borderRadius: 16,
+                          padding: 14,
                         }}
                       >
-                        <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
+                        <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 11, marginBottom: 8, letterSpacing: "0.02em", textTransform: "uppercase" }}>
                           AI Status
                         </div>
-                        <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
+                        <div style={{ color: TEXT, fontWeight: 600, fontSize: 20, marginBottom: 2 }}>
                           Optimizing
                         </div>
                       </div>
@@ -532,7 +539,7 @@ export default function Landing() {
 
                     <div
                       style={{
-                        marginTop: 16,
+                        marginTop: 18,
                         display: "flex",
                         justifyContent: "center",
                       }}
@@ -545,9 +552,10 @@ export default function Landing() {
             </div>
           </section>
 
+          {/* How it works */}
           <section
             style={{
-              marginTop: 64,
+              marginTop: 88,
             }}
           >
             <div
@@ -556,18 +564,18 @@ export default function Landing() {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 12,
-                marginBottom: 28,
+                gap: 10,
+                marginBottom: 36,
                 textAlign: "center",
               }}
             >
               <div
                 style={{
                   color: TEXT,
-                  fontSize: isMobile ? 38 : 52,
-                  lineHeight: 1,
-                  letterSpacing: "-0.05em",
-                  fontWeight: 700,
+                  fontSize: isMobile ? 32 : 42,
+                  lineHeight: 1.1,
+                  letterSpacing: "-0.04em",
+                  fontWeight: 500,
                 }}
               >
                 How it works
@@ -578,8 +586,8 @@ export default function Landing() {
               style={{
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
-                gap: 18,
-                marginBottom: 34,
+                gap: 16,
+                marginBottom: 40,
               }}
             >
               {[
@@ -596,7 +604,7 @@ export default function Landing() {
                 {
                   n: "03",
                   title: "Connect Facebook",
-                  body: "Use your own ad account, keep control, and launch without getting buried in Meta’s usual complexity.",
+                  body: "Use your own ad account, keep control, and launch without getting buried in Meta's usual complexity.",
                 },
                 {
                   n: "04",
@@ -609,25 +617,25 @@ export default function Landing() {
                   style={{
                     background: PANEL_STRONG,
                     border: `1px solid ${BORDER}`,
-                    borderRadius: 30,
-                    padding: 22,
+                    borderRadius: 26,
+                    padding: 24,
                     boxShadow: SOFT_SHADOW,
-                    minHeight: 250,
                   }}
                 >
                   <div
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 14,
+                      width: 38,
+                      height: 38,
+                      borderRadius: 12,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: "rgba(93,89,234,0.10)",
+                      background: "rgba(93,89,234,0.08)",
                       color: PURPLE,
-                      fontWeight: 900,
-                      fontSize: 14,
+                      fontWeight: 600,
+                      fontSize: 13,
                       marginBottom: 20,
+                      letterSpacing: "0.01em",
                     }}
                   >
                     {item.n}
@@ -636,9 +644,9 @@ export default function Landing() {
                   <div
                     style={{
                       color: TEXT,
-                      fontWeight: 800,
-                      fontSize: 24,
-                      lineHeight: 1.1,
+                      fontWeight: 600,
+                      fontSize: 18,
+                      lineHeight: 1.2,
                       marginBottom: 12,
                     }}
                   >
@@ -648,9 +656,9 @@ export default function Landing() {
                   <div
                     style={{
                       color: TEXT_SOFT,
-                      fontWeight: 600,
-                      fontSize: 15,
-                      lineHeight: 1.75,
+                      fontWeight: 400,
+                      fontSize: 14,
+                      lineHeight: 1.8,
                     }}
                   >
                     {item.body}
@@ -663,28 +671,29 @@ export default function Landing() {
               style={{
                 display: "flex",
                 justifyContent: "center",
-                marginTop: 10,
+                marginTop: 8,
               }}
             >
               <CTAButton onClick={goToForm}>Get Started</CTAButton>
             </div>
           </section>
 
+          {/* FAQ */}
           <section
             id="landing-faq"
             style={{
-              marginTop: 72,
-              paddingBottom: 30,
+              marginTop: 96,
+              paddingBottom: 40,
             }}
           >
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 24 }}>
               <SectionTag>FAQ</SectionTag>
             </div>
 
             <div
               style={{
                 display: "grid",
-                gap: 14,
+                gap: 12,
               }}
             >
               {FAQS.map((item, idx) => (
