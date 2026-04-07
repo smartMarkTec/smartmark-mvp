@@ -1507,46 +1507,62 @@ function MetricsRow({ metrics }) {
     <div style={{ position: "relative", width: "100%" }}>
       <div
         style={{
-          marginBottom: 10,
-          color: normalized.hasDelivery ? "#6ee7b7" : "#94a3b8",
-          fontWeight: 900,
-          fontSize: 12,
-          letterSpacing: 0.2,
+          marginBottom: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
         }}
       >
-        {normalized.hasDelivery ? "Delivery data received" : "No delivery data yet"}
+        {normalized.hasDelivery && (
+          <div
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: "#22c55e",
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <div
+          style={{
+            color: normalized.hasDelivery ? "#16a34a" : "#94a3b8",
+            fontWeight: 600,
+            fontSize: 12,
+          }}
+        >
+          {normalized.hasDelivery ? "Delivery data received" : "No delivery data yet"}
+        </div>
       </div>
 
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 12,
+          gap: 10,
         }}
       >
         {cards.map((c) => (
           <div
             key={c.key}
             style={{
-              minHeight: 86,
-              background: "linear-gradient(180deg, #182029 0%, #10161d 100%)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              color: "#f8fffc",
-              borderRadius: 16,
-              padding: "14px 14px",
+              background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+              border: "1px solid rgba(93,89,234,0.12)",
+              borderRadius: 14,
+              padding: "14px 16px",
               display: "flex",
               flexDirection: "column",
-              justifyContent: "space-between",
-              gap: 8,
-              boxShadow: "0 12px 24px rgba(15,23,42,0.16)",
+              gap: 10,
+              boxShadow: "0 4px 14px rgba(91,87,232,0.07)",
             }}
           >
             <div
               style={{
-                fontSize: 12,
-                color: "rgba(203,213,225,0.72)",
-                fontWeight: 900,
-                letterSpacing: 0.3,
+                fontSize: 10,
+                color: "#94a3b8",
+                fontWeight: 600,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
               }}
             >
               {c.label}
@@ -1554,10 +1570,10 @@ function MetricsRow({ metrics }) {
 
             <div
               style={{
-                fontSize: 18,
-                fontWeight: 900,
+                fontSize: 20,
+                fontWeight: 700,
                 lineHeight: 1.1,
-                color: "#f8fffc",
+                color: "#111827",
               }}
             >
               {c.value}
@@ -1735,18 +1751,32 @@ function MarketerActionsCard({ summary, optimizerState }) {
     >
       <div
         style={{
-          borderRadius: 16,
-          padding: 18,
-          background:
-            "linear-gradient(135deg, rgba(82,72,224,0.98), rgba(104,93,246,0.95), rgba(190,191,255,0.88))",
-          color: "#ffffff",
-          boxShadow: "0 18px 40px rgba(91,87,232,0.18)",
-          border: "1px solid rgba(255,255,255,0.16)",
+          borderRadius: 18,
+          padding: "20px 22px",
+          background: "linear-gradient(160deg, #ffffff 0%, #f5f6ff 55%, #eef0ff 100%)",
+          boxShadow: "0 12px 36px rgba(91,87,232,0.10), inset 0 1px 0 rgba(255,255,255,0.95)",
+          border: "1px solid rgba(93,89,234,0.14)",
           display: "flex",
           flexDirection: "column",
-          gap: 14,
+          gap: 16,
+          position: "relative",
+          overflow: "hidden",
         }}
       >
+        {/* Subtle top edge highlight */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "8%",
+            right: "8%",
+            height: 1,
+            background:
+              "linear-gradient(90deg, transparent, rgba(93,89,234,0.28), transparent)",
+            pointerEvents: "none",
+          }}
+        />
+
         <div
           style={{
             display: "flex",
@@ -1759,20 +1789,22 @@ function MarketerActionsCard({ summary, optimizerState }) {
           <div>
             <div
               style={{
-                fontWeight: 900,
-                fontSize: 22,
-                lineHeight: 1.1,
-                marginBottom: 6,
+                fontWeight: 600,
+                fontSize: 11,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                color: "#94a3b8",
+                marginBottom: 7,
               }}
             >
               AI Ad Manager
             </div>
             <div
               style={{
-                fontSize: 15,
-                fontWeight: 800,
-                lineHeight: 1.45,
-                color: "rgba(255,255,255,0.98)",
+                fontSize: 17,
+                fontWeight: 600,
+                lineHeight: 1.35,
+                color: "#111827",
               }}
             >
               {headline}
@@ -1781,14 +1813,16 @@ function MarketerActionsCard({ summary, optimizerState }) {
 
           <div
             style={{
-              padding: "8px 12px",
+              padding: "6px 12px",
               borderRadius: 999,
-              background: "rgba(255,255,255,0.16)",
-              border: "1px solid rgba(255,255,255,0.16)",
-              color: "#ffffff",
-              fontWeight: 900,
-              fontSize: 12,
+              background: "linear-gradient(135deg, #eef2ff 0%, #e4e8ff 100%)",
+              border: "1px solid rgba(93,89,234,0.18)",
+              color: "#4f46e5",
+              fontWeight: 700,
+              fontSize: 11,
+              letterSpacing: "0.02em",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             {isTesting ? "A/B Testing" : "Monitoring"}
@@ -1797,14 +1831,14 @@ function MarketerActionsCard({ summary, optimizerState }) {
 
         <div
           style={{
-            background: "rgba(255,255,255,0.12)",
-            border: "1px solid rgba(255,255,255,0.14)",
-            borderRadius: 14,
-            padding: 14,
+            background: "linear-gradient(135deg, #f7f8ff 0%, #f0f2ff 100%)",
+            border: "1px solid rgba(93,89,234,0.09)",
+            borderRadius: 12,
+            padding: "13px 15px",
             fontSize: 14,
-            lineHeight: 1.65,
-            color: "rgba(255,255,255,0.96)",
-            fontWeight: 700,
+            lineHeight: 1.7,
+            color: "#374151",
+            fontWeight: 400,
           }}
         >
           {detail}
@@ -1821,8 +1855,8 @@ function MarketerActionsCard({ summary, optimizerState }) {
         >
           <div
             style={{
-              color: "rgba(255,255,255,0.84)",
-              fontWeight: 800,
+              color: "#94a3b8",
+              fontWeight: 500,
               fontSize: 12,
             }}
           >
@@ -5270,17 +5304,38 @@ const selectedCampaignCreatives =
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      padding: "7px 11px",
-                      borderRadius: 999,
-                      background: "#eef2ff",
-                      color: "#4f46e5",
-                      fontWeight: 900,
-                      fontSize: 12,
-                    }}
-                  >
-                    {isDraftView ? "Draft Ready" : isTesting ? "A/B Testing" : "Monitoring"}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                    <div
+                      style={{
+                        padding: "7px 11px",
+                        borderRadius: 999,
+                        background: "#eef2ff",
+                        color: "#4f46e5",
+                        fontWeight: 900,
+                        fontSize: 12,
+                      }}
+                    >
+                      {isDraftView ? "Draft Ready" : isTesting ? "A/B Testing" : "Monitoring"}
+                    </div>
+                    {isDraftView && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCampaign("__DRAFT__")}
+                        style={{
+                          background: "#fff1f2",
+                          border: "1px solid #ffd6d6",
+                          borderRadius: 8,
+                          padding: "5px 10px",
+                          color: "#b42318",
+                          fontWeight: 700,
+                          fontSize: 11,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Clear draft creatives
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -5800,10 +5855,7 @@ const selectedCampaignCreatives =
 
         <div
           style={{
-            background: "#f7f9ff",
-            border: "1px solid #dbe4ff",
-            borderRadius: 18,
-            padding: 14,
+            padding: "2px 0",
           }}
         >
           <MetricsRow metrics={metricsMap[selectedCampaignId]} />
