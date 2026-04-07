@@ -2442,7 +2442,7 @@ if (rawCity && rawState) {
 
     if (match && match.key) {
       targeting.geo_locations = {
-        cities: [{ key: String(match.key), radius: 60, distance_unit: 'mile' }],
+        cities: [{ key: String(match.key), radius: 50, distance_unit: 'mile' }],
       };
       console.log('[LAUNCH][geo] city targeting resolved', {
         query: rawCity,
