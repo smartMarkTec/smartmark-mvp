@@ -2331,7 +2331,20 @@ let targeting = {
 if (aiAudience?.location) {
   const loc = String(aiAudience.location).trim();
   if (/^[A-Za-z]{2}$/.test(loc)) {
-    targeting.geo_locations = { countries: [loc.toUpperCase()] };
+    // Do not treat a US state abbreviation as a country code — the city/state
+    // targeting block below handles US state values. Only write a country code
+    // if it is a known 2-letter ISO country code that is not a US state.
+    const US_STATE_ABBRS = new Set([
+      'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+      'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+      'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+      'VA','WA','WV','WI','WY','DC',
+    ]);
+    if (!US_STATE_ABBRS.has(loc.toUpperCase())) {
+      targeting.geo_locations = { countries: [loc.toUpperCase()] };
+    }
+    // If it is a US state abbreviation, leave targeting as-is (countries: ['US'])
+    // and let the city/state block below apply city-level targeting.
   } else if (/united states|usa/i.test(loc)) {
     targeting.geo_locations = { countries: ['US'] };
   }

@@ -344,9 +344,27 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
+  // Hash the full token so mood is distributed across all 8 options, not locked to last char.
+  // djb2-style fold: each character contributes, so token suffix doesn't dominate.
+  function tokenHash(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+    return Math.abs(h);
+  }
   const moodIdx = variationToken
-    ? variationToken.charCodeAt(variationToken.length - 1) % VISUAL_MOODS.length
-    : 0;
+    ? tokenHash(variationToken) % VISUAL_MOODS.length
+    : Math.floor(Math.random() * VISUAL_MOODS.length);
+
+  // Structural framing varies independently of mood so subject/layout diverge each run.
+  const FRAMING_CUES = [
+    "Lead with the subject — make it the clear visual anchor.",
+    "Lead with the environment — let the setting establish context before the product appears.",
+    "Lead with the copy — make text the primary element and let imagery support it.",
+    "Lead with a close-up detail — bring texture or craft to the foreground.",
+  ];
+  const framingIdx = variationToken
+    ? (tokenHash(variationToken + "framing") % FRAMING_CUES.length)
+    : Math.floor(Math.random() * FRAMING_CUES.length);
 
   return [
     `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
@@ -363,7 +381,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
+    `Visual direction: ${VISUAL_MOODS[moodIdx]}. ${FRAMING_CUES[framingIdx]} Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
     .filter(Boolean)
