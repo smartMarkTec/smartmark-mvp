@@ -357,22 +357,41 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
 
   // Structural framing varies independently of mood so subject/layout diverge each run.
   const FRAMING_CUES = [
-    "Lead with the subject — make it the clear visual anchor.",
-    "Lead with the environment — let the setting establish context before the product appears.",
-    "Lead with the copy — make text the primary element and let imagery support it.",
-    "Lead with a close-up detail — bring texture or craft to the foreground.",
+    "Lead with the subject — make it the clear visual anchor, copy plays a supporting role.",
+    "Lead with the environment — let the setting establish mood before product or text appears prominently.",
+    "Lead with the copy — headline text is the primary element, imagery fills the background.",
+    "Lead with a close-up detail — bring texture, craft, or a finished result to the foreground.",
+    "Balanced split composition — image fills one half, copy block occupies the other with equal visual weight.",
+    "Full-bleed image with copy overlaid in the bottom third only — image dominates, text anchors low.",
+    "Minimal layout — mostly negative space, one strong visual element, copy small and precise.",
+    "Dynamic arrangement — subject and text placed on a diagonal or asymmetric axis for visual energy.",
   ];
   const framingIdx = variationToken
     ? (tokenHash(variationToken + "framing") % FRAMING_CUES.length)
     : Math.floor(Math.random() * FRAMING_CUES.length);
 
+  // Text placement varies independently — CTA and headline don't always sit in the same spot.
+  const TEXT_PLACEMENT_CUES = [
+    "Place the headline at the top of the ad with support text and CTA stacked below it.",
+    "Place the headline and CTA at the bottom — let the visual fill the upper portion completely.",
+    "Place the headline in the upper third; put the CTA in the lower-right corner as a standalone element.",
+    "Center the copy block mid-frame — headline large, support small below it, CTA at the bottom edge.",
+    "Overlay copy on the left side, leaving the right side purely visual with no text.",
+    "Place headline prominently mid-frame, support line small beneath it, CTA flush to the bottom edge.",
+  ];
+  const textPlacementIdx = variationToken
+    ? (tokenHash(variationToken + "textplace") % TEXT_PLACEMENT_CUES.length)
+    : Math.floor(Math.random() * TEXT_PLACEMENT_CUES.length);
+
   return [
     `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
     `Style: clean, polished, and believable — like a real paid social ad. No heavy border frames, no thick decorative edges, no flyer or poster layout. The image should feel like a modern social ad, not a printed announcement.`,
     ``,
-    `Ad copy:`,
+    `Layout: ${FRAMING_CUES[framingIdx]} ${TEXT_PLACEMENT_CUES[textPlacementIdx]}`,
+    ``,
+    `Ad copy to render:`,
     `  Headline: "${headline}"`,
-    supportLine ? `  Support (one short line, render it complete and readable): "${supportLine}"` : null,
+    supportLine ? `  Support (render it complete and readable): "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
     !website && phone ? `  Phone: ${phone}` : null,
@@ -381,7 +400,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Visual direction: ${VISUAL_MOODS[moodIdx]}. ${FRAMING_CUES[framingIdx]} Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
+    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout without forcing a template. Keep it believable and ready to run as a paid ad.`,
     `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]

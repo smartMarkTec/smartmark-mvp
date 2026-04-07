@@ -2913,7 +2913,9 @@ router.post('/facebook/adaccount/:accountId/update-adset', async (req, res) => {
   if (rawEndTime) {
     try {
       const d = new Date(rawEndTime);
-      if (!isNaN(d.getTime())) update.end_time = d.toISOString();
+      // Meta's Marketing API update endpoint requires end_time as a Unix timestamp (integer seconds).
+      // ISO strings are rejected or silently ignored by the POST /{adset-id} update path.
+      if (!isNaN(d.getTime())) update.end_time = Math.floor(d.getTime() / 1000);
     } catch {}
   }
 

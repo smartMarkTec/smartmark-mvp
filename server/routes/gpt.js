@@ -390,19 +390,24 @@ const buildFallbackSubline = (headline) => {
 
 const system =
   "You are a professional marketing copywriter who writes Facebook and Instagram ads for small and medium businesses. " +
-  "Write clear, practical, believable copy. Sound like a competent marketer — not a hype artist. The goal is to communicate what the business offers and why it is worth paying attention to, without drama or exaggeration. " +
-  "Headline: state the main benefit or angle directly. Short and specific. 5–8 words. No dramatic fragments, no emotional manipulation. Good examples: 'Marketing built to generate better leads.' / 'Reliable HVAC service when you need it.' / 'A simpler way to run your campaigns.' " +
-  "Subline: 2–3 sentences that support the headline. Be specific about what the business does and who benefits. Practical and professional. 20–40 words total. Do not exaggerate outcomes or dramatize the reader's situation. " +
-  "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number. Examples: 'Call (713) 555-1234 to book service.' / 'Questions? Call (713) 555-1234.' / 'Reach us at (713) 555-1234.' Never invent a phone number. Never use a placeholder." +
+  "Write clear, specific, punchy copy. Sound like a competent marketer who knows the industry — not a generic template writer. Vary the angle: try problem-first one time, benefit-first another, outcome-focused another. Be concrete. " +
+  "Headline: state the main benefit or angle directly. 5–9 words. Be specific — name the service, outcome, or audience when you can. No vague fragments, no emotional manipulation. Good examples: 'Get faster HVAC repair without the runaround.' / 'Local plumbers ready when your pipes fail.' / 'Campaigns that bring in more qualified leads.' " +
+  "Subline: 2–3 sentences. Be specific about what the business does and who benefits. Use direct, concrete language. 20–50 words total. Vary sentence structure. Do not exaggerate outcomes or dramatize the reader's situation. " +
+  "PHONE RULE: If a Phone field is provided in the inputs, end the subline with a natural call phrase using that exact number. Examples: 'Call (713) 555-1234 to book service.' / 'Questions? Call (713) 555-1234.' Never invent a phone number. Never use a placeholder. " +
   "CTA: a clear action phrase (e.g. 'Get a free estimate', 'Book a consultation', 'See how it works'). " +
   "Bullets (if any): short, specific facts about what the business offers. No exaggeration. " +
-  "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
+  "Return strict JSON with keys: headline (<=9 words), subline (2–3 sentences, 20–50 words), offer (short, if provided), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
   "Hard rules: NO URLs. NO 'our/we/I' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
   "Do NOT write hype: 'transform', 'game-changer', 'effortlessly', 'no stress', 'fill your pipeline', 'just results that matter', 'imagine effortlessly', 'next level', 'take your X to the next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind'. " +
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
 
 
-    const phoneForCopy = String(a.phone || "").trim();
+    // Phone must only appear in copy when the run is a no-website/call-only flow.
+    // If a website is present, never inject a phone even if a.phone is stale from a prior run.
+    const websiteForCopy = String(a.website || a.url || "").trim();
+    const isNoWebsiteRun = String(a.noWebsite || "").trim().toLowerCase() === "yes";
+    const phoneForCopy = (!websiteForCopy || isNoWebsiteRun) ? String(a.phone || "").trim() : "";
+
     const user = [
       `Industry: ${a.industry || ""}`,
       `Business: ${a.businessName || ""}`,
@@ -412,13 +417,13 @@ const system =
       `Offer: ${a.offer || a.saveAmount || ""}`,
       `Secondary: ${a.secondary || a.financingLine || ""}`,
       ...(phoneForCopy ? [`Phone: ${phoneForCopy}`] : []),
-      ...(String(a.noWebsite || "").trim().toLowerCase() === "yes" ? ["No website: this is a call-only business. Include the phone number naturally in the subline."] : []),
+      ...(isNoWebsiteRun ? ["No website: this is a call-only business. Include the phone number naturally in the subline."] : []),
     ].join("\n");
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.45, // more variety, less echo
-      max_tokens: 240,
+      temperature: 0.55,
+      max_tokens: 320,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -463,20 +468,20 @@ const system =
     subline = subline.replace(/^\s*(our|we)\b\s*/i, "").trim();
 
     // if headline echoes benefit too closely, regenerate fallback
-    if (mainBenefit && (jaccard(headline, mainBenefit) > 0.75 || norm(headline) === norm(mainBenefit))) {
+    if (mainBenefit && (jaccard(headline, mainBenefit) > 0.82 || norm(headline) === norm(mainBenefit))) {
       headline = buildFallbackHeadline();
     }
 
     if (!subline) subline = buildFallbackSubline(headline);
 
     // prevent repeats between headline and subline
-    if (jaccard(headline, subline) > 0.55 || norm(subline).startsWith(norm(headline))) {
+    if (jaccard(headline, subline) > 0.65 || norm(subline).startsWith(norm(headline))) {
       subline = buildFallbackSubline(headline);
     }
 
     // if still too close to full source, force fallbacks
-    if (jaccard(headline, source) > 0.65) headline = buildFallbackHeadline();
-    if (jaccard(subline, source) > 0.70) subline = buildFallbackSubline(headline);
+    if (jaccard(headline, source) > 0.72) headline = buildFallbackHeadline();
+    if (jaccard(subline, source) > 0.76) subline = buildFallbackSubline(headline);
 
     // bullets fallback
     if (!bullets.length) {
@@ -531,7 +536,7 @@ const finalizeSubline = (s = "", maxWords = 45) => {
 
 const copy = {
   headline: clamp(headline, 55),
-  subline: finalizeSubline(subline, 45), // <= change this number if you want (ex: 35, 50)
+  subline: finalizeSubline(subline, 55),
   offer,
   bullets,
   disclaimers,

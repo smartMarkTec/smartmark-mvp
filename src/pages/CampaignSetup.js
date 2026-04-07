@@ -2633,6 +2633,7 @@ useEffect(() => {
   const [modalImg, setModalImg] = useState("");
 
   const [showCampaignMenu, setShowCampaignMenu] = useState(false);
+  const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
 const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(false);
@@ -4407,6 +4408,21 @@ console.log("[SM][launch payload]", {
           },
         };
         writeCreativeMap(resolvedUser, acctId, map);
+
+        // Seed campaignSettingsMap with original values at launch time so the
+        // per-campaign details panel can always show original vs current.
+        setCampaignSettingsMap((prev) => ({
+          ...prev,
+          [json.campaignId]: {
+            ...prev[json.campaignId],
+            originalBudget: String(budget || "").trim(),
+            originalEndDate: String(endDate || "").trim(),
+            originalStartDate: String(startDate || "").trim(),
+            budget: String(budget || "").trim(),
+            endDate: String(endDate || "").trim(),
+            startDate: String(startDate || "").trim(),
+          },
+        }));
       }
 
          // ✅ After successful launch: prevent "in progress" from coming back
@@ -5540,6 +5556,7 @@ const selectedCampaignCreatives =
         setSelectedCampaignId(e.target.value);
         setExpandedId(e.target.value);
         setShowCampaignMenu(false);
+        setShowCampaignDetails(false);
       }}
       style={{
         padding: "12px 14px",
@@ -5652,6 +5669,27 @@ const selectedCampaignCreatives =
       >
         <button
           type="button"
+          onClick={() => {
+            setShowCampaignMenu(false);
+            setShowCampaignDetails((v) => !v);
+          }}
+          style={{
+            background: "#ffffff",
+            color: "#111827",
+            border: "none",
+            textAlign: "left",
+            padding: "10px 12px",
+            borderRadius: 10,
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Campaign details
+        </button>
+
+        <button
+          type="button"
           onClick={openEditCurrentCampaign}
           style={{
             background: "#ffffff",
@@ -5692,6 +5730,42 @@ const selectedCampaignCreatives =
     )}
   </div>
 </div>
+
+{showCampaignDetails && selectedLiveCampaign && (() => {
+  const detId = String(selectedLiveCampaign.id || "").trim();
+  const det = campaignSettingsMap[detId] || {};
+  const fmtBudget = (v) => v && v !== "—" ? `$${v}/day` : "—";
+  const fmtDate = (v) => v && v !== "—" ? v : "—";
+  return (
+    <div
+      style={{
+        background: "#f7f9ff",
+        border: "1px solid #dbe4ff",
+        borderRadius: 14,
+        padding: "14px 18px",
+        marginTop: 8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ color: "#111827", fontWeight: 900, fontSize: 13, marginBottom: 2 }}>
+        Campaign Details
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 18px" }}>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>Original budget</div>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>Current budget</div>
+        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtBudget(det.originalBudget)}</div>
+        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtBudget(det.budget)}</div>
+
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginTop: 4 }}>Original end date</div>
+        <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginTop: 4 }}>Current end date</div>
+        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtDate(det.originalEndDate)}</div>
+        <div style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{fmtDate(det.endDate)}</div>
+      </div>
+    </div>
+  );
+})()}
 
            {selectedCampaignId ? (
   <>
