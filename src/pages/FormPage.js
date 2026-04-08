@@ -1412,7 +1412,6 @@ const displayLink = normalizeUrlForCopy(
       ssRemove("draft_form_creatives");
 
       lsRemove(IMAGE_DRAFTS_KEY);
-      lsRemove(IMAGE_GEN_QUOTA_KEY); // helpful during testing
       lsRemove(IMAGE_CACHE_KEY);
 
       // reset run ctx

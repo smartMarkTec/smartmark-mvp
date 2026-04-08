@@ -1466,6 +1466,7 @@ function CreativeThumbGrid({ items = [], labels = [], onOpen, height = 170 }) {
 
 /* ---------- Minimal metrics row ---------- */
 function MetricsRow({ metrics }) {
+  const isMobile = useIsMobile();
   const safeNum = (v, fallback = 0) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : fallback;
@@ -1538,7 +1539,7 @@ function MetricsRow({ metrics }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, minmax(0, 1fr))",
           gap: 10,
         }}
       >
@@ -4982,11 +4983,12 @@ const selectedCampaignCreatives =
             flex: isMobile ? 1 : "unset",
             display: "flex",
             alignItems: "center",
-            gap: 12,
+            justifyContent: isMobile ? "center" : "flex-start",
+            gap: isMobile ? 0 : 12,
             width: "100%",
             textAlign: "left",
             borderRadius: 14,
-            padding: isMobile ? "12px 10px" : "12px 12px",
+            padding: isMobile ? "10px 4px" : "12px 12px",
             border: active ? "1px solid rgba(93,89,234,0.22)" : "1px solid transparent",
             background: active
               ? "linear-gradient(120deg, #eef2ff 0%, #e4e8ff 100%)"
@@ -5016,19 +5018,19 @@ const selectedCampaignCreatives =
             {item.step}
           </div>
 
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                color: "#0f172a",
-                fontWeight: 900,
-                fontSize: 14,
-                lineHeight: 1.2,
-                marginBottom: 2,
-              }}
-            >
-              {item.title}
-            </div>
-            {!isMobile && (
+          {!isMobile && (
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  color: "#0f172a",
+                  fontWeight: 900,
+                  fontSize: 14,
+                  lineHeight: 1.2,
+                  marginBottom: 2,
+                }}
+              >
+                {item.title}
+              </div>
               <div
                 style={{
                   color: "#64748b",
@@ -5039,8 +5041,8 @@ const selectedCampaignCreatives =
               >
                 {item.subtitle}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </button>
       );
     })}
