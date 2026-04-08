@@ -4907,9 +4907,9 @@ const selectedCampaignCreatives =
           flexDirection: isMobile ? "column" : "row",
           alignItems: "flex-start",
           justifyContent: "center",
-          marginTop: isMobile ? 56 : 64,
-          gap: isMobile ? 28 : 52,
-          padding: isMobile ? "0 4vw 40px" : "0 36px 48px",
+          marginTop: isMobile ? 42 : 64,
+          gap: isMobile ? 16 : 52,
+          padding: isMobile ? "0 3vw 28px" : "0 36px 48px",
           minHeight: "92vh",
           position: "relative",
           zIndex: 1,
@@ -4941,10 +4941,10 @@ const selectedCampaignCreatives =
       background: "linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%)",
       borderRight: isMobile ? "none" : "1px solid rgba(93,89,234,0.10)",
       borderBottom: isMobile ? "1px solid rgba(93,89,234,0.10)" : "none",
-      padding: isMobile ? "14px" : "18px 14px",
+      padding: isMobile ? "10px 12px" : "18px 14px",
       display: "flex",
       flexDirection: isMobile ? "row" : "column",
-      gap: 10,
+      gap: isMobile ? 6 : 10,
     }}
   >
   {[
@@ -5052,11 +5052,11 @@ const selectedCampaignCreatives =
     style={{
       flex: 1,
       background: "linear-gradient(180deg, #f7f8ff 0%, #f8fafc 55%, #f9fbff 100%)",
-      padding: isMobile ? "16px" : "24px",
+      padding: isMobile ? "14px" : "24px",
       display: "flex",
       flexDirection: "column",
-      gap: 18,
-      minHeight: 720,
+      gap: isMobile ? 14 : 18,
+      minHeight: isMobile ? 0 : 720,
     }}
   >
     {setupTab === "connect" && (

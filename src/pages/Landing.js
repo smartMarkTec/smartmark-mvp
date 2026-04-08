@@ -330,7 +330,23 @@ export default function Landing() {
                 Pricing
               </button>
 
-              {isLoggedIn ? (
+              <button
+                onClick={() => (window.location.href = "/login")}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: TEXT_SOFT,
+                  fontWeight: 500,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                  padding: "10px 14px",
+                }}
+              >
+                Login
+              </button>
+
+              {isLoggedIn && (
                 <button
                   onClick={() => (window.location.href = "/setup")}
                   style={{
@@ -347,22 +363,6 @@ export default function Landing() {
                   }}
                 >
                   Dashboard
-                </button>
-              ) : (
-                <button
-                  onClick={() => (window.location.href = "/login")}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    color: TEXT_SOFT,
-                    fontWeight: 500,
-                    fontSize: 14,
-                    cursor: "pointer",
-                    fontFamily: FONT,
-                    padding: "10px 14px",
-                  }}
-                >
-                  Login
                 </button>
               )}
 
