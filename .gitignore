@@ -23,6 +23,10 @@ server/tmp/
 server/data/*.txt
 server/data/*.docx
 
+# Raw and hold knowledge PDFs — local ingestion only, not needed in production
+server/data/knowledge/marketing/raw/*.pdf
+server/data/knowledge/marketing/hold/*.pdf
+
 # testing
 /coverage
 
