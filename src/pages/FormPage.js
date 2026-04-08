@@ -333,8 +333,8 @@ function clearDraftDisabled() {
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
-// TEMP TESTING: disable gen limit
-const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 3;
+// Plan-aware limit — updated from whoami on mount; defaults to 3 (Standard) until resolved
+let IMAGE_GEN_MAX_RUNS_PER_WINDOW = 3;
 
 function loadGenQuota() {
   try {
@@ -1052,6 +1052,7 @@ useEffect(() => {
         const j = await res.json().catch(() => ({}));
         const u = j?.user?.username || j?.user?.email || sid || "anon";
         setUserNS(u);
+        if (j?.maxImageRegens > 0) IMAGE_GEN_MAX_RUNS_PER_WINDOW = j.maxImageRegens;
         return;
       }
 

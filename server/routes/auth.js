@@ -61,6 +61,7 @@ function getLaunchPlanLimits(planKey) {
       maxBusinesses: 3,
       maxAdAccounts: 3,
       imageVariants: 2,
+      maxImageRegens: 20,
     };
   }
 
@@ -72,6 +73,7 @@ function getLaunchPlanLimits(planKey) {
       maxBusinesses: 2,
       maxAdAccounts: 2,
       imageVariants: 2,
+      maxImageRegens: 10,
     };
   }
 
@@ -82,6 +84,7 @@ function getLaunchPlanLimits(planKey) {
     maxBusinesses: 1,
     maxAdAccounts: 1,
     imageVariants: 1,
+    maxImageRegens: 3,
   };
 }
 
@@ -1974,7 +1977,13 @@ router.get('/whoami', async (req, res) => {
     const s = await requireSession(req);
     if (!s.ok) return res.status(s.status).json({ error: s.error });
 
-    res.json({ success: true, user: { username: s.user.username, email: s.user.email } });
+    const planLimits = getLaunchPlanLimits(s.user?.billing?.planKey || 'starter');
+    res.json({
+      success: true,
+      user: { username: s.user.username, email: s.user.email },
+      planKey: planLimits.planKey,
+      maxImageRegens: planLimits.maxImageRegens,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
   }
