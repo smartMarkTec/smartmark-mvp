@@ -886,6 +886,7 @@ export default function FormPage() {
   const [activeImage, setActiveImage] = useState(0);
   const [imageUrl, setImageUrl] = useState("");
 
+  const [regenLimit, setRegenLimit] = useState(IMAGE_GEN_MAX_RUNS_PER_WINDOW);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -1052,7 +1053,10 @@ useEffect(() => {
         const j = await res.json().catch(() => ({}));
         const u = j?.user?.username || j?.user?.email || sid || "anon";
         setUserNS(u);
-        if (j?.maxImageRegens > 0) IMAGE_GEN_MAX_RUNS_PER_WINDOW = j.maxImageRegens;
+        if (j?.maxImageRegens > 0) {
+          IMAGE_GEN_MAX_RUNS_PER_WINDOW = j.maxImageRegens;
+          setRegenLimit(j.maxImageRegens);
+        }
         return;
       }
 
@@ -2483,7 +2487,7 @@ async function generatePosterBPair(runToken) {
             <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
               {(() => {
                 const q = loadGenQuota();
-                const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
+                const remaining = Math.max(0, regenLimit - (q.used || 0));
 
                 const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
                 const hrs = Math.floor(totalMins / 60);
@@ -2491,7 +2495,7 @@ async function generatePosterBPair(runToken) {
 
                 const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
 
-                return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${resetStr})`;
+                return `Generations left today: ${remaining}/${regenLimit} (resets in ~${resetStr})`;
               })()}
             </div>
           </div>

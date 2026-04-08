@@ -1719,7 +1719,7 @@ function buildOptimizerHistoryItems(optimizerState) {
     .slice(0, 4);
 }
 
-function MarketerActionsCard({ summary, optimizerState }) {
+function MarketerActionsCard({ summary, optimizerState, metrics }) {
   const safeSummary = summary || getFallbackPublicSummary();
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
@@ -1728,17 +1728,28 @@ function MarketerActionsCard({ summary, optimizerState }) {
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
   const isTesting = pendingStatus === "live" || pendingStatus === "ready" || pendingStatus === "staged";
 
-  const headline =
-    isTesting
-      ? "Creative test in progress"
-      : latest?.title || safeSummary?.headline || "Monitoring campaign performance";
+  const hasRealSummary = optimizerState?.publicSummary?.headline || latest;
+  const hasMetrics =
+    metrics &&
+    (Number(metrics.impressions) > 0 ||
+      Number(metrics.clicks) > 0 ||
+      Number(metrics.spend) > 0);
 
-  const detail =
-    isTesting
-      ? "Smartemark is running a controlled creative test with a limited number of ads and waiting for enough data before choosing a winner."
-      : latest?.detail ||
-        safeSummary?.subtext ||
-        "Smartemark is monitoring the campaign and will only make changes when the data clearly supports it.";
+  const headline = isTesting
+    ? "Creative test in progress"
+    : hasRealSummary
+    ? latest?.title || safeSummary?.headline
+    : hasMetrics
+    ? "Monitoring live performance"
+    : "Gathering delivery data";
+
+  const detail = isTesting
+    ? "Smartemark is running a controlled creative test with a limited number of ads and waiting for enough data before choosing a winner."
+    : hasRealSummary
+    ? latest?.detail || safeSummary?.subtext
+    : hasMetrics
+    ? `Tracking impressions, CTR, CPC, and spend. Smartemark will act when the data clearly supports a change.`
+    : "Smartemark is collecting early delivery signals. The AI will begin optimizing once enough data has been gathered.";
 
   return (
     <div
@@ -5851,6 +5862,7 @@ const selectedCampaignCreatives =
         <MarketerActionsCard
           summary={selectedOptimizerSummary}
           optimizerState={selectedOptimizerState}
+          metrics={metricsMap[selectedCampaignId]}
         />
 
         <div

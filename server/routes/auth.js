@@ -84,7 +84,7 @@ function getLaunchPlanLimits(planKey) {
     maxBusinesses: 1,
     maxAdAccounts: 1,
     imageVariants: 1,
-    maxImageRegens: 3,
+    maxImageRegens: 5,
   };
 }
 
