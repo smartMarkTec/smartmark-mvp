@@ -219,7 +219,8 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
   const copyHeadline = clean(craftedCopy.headline || "");
 
   // 1. Use pre-crafted headline only if it doesn't look like raw user input
-  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return clip(copyHeadline, 45);
+  // Keep to ≤28 chars (~4-5 words) so image AI renders it complete without clipping
+  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return clip(copyHeadline, 28);
 
   // Combine incoming copy + raw benefit as source material for pattern matching
   const rawPool = copyHeadline || clean(a.mainBenefit || a.benefit || "");
@@ -234,7 +235,7 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
   const mainBenefit = clean(a.mainBenefit || a.benefit || "");
   const benefitWords = mainBenefit.split(/\s+/).filter(Boolean);
   if (mainBenefit && benefitWords.length <= 4 && !looksLikeRawClaim(mainBenefit)) {
-    return clip(titleCase(mainBenefit), 45);
+    return clip(titleCase(mainBenefit), 28);
   }
 
   // 4. Industry-specific short headlines (randomized to avoid repetition)
@@ -260,7 +261,7 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 
   // 5. Short business name as final fallback
   const businessName = clean(a.businessName || a.brand || "");
-  if (businessName && businessName.split(/\s+/).length <= 3) return clip(businessName, 45);
+  if (businessName && businessName.split(/\s+/).length <= 3) return clip(businessName, 28);
 
   return "Local Experts, Real Results";
 }
@@ -404,7 +405,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     ``,
     `Typography: render the headline in large, bold, high-contrast type — it must be the most visually prominent element on the ad. Support text should be noticeably smaller. CTA should stand out as a distinct, readable element. Never let the headline be faint, small, or easy to overlook.`,
     `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout. Keep it believable and ready to run as a paid ad. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
-    `Copy rendering: the support line must be brief and complete — short enough to fit cleanly without truncating, and must end at a natural stopping point, not mid-thought or mid-word.`,
+    `Copy rendering: CRITICAL — both the headline and the support line must render fully complete on the image. The headline is short (4–5 words maximum) and must never be cut off, clipped, or end with "...". The support line must end at a natural stopping point — not mid-word or mid-thought. If a line does not fit at the chosen size, reduce font size until the entire line is visible. Never sacrifice completeness for size.`,
     `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]

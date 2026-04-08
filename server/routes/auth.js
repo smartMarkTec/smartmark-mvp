@@ -2675,7 +2675,7 @@ const { data: adsetData } = await axios.post(
     billing_event: 'IMPRESSIONS',
     optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    destination_type: 'WEBSITE',
+    destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
     start_time: startISO,
     ...(endISO ? { end_time: endISO } : {}),
