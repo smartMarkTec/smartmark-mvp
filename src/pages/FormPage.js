@@ -856,7 +856,18 @@ const INITIAL_CHAT = [
 ];
 
 /* ========================= Main Component ========================= */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
+  React.useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return isMobile;
+}
+
 export default function FormPage() {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const chatBoxRef = useRef();
   const inputRef = useRef();
@@ -1925,6 +1936,11 @@ async function generatePosterBPair(runToken) {
   setActiveImage(0);
   setImageUrl(urls[0] || "");
 
+  // Cache images as DataURLs so previews survive Render restarts (ephemeral filesystem)
+  if (urls.length) {
+    cacheImagesFor24h(getActiveCtx(), urls).catch(() => {});
+  }
+
   // Surface AI copy immediately so displayHeadline / displayBody show it.
   if (aiHeadline || aiBody) {
     setResult((prev) => ({
@@ -2133,7 +2149,7 @@ async function generatePosterBPair(runToken) {
         }}
       />
        <div style={{ width: "100%", maxWidth: 980, padding: "28px 20px 0", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button
             onClick={() => navigate("/")}
             style={{
@@ -2186,7 +2202,7 @@ async function generatePosterBPair(runToken) {
           <h1
             style={{
               margin: 0,
-              fontSize: "2.45rem",
+              fontSize: isMobile ? "1.7rem" : "2.45rem",
               lineHeight: 1.15,
               letterSpacing: "-0.8px",
               color: "#1a1a22",
@@ -2209,7 +2225,7 @@ async function generatePosterBPair(runToken) {
           borderRadius: 28,
           border: `1px solid ${EDGE}`,
           boxShadow: "0 16px 42px rgba(66,54,120,0.10)",
-          padding: "26px 26px 22px 26px",
+          padding: isMobile ? "14px 12px 12px" : "26px 26px 22px 26px",
           display: "flex",
           flexDirection: "column",
           alignItems: "stretch",
@@ -2415,14 +2431,14 @@ async function generatePosterBPair(runToken) {
         <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>Ad Previews</div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? 12 : 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
         <div
           style={{
             background: "#fff",
             borderRadius: 13,
             boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
+            minWidth: isMobile ? "92vw" : 340,
+            maxWidth: isMobile ? "96vw" : 390,
             flex: 1,
             marginBottom: 20,
             padding: "0px 0px 14px 0px",

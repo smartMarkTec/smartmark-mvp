@@ -116,6 +116,16 @@ function clip(s, max) {
   return out.length > max ? `${out.slice(0, max - 3).trim()}...` : out;
 }
 
+/* Truncate at the last word boundary — no trailing "..." so the model renders the
+   full text rather than the ellipsis character literally. */
+function wordTrim(s, maxChars) {
+  const out = clean(s);
+  if (!out || out.length <= maxChars) return out;
+  const sub = out.slice(0, maxChars);
+  const lastSpace = sub.lastIndexOf(" ");
+  return lastSpace > 4 ? sub.slice(0, lastSpace) : sub.slice(0, maxChars);
+}
+
 function safeFilenamePart(s) {
   return clean(s).replace(/[^a-z0-9-_]+/gi, "-").replace(/-+/g, "-");
 }
@@ -343,7 +353,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
   const website = clean(a.website || a.url || "");
   const phone = clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
-  const headline = deriveHeadline(a, craftedCopy);
+  const headline = wordTrim(deriveHeadline(a, craftedCopy), 28);
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
@@ -475,13 +485,8 @@ async function generateOpenAIAdImageBuffers({
 
 function looksLikeLogoUrl(url) {
   const u = clean(url).toLowerCase();
-  return (
-    /logo/.test(u) ||
-    /brand/.test(u) ||
-    /navbar/.test(u) ||
-    /header/.test(u) ||
-    /site-logo/.test(u)
-  );
+  // Narrow to actual logo indicators only — "brand", "navbar", "header" catch too many non-logo images
+  return /logo|site-logo/.test(u);
 }
 
 async function detectBrandLogo(websiteUrl) {
@@ -525,7 +530,7 @@ async function detectBrandLogo(websiteUrl) {
         const id = clean((tag.match(/id=["']([^"']+)["']/i) || [])[1] || "");
 
         const combined = `${src || ""} ${alt} ${cls} ${id}`.toLowerCase();
-        if (src && /logo|brand|site-logo|navbar|header/.test(combined)) {
+        if (src && /logo|site-logo/.test(combined)) {
           candidateUrls.push(src);
         }
       }
