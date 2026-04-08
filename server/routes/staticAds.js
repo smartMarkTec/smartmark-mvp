@@ -347,7 +347,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
-  // Hash the full token so mood is distributed across all 8 options, not locked to last char.
+  // Hash the full token so mood is distributed across all options, not locked to last char.
   // djb2-style fold: each character contributes, so token suffix doesn't dominate.
   function tokenHash(s) {
     let h = 5381;
@@ -358,43 +358,17 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     ? tokenHash(variationToken) % VISUAL_MOODS.length
     : Math.floor(Math.random() * VISUAL_MOODS.length);
 
-  // Structural framing varies independently of mood so subject/layout diverge each run.
-  const FRAMING_CUES = [
-    "Lead with the subject as the clear visual anchor — headline sits bold and prominent over or below it.",
-    "Lead with the environment — let the setting fill the frame, headline overlaid large and legible on top.",
-    "Lead with the copy — headline text is the primary element, rendered large, with imagery as the background.",
-    "Lead with a close-up detail in the foreground — headline placed clearly above or below with strong contrast.",
-    "Balanced split composition — image fills one half, copy block with bold headline occupies the other.",
-    "Full-bleed image with a high-contrast copy bar anchored to the bottom third — headline large and clear.",
-    "Minimal layout — one strong visual element plus large, confident headline text with breathing room around it.",
-    "Dynamic diagonal or asymmetric arrangement — subject and bold headline balanced across a tilted axis.",
-  ];
-  const framingIdx = variationToken
-    ? (tokenHash(variationToken + "framing") % FRAMING_CUES.length)
-    : Math.floor(Math.random() * FRAMING_CUES.length);
-
-  // Text placement varies independently — CTA and headline don't always sit in the same spot.
-  const TEXT_PLACEMENT_CUES = [
-    "Place the headline at the top of the ad with support text and CTA stacked below it.",
-    "Place the headline and CTA at the bottom — let the visual fill the upper portion completely.",
-    "Place the headline in the upper third; put the CTA in the lower-right corner as a standalone element.",
-    "Center the copy block mid-frame — headline large, support small below it, CTA at the bottom edge.",
-    "Overlay copy on the left side, leaving the right side purely visual with no text.",
-    "Place headline prominently mid-frame, support line small beneath it, CTA flush to the bottom edge.",
-  ];
-  const textPlacementIdx = variationToken
-    ? (tokenHash(variationToken + "textplace") % TEXT_PLACEMENT_CUES.length)
-    : Math.floor(Math.random() * TEXT_PLACEMENT_CUES.length);
-
   return [
     `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
-    `Style: clean, polished, and believable — like a real paid social ad. No heavy border frames, no thick decorative edges, no flyer or poster layout. The image should feel like a modern social ad, not a printed announcement.`,
+    `Style: clean, polished, and professional — like a real paid social ad. No heavy border frames, no thick decorative edges, no flyer or poster layout. The image should feel like a modern social ad creative, not a printed announcement.`,
     ``,
-    `Layout: ${FRAMING_CUES[framingIdx]} ${TEXT_PLACEMENT_CUES[textPlacementIdx]}`,
+    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
+    ``,
+    `Composition: choose the layout that best serves the visual content and copy — you have full creative freedom here. The design should feel natural and intentional, not templated. Good ads use a clear visual hierarchy: the headline reads first, supporting text second, CTA last. Composition, spacing, and type placement should serve that hierarchy, not fight it.`,
     ``,
     `Ad copy to render:`,
     `  Headline: "${headline}"`,
-    supportLine ? `  Support (render it complete and readable): "${supportLine}"` : null,
+    supportLine ? `  Support: "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
     !website && phone ? `  Phone: ${phone}` : null,
@@ -403,10 +377,8 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Typography: render the headline in large, bold, high-contrast type — it must be the most visually prominent element on the ad. Support text should be noticeably smaller. CTA should stand out as a distinct, readable element. Never let the headline be faint, small, or easy to overlook.`,
-    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Compose naturally — let the subject and copy guide the layout. Keep it believable and ready to run as a paid ad. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
-    `Copy rendering: CRITICAL — both the headline and the support line must render fully complete on the image. The headline is short (4–5 words maximum) and must never be cut off, clipped, or end with "...". The support line must end at a natural stopping point — not mid-word or mid-thought. If a line does not fit at the chosen size, reduce font size until the entire line is visible. Never sacrifice completeness for size.`,
-    `Branding rule: Do not draw any logo, emblem, badge, seal, crest, icon, or invented brand symbol anywhere in the image. The business name may appear as plain readable text if it fits the layout naturally, but no visual logo or graphic mark of any kind — not in any corner, border, or background.`,
+    `Typography: the headline must be the dominant typographic element — large, bold, high-contrast, and fully legible. Support text is smaller. CTA is distinct. Every line of copy must render completely — no clipping, no truncation, no trailing "...". If a line does not fit at the chosen size, reduce font size until every word is visible. Never cut copy short.`,
+    `Branding: a real business logo will be composited onto this image after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere in the image. The business name may appear as plain readable text if the layout calls for it, but no graphic symbol of any kind.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
     .filter(Boolean)
