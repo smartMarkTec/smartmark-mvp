@@ -230,7 +230,7 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 
   // 1. Use pre-crafted headline only if it doesn't look like raw user input
   // Keep to ≤28 chars (~4-5 words) so image AI renders it complete without clipping
-  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return clip(copyHeadline, 28);
+  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return wordTrim(copyHeadline, 28);
 
   // Combine incoming copy + raw benefit as source material for pattern matching
   const rawPool = copyHeadline || clean(a.mainBenefit || a.benefit || "");
@@ -245,7 +245,7 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
   const mainBenefit = clean(a.mainBenefit || a.benefit || "");
   const benefitWords = mainBenefit.split(/\s+/).filter(Boolean);
   if (mainBenefit && benefitWords.length <= 4 && !looksLikeRawClaim(mainBenefit)) {
-    return clip(titleCase(mainBenefit), 28);
+    return wordTrim(titleCase(mainBenefit), 28);
   }
 
   // 4. Industry-specific short headlines (randomized to avoid repetition)
@@ -271,7 +271,7 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 
   // 5. Short business name as final fallback
   const businessName = clean(a.businessName || a.brand || "");
-  if (businessName && businessName.split(/\s+/).length <= 3) return clip(businessName, 28);
+  if (businessName && businessName.split(/\s+/).length <= 3) return wordTrim(businessName, 28);
 
   return "Local Experts, Real Results";
 }
@@ -381,7 +381,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     supportLine ? `  Support: "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
-    !website && phone ? `  Phone: ${phone}` : null,
+    phone ? `  Phone: ${phone}` : null,
     `Brand: "${businessName}"`,
     offer
       ? `Offer: "${offer}"`
