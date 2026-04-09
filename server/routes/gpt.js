@@ -286,7 +286,7 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
     const safeHeadline = (s = "") => {
       s = stripWeOur(s);
       s = s.replace(/[“”"']/g, "").replace(/[.,;:!?]+$/g, "").trim();
-      s = clampWords(s, 8);
+      s = clampWords(s, 6);
       if (!s) return "";
       return s[0].toUpperCase() + s.slice(1);
     };
@@ -408,12 +408,12 @@ const system =
   "Think: what does the customer want? What problem are they trying to solve? What would make them stop scrolling? Write from THAT angle. " +
   "BAD (echoing input): 'Efficient HVAC service in San Antonio' — 'High-quality HVAC services, efficient and effective' — 'Professional marketing for businesses.' " +
   "GOOD (writing like a copywriter): 'AC breaks in summer — we fix it today.' — 'Plumbers who answer the phone and show up.' — 'More leads in 30 days, or you know exactly why not.' " +
-  "Headline: 5–9 words. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
+  "Headline: 4–6 words maximum — short, punchy, concrete. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. Never add location or city to the headline. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
   "Subline: 2–3 sentences, 20–50 words. Say what the business actually does, who it helps, and what makes it worth calling. Use plain, direct language a real customer would respond to. Vary sentence structure. No drama or exaggeration. " +
   "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number — e.g. 'Call (713) 555-1234 to schedule.' / 'Reach us at (713) 555-1234.' Never invent or placeholder a phone number. " +
   "CTA: a clear, specific action (e.g. 'Get a free quote', 'Book today', 'See how it works'). " +
   "Bullets (if any): short, specific facts — not restatements of the headline. No exaggeration. " +
-  "Return strict JSON with keys: headline (<=9 words), subline (2–3 sentences, 20–50 words), offer (short if provided, else empty string), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
+  "Return strict JSON with keys: headline (4–6 words, no city/location), subline (2–3 sentences, 20–50 words), offer (short if provided, else empty string), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
   "Hard rules: NO URLs. NO 'our/we/I/my' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
   "Do NOT write: 'transform', 'game-changer', 'effortlessly', 'no stress', 'next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind', 'fill your pipeline', 'just results that matter', 'take your X to the next level'. " +
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";

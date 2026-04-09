@@ -117,13 +117,23 @@ function clip(s, max) {
 }
 
 /* Truncate at the last word boundary — no trailing "..." so the model renders the
-   full text rather than the ellipsis character literally. */
+   full text rather than the ellipsis character literally.
+   Also strips any trailing preposition/article/conjunction that would leave a
+   dangling incomplete phrase (e.g. "HVAC Services in" → "HVAC Services"). */
+const DANGLING_TAIL = /^(in|at|for|of|to|by|a|an|the|and|or|nor|with|from|near|on|as|into|onto|per|via|that|when|where|which|but|both|either|neither|whether|so)$/i;
+
 function wordTrim(s, maxChars) {
   const out = clean(s);
   if (!out || out.length <= maxChars) return out;
   const sub = out.slice(0, maxChars);
   const lastSpace = sub.lastIndexOf(" ");
-  return lastSpace > 4 ? sub.slice(0, lastSpace) : sub.slice(0, maxChars);
+  let trimmed = lastSpace > 4 ? sub.slice(0, lastSpace) : sub.slice(0, maxChars);
+  // Drop trailing dangling words so we never emit "Services in" or "Care for"
+  const words = trimmed.split(/\s+/);
+  while (words.length > 1 && DANGLING_TAIL.test(words[words.length - 1])) {
+    words.pop();
+  }
+  return words.join(" ");
 }
 
 function safeFilenamePart(s) {
@@ -374,7 +384,12 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     ``,
     `Visual direction: ${VISUAL_MOODS[moodIdx]}. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
     ``,
-    `Composition: choose the layout that best serves the visual content and copy — you have full creative freedom here. The design should feel natural and intentional, not templated. Good ads use a clear visual hierarchy: the headline reads first, supporting text second, CTA last. Composition, spacing, and type placement should serve that hierarchy, not fight it.`,
+    `Composition: you have creative freedom over background, visual style, color palette, and type treatment — but the layout must follow these safe-zone rules so the final ad looks professional and complete:`,
+    `  1. Text clearance: all text must sit at least 9% inset from every edge of the image. No headline, support text, CTA, or footer detail may touch or bleed into the outer 9% margin. This prevents clipping at any render resolution.`,
+    `  2. Logo zone: reserve the top-right corner — roughly the top 12% height and rightmost 22% width — completely clear of text and important visual elements. A real business logo will be composited into that zone after generation. Nothing should compete with it.`,
+    `  3. Hierarchy: headline reads first (largest, highest contrast), support text second (smaller, lighter), CTA last (distinct button or label treatment). These three elements must be visually separated, not stacked tight.`,
+    `  4. Breathing room: leave generous white space or visual separation between the headline block and any other element — at least 4% of image height between the headline and the next element below it.`,
+    `  Within these rules, the visual direction, color, layout style, and background are entirely your creative choice.`,
     ``,
     `Ad copy to render:`,
     `  Headline: "${headline}"`,
@@ -387,7 +402,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       ? `Offer: "${offer}"`
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Typography: the headline must be the dominant typographic element — large, bold, high-contrast, and fully legible. Support text is smaller. CTA is distinct. Every line of copy must render completely — no clipping, no truncation, no trailing "...". If a line does not fit at the chosen size, reduce font size until every word is visible. Never cut copy short.`,
+    `Typography: the headline is the dominant typographic element — large, bold, high-contrast, fully legible. Every single word of every line must render completely. If any line does not fit at the size chosen, reduce the font size until every word is fully visible. Never truncate, clip, or add "..." to any copy element.`,
     `Branding: a real business logo will be composited onto this image after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere in the image. The business name may appear as plain readable text if the layout calls for it, but no graphic symbol of any kind.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
