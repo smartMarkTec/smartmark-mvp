@@ -287,17 +287,18 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 }
 
 /* Trim AI-generated support copy to a length that renders cleanly inside the image.
-   Prefers a complete first sentence (≤8 words). If the first sentence is too long,
-   falls back to the first 7 words — no ellipsis, so there is no cut-off artifact. */
+   Prefers a complete first sentence (≤11 words). If the first sentence is too long,
+   returns empty string — a missing support line is better than a semantically broken fragment. */
 function imageSafeSupport(s) {
   const full = clean(s);
   if (!full) return "";
   const firstSentMatch = full.match(/^(.+?[.!?])(?:\s|$)/);
   if (firstSentMatch) {
     const sent = firstSentMatch[1].trim();
-    if (sent.split(/\s+/).filter(Boolean).length <= 8) return sent;
+    if (sent.split(/\s+/).filter(Boolean).length <= 11) return sent;
   }
-  return full.split(/\s+/).filter(Boolean).slice(0, 7).join(" ");
+  // Sentence too long — omit rather than emit a broken fragment
+  return "";
 }
 
 function deriveSupportLine(a = {}, craftedCopy = {}) {

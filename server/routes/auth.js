@@ -2036,6 +2036,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   function normalizeLink(raw) {
     let s = String(raw || '').trim();
     if (!s) return '';
+    // Strip internal spaces (common typo: "wilks air.com", "my site .com")
+    s = s.replace(/\s+/g, '');
+    if (!s) return '';
     if (s.startsWith('//')) s = 'https:' + s;
     if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
     return s;

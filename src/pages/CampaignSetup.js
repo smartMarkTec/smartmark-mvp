@@ -2820,14 +2820,13 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
       }
     }
 
-    // 2) Fallback: last 2 from imageDrafts — ONLY when no draft object was found at all.
-    // If a draft existed but was ctx-mismatched (stale session), do NOT fall through here —
-    // that is exactly the ghost-creative scenario we are preventing.
+    // 2) Fallback: use navImageUrls from route state (freshly passed at navigate() call-site).
+    // These are always current for this run — prefer them over imageDrafts which are not ctxKey-gated.
+    // Only when no draft object was found at all (baseDraftExisted = false prevents ghost-creative bleed).
     if (!baseDraftExisted) {
-      const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
-      if (fallbackUrls && fallbackUrls.length) {
-        const ctx = (getActiveCtx(resolvedUser) || "").trim();
-        setDraftFromImages(fallbackUrls, ctx);
+      const ctx = (getActiveCtx(resolvedUser) || "").trim();
+      if (Array.isArray(navImageUrls) && navImageUrls.length) {
+        setDraftFromImages(navImageUrls, ctx);
       }
     }
   }, [resolvedUser, draftCreatives?.images?.length]);

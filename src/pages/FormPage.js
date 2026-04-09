@@ -2785,6 +2785,32 @@ async function generatePosterBPair(runToken) {
 
             ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
             lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+            lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+
+            // ✅ Write FORM_DRAFT_KEY synchronously before SPA navigation — the autosave
+            // debounce gets cancelled on unmount and beforeunload doesn't fire for navigate(),
+            // so the form draft (including imageUrls) must be committed here.
+            try {
+              const formPayload = {
+                savedAt: Date.now(),
+                ctxKey,
+                data: {
+                  ctxKey,
+                  answers,
+                  step,
+                  chatHistory,
+                  mediaType: "image",
+                  result: result ? { ...result, headline: mergedHeadline, body: mergedBody } : null,
+                  imageUrls: imageUrls.slice(0, 2),
+                  activeImage,
+                  awaitingReady,
+                  input,
+                  sideChatCount,
+                  hasGenerated,
+                },
+              };
+              lsSet(FORM_DRAFT_KEY, JSON.stringify(formPayload));
+            } catch {}
 
             try {
               localStorage.setItem("smartmark_media_selection", "image");
