@@ -4291,14 +4291,19 @@ if (!pageId) throw new Error("Please select a Facebook page.");
 
 const isNoWebsite = String(answers?.noWebsite || '').trim().toLowerCase() === 'yes';
 const launchPhone = String(answers?.phone || form?.phone || '').trim();
+// websiteUrl is already .toString().trim()'d above — empty string means no website was entered
+const websiteBlank = !websiteUrl;
 
 if (!isValidHttpUrl(websiteUrl)) {
-  if (isNoWebsite && launchPhone) {
-    // No-website + phone present: pass through to backend CALL_NOW path
-  } else if (isNoWebsite) {
-    throw new Error("No website on file. Please add a phone number — we'll launch a call-focused ad for you.");
-  } else {
+  if (!websiteBlank) {
+    // User typed something but it's not a valid URL — always require correction
     throw new Error("Please enter a valid website URL starting with http:// or https://");
+  } else if (launchPhone) {
+    // No website entered + phone present → phone-only launch
+    // Robust to stale/missing noWebsite flag: we derive intent from actual inputs
+  } else {
+    // No website and no phone — cannot launch
+    throw new Error("No website on file. Please add a phone number — we'll launch a call-focused ad for you.");
   }
 }
 
@@ -4402,7 +4407,8 @@ const payload = {
   flightEnd: endISO,
 
   // Instagram: only sent for website users. Backend enforces no-Instagram for CALL_NOW path.
-  includeInstagram: !isNoWebsite && includeInstagram,
+  // Gate on both flag AND actual websiteUrl being present — robust to stale noWebsite flag.
+  includeInstagram: !isNoWebsite && !websiteBlank && includeInstagram,
 
   overrideCountPerType: {
     images: Math.min(2, filteredImages.length),
