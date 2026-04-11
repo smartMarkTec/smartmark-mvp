@@ -4849,7 +4849,12 @@ const selectedCampaignCreatives =
       <div style={{ width: "100%", maxWidth: 1180, padding: "22px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <button
-            onClick={() => navigate("/form")}
+            onClick={() => navigate("/form", {
+              state: {
+                imageUrls: Array.isArray(draftCreatives?.images) ? draftCreatives.images.filter(Boolean) : [],
+                ctxKey: getActiveCtx(resolvedUser) || "",
+              },
+            })}
             style={{
               background: "#202824e0",
               color: WHITE,

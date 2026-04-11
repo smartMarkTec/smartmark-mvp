@@ -1,7 +1,7 @@
 /* eslint-disable */
 // src/pages/FormPage.js
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 import { trackEvent } from "../analytics/gaEvents";
 
@@ -869,6 +869,7 @@ function useIsMobile() {
 export default function FormPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const location = useLocation();
   const chatBoxRef = useRef();
   const inputRef = useRef();
 
@@ -982,6 +983,10 @@ useEffect(() => {
 
   const shouldClearBecauseNoDrafts = () => {
     try {
+      // If we just came back from CampaignSetup with images in route state,
+      // treat that as "has current draft" — do not wipe
+      if ((location.state?.imageUrls || []).filter(Boolean).length) return false;
+
       const rawForm = lsGet(FORM_DRAFT_KEY);
       const rawCreative =
         ssGet("draft_form_creatives") ||
@@ -1324,6 +1329,19 @@ useEffect(() => {
           setHasGenerated(false);
         }
       }
+
+    // Last resort: if we just returned from CampaignSetup with images in route state,
+    // restore those images so the creative preview is visible again.
+    try {
+      const stateImgs = (location.state?.imageUrls || []).filter(Boolean);
+      if (stateImgs.length && !isDraftDisabled()) {
+        setImageUrls(stateImgs.slice(0, 2));
+        setActiveImage(0);
+        setImageUrl(stateImgs[0] || "");
+        setHasGenerated(true);
+        setAwaitingReady(false);
+      }
+    } catch {}
 
     } catch {}
     // eslint-disable-next-line
