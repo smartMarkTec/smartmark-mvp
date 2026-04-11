@@ -968,14 +968,14 @@ useEffect(() => {
       lsRemove(ACTIVE_CTX_KEY);
     } catch {}
 
-    // reset UI state
+    // reset UI state (preview/image only — do NOT reset awaitingReady here,
+    // that is conversation state and must not be disrupted by a preview clear)
     setImageDataUrls([]);
     setImageUrls([]);
     setActiveImage(0);
     setImageUrl("");
     setResult(null);
     setHasGenerated(false);
-    setAwaitingReady(true);
     setImgFail({});
     setImageEditing(false);
   };
