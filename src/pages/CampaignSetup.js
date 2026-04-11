@@ -4290,7 +4290,21 @@ if (!acctId) throw new Error("Please select a Facebook ad account.");
 if (!pageId) throw new Error("Please select a Facebook page.");
 
 const isNoWebsite = String(answers?.noWebsite || '').trim().toLowerCase() === 'yes';
-const launchPhone = String(answers?.phone || form?.phone || '').trim();
+// Fallback: if answers came from stale/missing route state (mobile refresh, BFCache restore),
+// try reading phone from the saved FORM_DRAFT_KEY so phone-only launch still works.
+const launchPhoneRaw = (() => {
+  const fromAnswers = String(answers?.phone || form?.phone || '').trim();
+  if (fromAnswers) return fromAnswers;
+  try {
+    const raw = lsGet(resolvedUser, FORM_DRAFT_KEY) || localStorage.getItem(FORM_DRAFT_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      return String(saved?.data?.answers?.phone || '').trim();
+    }
+  } catch {}
+  return '';
+})();
+const launchPhone = launchPhoneRaw;
 // websiteUrl is already .toString().trim()'d above — empty string means no website was entered
 const websiteBlank = !websiteUrl;
 
@@ -4396,7 +4410,8 @@ const payload = {
 
   aiAudience: String(form?.aiAudience || answers?.aiAudience || "").trim(),
   adCopy: [finalHeadline, finalBody].filter(Boolean).join("\n\n"),
-  answers: answers || {},
+  // Merge launchPhone back into answers so backend always has it, even when route state was lost
+  answers: { ...(answers || {}), phone: launchPhone || (answers?.phone || '') },
 
   mediaSelection: "image",
   imageVariants: filteredImages,

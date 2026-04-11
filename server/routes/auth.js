@@ -2384,9 +2384,26 @@ const bodyAnswers = req.body.answers && typeof req.body.answers === 'object'
   ? req.body.answers
   : {};
 
-const isNoWebsiteLaunch = String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes';
 const normalizedPhone = normalizePhone(bodyAnswers.phone || form.phone || '');
 
+// Derive phone-only intent from actual values, not just the noWebsite flag.
+// The flag can be stale (restored from old draft). If no real URL was submitted
+// AND a valid phone is present, treat as phone-only regardless of the flag.
+const _rawWebsiteForCheck = normalizeLink(
+  form.websiteUrl || form.website || form.businessWebsite ||
+  form.businessUrl || form.url ||
+  req.body.websiteUrl || req.body.url || ''
+);
+const isNoWebsiteLaunch =
+  String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes' ||
+  (!_rawWebsiteForCheck && !!normalizedPhone);
+
+if (!isNoWebsiteLaunch && !normalizedPhone && !_rawWebsiteForCheck) {
+  // No website AND no phone — clear failure
+  return res.status(400).json({
+    error: 'No website on file and no valid phone number provided. Add a phone number to launch a call-focused ad.',
+  });
+}
 if (isNoWebsiteLaunch && !normalizedPhone) {
   return res.status(400).json({
     error: 'No website on file and no valid phone number provided. Add a phone number to launch a call-focused ad.',
