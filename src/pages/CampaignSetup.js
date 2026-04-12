@@ -1,6 +1,6 @@
 /* eslint-disable */
 // src/pages/CampaignSetup.js
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   FaPause,
@@ -1744,13 +1744,16 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
     ? "Monitoring live performance"
     : "Gathering delivery data";
 
+  // The AI `reason` from the optimizer brain is genuine GPT-written text grounded in real metrics.
+  const aiReason = optimizerState?.latestDiagnosis?.reason || null;
+
   const detail = isTesting
     ? "Smartemark is running a controlled creative test with a limited number of ads and waiting for enough data before choosing a winner."
-    : hasRealSummary
-    ? latest?.detail || safeSummary?.subtext
+    : hasRealSummary && (aiReason || latest?.detail || safeSummary?.subtext)
+    ? aiReason || latest?.detail || safeSummary?.subtext
     : hasMetrics
-    ? `Tracking impressions, CTR, CPC, and spend. Smartemark will act when the data clearly supports a change.`
-    : "Smartemark is collecting early delivery signals. The AI will begin optimizing once enough data has been gathered.";
+    ? `Delivery is active. Watching for a stable pattern in CTR and CPC before recommending a change.`
+    : "Smartemark is collecting early delivery signals. The AI will begin analyzing once there is enough data — typically after a day or two of impressions.";
 
   return (
     <div
@@ -1872,9 +1875,13 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
               fontSize: 12,
             }}
           >
-            {safeSummary?.updatedAt
-              ? `Updated ${timeAgoShort(safeSummary.updatedAt)}`
-              : "Recently updated"}
+            {(() => {
+              const ts =
+                optimizerState?.latestDiagnosis?.generatedAt ||
+                safeSummary?.updatedAt ||
+                null;
+              return ts ? `Analyzed ${timeAgoShort(ts)}` : "Monitoring campaign";
+            })()}
           </div>
         </div>
       </div>
@@ -2666,6 +2673,8 @@ useEffect(() => {
   const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
   const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
   const [optimizerStateMap, setOptimizerStateMap] = useState({});
+  // Tracks last time we fired run-diagnosis per campaignId so we never call it more than ~hourly
+  const diagnosisLastCalledRef = useRef({});
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3800,6 +3809,46 @@ if (
     ...m,
     [campaignId]: optimizerCreativeState,
   }));
+
+  // ── AI Observation refresh ─────────────────────────────────────────────
+  // Fire run-diagnosis if:
+  //   1. There are real metrics (spend > 0 OR impressions >= 50)
+  //   2. Either no diagnosis exists yet, OR the last one is > 55 minutes old
+  //   3. We haven't already fired it within the last hour in this session
+  // This produces a fresh, AI-generated `reason` string that surfaces in the AI box.
+  const DIAGNOSIS_TTL_MS = 55 * 60 * 1000; // ~hourly
+  // Read metrics from the just-received optimizer snapshot (avoids stale closure over metricsMap state)
+  const snapMetrics = optimizerState?.metricsSnapshot || {};
+  const hasRealActivity =
+    Number(snapMetrics.spend) > 0 || Number(snapMetrics.impressions) >= 50;
+
+  const existingDiagnosisTs = optimizerState?.latestDiagnosis?.generatedAt
+    ? new Date(optimizerState.latestDiagnosis.generatedAt).getTime()
+    : 0;
+  const diagnosisFresh = existingDiagnosisTs && Date.now() - existingDiagnosisTs < DIAGNOSIS_TTL_MS;
+  const sessionLastCalled = diagnosisLastCalledRef.current[campaignId] || 0;
+  const calledRecentlyThisSession = Date.now() - sessionLastCalled < DIAGNOSIS_TTL_MS;
+
+  if (!cancelled && hasRealActivity && !diagnosisFresh && !calledRecentlyThisSession) {
+    diagnosisLastCalledRef.current[campaignId] = Date.now();
+    // Fire async — do not block the poll loop
+    authFetch(
+      `/facebook/adaccount/${acctId}/campaign/${campaignId}/run-diagnosis`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.optimizerState || cancelled) return;
+        const freshState = d.optimizerState;
+        setOptimizerStateMap((m) => ({ ...m, [campaignId]: freshState }));
+        setPublicSummaryMap((m) => ({
+          ...m,
+          [campaignId]: getPublicSummaryFromOptimizerState(freshState) || getFallbackPublicSummary(),
+        }));
+      })
+      .catch(() => {});
+  }
+  // ──────────────────────────────────────────────────────────────────────
 }
     } catch (err) {
       console.error("Failed to refresh campaign panel:", err);
