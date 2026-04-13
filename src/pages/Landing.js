@@ -164,15 +164,10 @@ export default function Landing() {
   }, []);
 
   useEffect(() => {
-    try {
-      const ns =
-        sessionStorage.getItem("sm_user_ns_v1") ||
-        localStorage.getItem("sm_user_ns_v1") ||
-        "anon";
-      setIsLoggedIn(!!ns && ns !== "anon");
-    } catch {
-      setIsLoggedIn(false);
-    }
+    fetch("/auth/whoami", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsLoggedIn(!!(d?.success)))
+      .catch(() => setIsLoggedIn(false));
   }, []);
 
   const goToForm = () => {

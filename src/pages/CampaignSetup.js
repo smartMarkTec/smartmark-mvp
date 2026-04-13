@@ -2675,6 +2675,9 @@ useEffect(() => {
   const [optimizerStateMap, setOptimizerStateMap] = useState({});
   // Tracks last time we fired run-diagnosis per campaignId so we never call it more than ~hourly
   const diagnosisLastCalledRef = useRef({});
+  // Tracks whether the previous poll for a campaignId had real metrics — used to detect
+  // the exact moment metrics first appear so we can diagnose immediately.
+  const prevActivityRef = useRef({});
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3824,25 +3827,37 @@ if (
   }));
 
   // ── AI Observation refresh ─────────────────────────────────────────────
-  // Fire run-diagnosis if:
-  //   1. There are real metrics (spend > 0 OR impressions >= 50)
-  //   2. Either no diagnosis exists yet, OR the last one is > 55 minutes old
-  //   3. We haven't already fired it within the last hour in this session
-  // This produces a fresh, AI-generated `reason` string that surfaces in the AI box.
-  const DIAGNOSIS_TTL_MS = 55 * 60 * 1000; // ~hourly
-  // Use live metrics from the /metrics endpoint (liveImpressions/liveSpend hoisted above).
-  // optimizerState.metricsSnapshot is only populated by the scheduled sync-metrics pass,
-  // which is unreliable — do NOT use it as the activity gate.
+  // Two-tier timing:
+  //   FRESHNESS_TTL  — how old the existing DB diagnosis must be before we consider it stale
+  //                    (short: 15 min, so a new session quickly gets a current diagnosis)
+  //   SESSION_THROTTLE — how long we wait before re-firing within the same page session
+  //                      (long: 50 min, prevents spam after the first run)
+  //
+  // Immediate trigger: if this poll is the FIRST one in this session that shows real metrics
+  // (prevActivityRef was false), bypass the freshness gate so the user sees AI text quickly.
+  const FRESHNESS_TTL_MS    = 15 * 60 * 1000; // existing diagnosis considered stale after 15 min
+  const SESSION_THROTTLE_MS = 50 * 60 * 1000; // don't re-fire more than once per 50 min/session
+
+  // Use live metrics from the /metrics endpoint (hoisted above).
   const hasRealActivity = liveSpend > 0 || liveImpressions >= 50;
+
+  // Detect moment metrics first appear in this session so we can diagnose immediately.
+  const prevHadActivity = prevActivityRef.current[campaignId] || false;
+  const metricsJustAppeared = hasRealActivity && !prevHadActivity;
+  prevActivityRef.current[campaignId] = hasRealActivity;
 
   const existingDiagnosisTs = optimizerState?.latestDiagnosis?.generatedAt
     ? new Date(optimizerState.latestDiagnosis.generatedAt).getTime()
     : 0;
-  const diagnosisFresh = existingDiagnosisTs && Date.now() - existingDiagnosisTs < DIAGNOSIS_TTL_MS;
+  const diagnosisFresh = existingDiagnosisTs && Date.now() - existingDiagnosisTs < FRESHNESS_TTL_MS;
   const sessionLastCalled = diagnosisLastCalledRef.current[campaignId] || 0;
-  const calledRecentlyThisSession = Date.now() - sessionLastCalled < DIAGNOSIS_TTL_MS;
+  const calledRecentlyThisSession = Date.now() - sessionLastCalled < SESSION_THROTTLE_MS;
 
-  if (!cancelled && hasRealActivity && !diagnosisFresh && !calledRecentlyThisSession) {
+  // Fire when:
+  //   • real metrics exist
+  //   • AND (metrics just appeared this session  OR  existing diagnosis is stale)
+  //   • AND we haven't already fired this session recently
+  if (!cancelled && hasRealActivity && (metricsJustAppeared || !diagnosisFresh) && !calledRecentlyThisSession) {
     diagnosisLastCalledRef.current[campaignId] = Date.now();
     // Fire async — do not block the poll loop
     authFetch(
