@@ -89,6 +89,14 @@ Rules:
 - If frequency is elevated and performance is softening, consider creative_fatigue_risk.
 - Confidence must be a number from 0 to 1.
 - Output JSON only. No markdown.
+
+Tone rules for the "reason" field:
+- Write like a calm, professional marketing advisor — not a judge.
+- Be constructive and forward-looking: describe what is happening and what the next focus is.
+- Do not say things like "weak hook" or "not compelling enough" — instead say "the next focus is strengthening the hook" or "a messaging refresh could improve click response."
+- Avoid language that makes the user feel the campaign is failing unless delivery is genuinely blocked.
+- "Early", "still gathering signal", "watching for stronger patterns", and "next step" are good framings.
+- Keep it concise: one to two sentences.
 `.trim();
 
   const input = {

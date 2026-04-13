@@ -128,7 +128,7 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
   let likelyProblem = 'Campaign has not generated enough data yet.';
   let recommendedAction = 'continue_monitoring';
   let reason =
-    'There is not enough trustworthy delivery data yet to diagnose campaign performance confidently.';
+    'Still gathering early delivery data. The system will begin forming a clear picture once impressions start coming in — typically within the first day or two.';
   let confidence = 0.88;
 
   if (optimizerState?.billingBlocked === true) {
@@ -136,56 +136,56 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     likelyProblem = 'Campaign delivery is blocked by ad account billing or payment issues.';
     recommendedAction = 'resolve_billing';
     reason =
-      'Optimizer state indicates a billing or payment block, so no creative or messaging change should happen until delivery is restored.';
+      'Delivery is currently paused due to a billing or payment issue on the ad account. Once that is resolved, the campaign can resume and the system will pick up monitoring from there.';
     confidence = 0.99;
   } else if (hasFutureStart && !hasAnyDelivery) {
     diagnosis = 'scheduled_not_started';
     likelyProblem = 'Campaign has a future start time and has not begun serving yet.';
     recommendedAction = 'wait_for_start_time';
     reason =
-      'The scheduled start time appears to be in the future, so zero delivery is expected right now.';
+      'The campaign is scheduled to start in the future, so zero delivery right now is expected. The system will begin watching performance once it goes live.';
     confidence = 0.98;
   } else if (!hasAnyDelivery && looksPaused) {
     diagnosis = 'no_delivery';
     likelyProblem = 'Campaign is not delivering because it is paused or otherwise inactive.';
     recommendedAction = 'check_delivery_status';
     reason =
-      'There is zero spend and zero impressions, and the campaign status appears inactive, so delivery conditions should be checked before optimizing messaging.';
+      'Delivery is currently paused. Once the campaign is reactivated, the system will resume monitoring and flag the next logical move.';
     confidence = 0.97;
   } else if (!hasAnyDelivery) {
     diagnosis = 'no_delivery';
     likelyProblem = 'Campaign is not serving impressions yet.';
     recommendedAction = 'check_delivery_status';
     reason =
-      'Metrics show zero impressions and zero spend, which usually means the campaign has not entered delivery or is blocked from serving.';
+      'No impressions or spend have registered yet — this is common in the early hours after launch while the ad goes through review and Facebook begins distributing it.';
     confidence = 0.95;
   } else if (impressions < 150 && spend < 3 && !hasSomeClickSignal) {
     diagnosis = 'insufficient_data';
     likelyProblem = 'Delivery has started, but there is not enough signal yet for a reliable optimization move.';
     recommendedAction = 'continue_monitoring';
     reason =
-      'The campaign has only light early delivery so far, so changing creative or messaging now would be premature.';
+      'Early delivery has started — still gathering enough signal to form a reliable view. This is normal at this stage and the system will continue watching before suggesting any change.';
     confidence = 0.9;
   } else if (impressions >= 150 && !hasSomeClickSignal) {
     diagnosis = 'weak_engagement';
     likelyProblem = 'The campaign is getting delivery, but the message or creative is not generating clicks.';
     recommendedAction = 'test_new_primary_text_or_headline';
     reason =
-      'The ad is being shown, but click response is absent after meaningful delivery, which usually points to a weak hook, message, or creative.';
+      'The ad is reaching people but hasn\'t generated clicks yet after meaningful impressions. The next focus is testing a stronger hook or headline to improve early engagement.';
     confidence = 0.86;
   } else if (impressions >= 300 && ctr > 0 && ctr < 0.9) {
     diagnosis = 'low_ctr';
-    likelyProblem = 'Click-through rate is weak enough to justify a messaging refresh.';
+    likelyProblem = 'Click-through rate is below the range that suggests strong ad resonance.';
     recommendedAction = 'update_primary_text';
     reason =
-      'The campaign is delivering and getting some click signal, but CTR remains under the threshold that suggests healthy ad response.';
+      'Delivery is active and generating some click response. CTR is on the lower side — the system is watching closely and will flag when a messaging refresh could meaningfully improve performance.';
     confidence = 0.87;
   } else if (linkClicks >= 12 && conversions === 0) {
     diagnosis = 'post_click_conversion_gap';
     likelyProblem = 'Users are clicking, but the offer, landing page, or audience fit is not converting.';
     recommendedAction = 'test_offer_or_audience_angle';
     reason =
-      'The campaign is able to generate traffic, but post-click conversion response is absent after meaningful click volume.';
+      'Traffic is coming in from the ad. The system is now watching post-click behavior — if conversions don\'t follow, a landing page or offer adjustment may be worth testing next.';
     confidence = 0.82;
   } else if (
     frequency != null &&
@@ -195,17 +195,17 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     ctr < 1.2
   ) {
     diagnosis = 'creative_fatigue_risk';
-    likelyProblem = 'Audience repetition may be increasing while engagement quality softens.';
+    likelyProblem = 'Audience repetition is increasing while engagement efficiency softens.';
     recommendedAction = 'prepare_fresh_creative_variant';
     reason =
-      'Frequency is elevated and response efficiency looks weaker, which can indicate early creative fatigue rather than pure delivery failure.';
+      'The audience has seen this ad regularly and engagement efficiency is starting to soften — a normal pattern after extended delivery. Preparing a fresh creative variant now is the right proactive move.';
     confidence = 0.78;
   } else if (linkClicks >= 3 && cpc != null && cpc > 3.5) {
     diagnosis = 'high_cpc';
-    likelyProblem = 'Traffic is coming in, but cost efficiency is weak.';
+    likelyProblem = 'Traffic is coming in, but cost per click is on the higher side.';
     recommendedAction = 'test_new_audience_or_creative';
     reason =
-      'Clicks are happening, but cost per click is elevated enough to suggest inefficient creative resonance or audience fit.';
+      'Clicks are coming in. Cost per click is elevated relative to typical benchmarks — the system is evaluating whether a creative or audience adjustment could bring efficiency up.';
     confidence = 0.75;
   } else if (
     hasMeaningfulDelivery &&
@@ -215,14 +215,14 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     likelyProblem = 'No major performance problem is visible yet.';
     recommendedAction = 'continue_monitoring';
     reason =
-      'The campaign is showing acceptable delivery and response for this stage, so immediate intervention would be premature.';
+      'Delivery and engagement are both in a healthy range for this stage. The system is monitoring closely and will flag the next action when the data justifies it.';
     confidence = 0.79;
   } else if (hasAnyDelivery && hasSomeClickSignal) {
     diagnosis = 'healthy_early_signal';
     likelyProblem = 'Early signal is present, but more data is still needed before major changes.';
     recommendedAction = 'continue_monitoring';
     reason =
-      'The campaign has begun generating delivery and click response, and the current signal does not yet justify a stronger intervention.';
+      'Delivery and click response are both active. Still building enough signal for a confident optimization move — the system will continue watching and flag the right moment.';
     confidence = 0.72;
   }
 

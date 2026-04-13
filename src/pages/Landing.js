@@ -164,10 +164,30 @@ export default function Landing() {
   }, []);
 
   useEffect(() => {
-    fetch("/auth/whoami", { credentials: "include" })
+    // Optimistic: if we have a stored sid + non-anon namespace, assume logged in immediately
+    // so the Dashboard button renders without a flash on normal page loads.
+    let storedSid = "";
+    try {
+      storedSid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const ns =
+        sessionStorage.getItem("sm_user_ns_v1") ||
+        localStorage.getItem("sm_user_ns_v1") ||
+        "anon";
+      if (storedSid && ns && ns !== "anon") setIsLoggedIn(true);
+    } catch {}
+
+    // Verify with a real session check. Pass sm_sid so the server can find the session —
+    // the app relies on x-sm-sid header (not just the cookie) to identify sessions.
+    const url = storedSid
+      ? `/auth/whoami?sm_sid=${encodeURIComponent(storedSid)}`
+      : `/auth/whoami`;
+    fetch(url, {
+      credentials: "include",
+      headers: storedSid ? { "x-sm-sid": storedSid } : {},
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setIsLoggedIn(!!(d?.success)))
-      .catch(() => setIsLoggedIn(false));
+      .catch(() => {}); // on network error keep the optimistic value
   }, []);
 
   const goToForm = () => {
