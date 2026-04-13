@@ -495,7 +495,9 @@ export default function Landing() {
                 >
                   <CTAButton onClick={goToForm}>Launch Campaign</CTAButton>
                   <a
-                    href="mailto:hello@smartemark.com?subject=Book a Demo"
+                    href="https://cal.com/william-knowles-wxottg/30min"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     style={{
                       appearance: "none",
                       display: "inline-flex",
