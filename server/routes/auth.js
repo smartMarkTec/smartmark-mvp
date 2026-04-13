@@ -4846,8 +4846,18 @@ for (let i = 0; i < storedImagesRaw.length; i += 1) {
   }
 }
 
+// Only trust stored /api/media/ URLs if the files actually exist on disk.
+// Render wipes /tmp/generated on every restart/redeploy — stored URLs become dead without this check.
 const existingUsableLocalImages = dedupeKeepOrder(
-  storedLocalImages.filter((img) => /\/api\/media\//i.test(String(img || ''))),
+  storedLocalImages.filter((img) => {
+    if (!/\/api\/media\//i.test(String(img || ''))) return false;
+    try {
+      const fileName = String(img).split('/api/media/').pop().split(/[?#]/)[0];
+      return !!(fileName && fs.existsSync(path.join(generatedDir, fileName)));
+    } catch {
+      return false;
+    }
+  }),
   2
 );
 
