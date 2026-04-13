@@ -490,9 +490,32 @@ export default function Landing() {
                     gap: 14,
                     flexWrap: "wrap",
                     marginBottom: 8,
+                    alignItems: "center",
                   }}
                 >
                   <CTAButton onClick={goToForm}>Launch Campaign</CTAButton>
+                  <a
+                    href="mailto:hello@smartemark.com?subject=Book a Demo"
+                    style={{
+                      appearance: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      border: "1.5px solid rgba(93,89,234,0.45)",
+                      background: "transparent",
+                      color: "#5d59ea",
+                      borderRadius: 999,
+                      padding: "12px 26px",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontFamily: FONT,
+                      textDecoration: "none",
+                      letterSpacing: "-0.01em",
+                      transition: "all 160ms ease",
+                    }}
+                  >
+                    Book a Demo
+                  </a>
                 </div>
               </div>
 

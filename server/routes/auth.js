@@ -3493,7 +3493,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-diagnosis',
     );
   }) || null;
 
-// If metricsSnapshot is still empty, refresh exact state before diagnosis
+// If metricsSnapshot is still empty, try refreshing from DB first.
 if (
   state &&
   (!state.metricsSnapshot || Object.keys(state.metricsSnapshot).length === 0)
@@ -3505,6 +3505,39 @@ if (
   });
 
   if (refreshed) state = refreshed;
+}
+
+// If metricsSnapshot is still empty (or all-zeros), overlay the live metrics the client
+// already polled from the /metrics endpoint.  This closes the sync-metrics gap: the frontend
+// has the same real Facebook numbers the user sees in the KPI cards, so the AI diagnosis
+// will be grounded in those rather than returning "no data".
+// We do NOT persist these to the DB here — the authoritative sync-metrics path handles that.
+const clientMetrics = req.body?.clientMetrics;
+if (
+  clientMetrics &&
+  typeof clientMetrics === 'object' &&
+  state &&
+  (
+    !state.metricsSnapshot ||
+    Object.keys(state.metricsSnapshot).length === 0 ||
+    (Number(state.metricsSnapshot.impressions) === 0 && Number(state.metricsSnapshot.spend) === 0)
+  )
+) {
+  const ci = clientMetrics;
+  state = {
+    ...state,
+    metricsSnapshot: {
+      impressions: Number(ci.impressions) || 0,
+      clicks: Number(ci.clicks) || 0,
+      linkClicks: Number(ci.clicks) || 0,
+      spend: Number(ci.spend) || 0,
+      ctr: Number(ci.ctr) || 0,
+      reach: 0,
+      conversions: 0,
+      lastSyncedAt: new Date().toISOString(),
+      source: 'client_polled',
+    },
+  };
 }
 
    const diagnosis = await buildDiagnosisAsync({

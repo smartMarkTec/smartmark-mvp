@@ -3747,6 +3747,8 @@ useEffect(() => {
     // are processed in separate branches (optimizer-state has no reliable metricsSnapshot).
     let liveImpressions = 0;
     let liveSpend = 0;
+    let liveClicks = 0;
+    let liveCtr = 0;
 
     try {
       const [metricsRes, summaryRes] = await Promise.allSettled([
@@ -3770,6 +3772,8 @@ useEffect(() => {
         // Capture for diagnosis check below
         liveImpressions = Number.isFinite(impressions) ? impressions : 0;
         liveSpend = Number.isFinite(spend) ? spend : 0;
+        liveClicks = Number.isFinite(clicks) ? clicks : 0;
+        liveCtr = Number.isFinite(ctr) ? ctr : 0;
 
         setMetricsMap((m) => ({
           ...m,
@@ -3843,7 +3847,21 @@ if (
     // Fire async — do not block the poll loop
     authFetch(
       `/facebook/adaccount/${acctId}/campaign/${campaignId}/run-diagnosis`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Pass the live metrics the UI already polled from Facebook.
+          // Backend will overlay these onto state.metricsSnapshot if the DB copy is empty,
+          // so the AI diagnosis is grounded in the same numbers the user sees.
+          clientMetrics: {
+            impressions: liveImpressions,
+            spend: liveSpend,
+            clicks: liveClicks,
+            ctr: liveCtr,
+          },
+        }),
+      }
     )
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
