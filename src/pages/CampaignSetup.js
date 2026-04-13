@@ -3743,6 +3743,11 @@ useEffect(() => {
   };
 
   const pollLightweightData = async () => {
+    // Hoisted so the diagnosis block can read live metrics even if metricsRes and summaryRes
+    // are processed in separate branches (optimizer-state has no reliable metricsSnapshot).
+    let liveImpressions = 0;
+    let liveSpend = 0;
+
     try {
       const [metricsRes, summaryRes] = await Promise.allSettled([
         authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/metrics`),
@@ -3761,6 +3766,10 @@ useEffect(() => {
         const clicks = Number(row?.clicks);
         const spend = Number(row?.spend);
         const ctr = Number(row?.ctr);
+
+        // Capture for diagnosis check below
+        liveImpressions = Number.isFinite(impressions) ? impressions : 0;
+        liveSpend = Number.isFinite(spend) ? spend : 0;
 
         setMetricsMap((m) => ({
           ...m,
@@ -3817,10 +3826,10 @@ if (
   //   3. We haven't already fired it within the last hour in this session
   // This produces a fresh, AI-generated `reason` string that surfaces in the AI box.
   const DIAGNOSIS_TTL_MS = 55 * 60 * 1000; // ~hourly
-  // Read metrics from the just-received optimizer snapshot (avoids stale closure over metricsMap state)
-  const snapMetrics = optimizerState?.metricsSnapshot || {};
-  const hasRealActivity =
-    Number(snapMetrics.spend) > 0 || Number(snapMetrics.impressions) >= 50;
+  // Use live metrics from the /metrics endpoint (liveImpressions/liveSpend hoisted above).
+  // optimizerState.metricsSnapshot is only populated by the scheduled sync-metrics pass,
+  // which is unreliable — do NOT use it as the activity gate.
+  const hasRealActivity = liveSpend > 0 || liveImpressions >= 50;
 
   const existingDiagnosisTs = optimizerState?.latestDiagnosis?.generatedAt
     ? new Date(optimizerState.latestDiagnosis.generatedAt).getTime()
