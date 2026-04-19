@@ -358,7 +358,7 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 }
 
 
-function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "") {
+function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "", { logoFound = false } = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
@@ -387,7 +387,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
     ``,
     `Composition: you have creative freedom over background, visual style, color palette, and type treatment — but the layout must follow these safe-zone rules so the final ad looks professional and complete:`,
     `  1. Text clearance: all text must sit at least 9% inset from every edge of the image. No headline, support text, CTA, or footer detail may touch or bleed into the outer 9% margin. This prevents clipping at any render resolution.`,
-    `  2. Logo zone: reserve the top-right corner — roughly the top 12% height and rightmost 22% width — completely clear of text and important visual elements. A real business logo will be composited into that zone after generation. Nothing should compete with it.`,
+    logoFound
+      ? `  2. Logo zone: reserve the top-right corner — roughly the top 12% height and rightmost 22% width — completely clear of text and important visual elements. A real business logo will be composited into that zone after generation. Nothing should compete with it.`
+      : `  2. No logo zone needed — no logo will be composited. Use the full image area freely, but do not draw any logo, brand mark, seal, badge, or graphic symbol anywhere.`,
     `  3. Hierarchy: headline reads first (largest, highest contrast), support text second (smaller, lighter), CTA last (distinct button or label treatment). These three elements must be visually separated, not stacked tight.`,
     `  4. Breathing room: leave generous white space or visual separation between the headline block and any other element — at least 4% of image height between the headline and the next element below it.`,
     `  Within these rules, the visual direction, color, layout style, and background are entirely your creative choice.`,
@@ -404,7 +406,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "")
       : `Do not invent any promotional offer, sale, or discount.`,
     ``,
     `Typography: the headline is the dominant typographic element — large, bold, high-contrast, fully legible. Every single word of every line must render completely. If any line does not fit at the size chosen, reduce the font size until every word is fully visible. Never truncate, clip, or add "..." to any copy element.`,
-    `Branding: a real business logo will be composited onto this image after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere in the image. The business name may appear as plain readable text if the layout calls for it, but no graphic symbol of any kind.`,
+    logoFound
+      ? `Branding: a real business logo will be composited onto this image after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere in the image. The business name may appear as plain readable text if the layout calls for it, but no graphic symbol of any kind.`
+      : `Branding: no logo is available — do not draw any logo, icon, emblem, seal, badge, brand mark, or graphic symbol anywhere in the image. Do not write the name of any equipment manufacturer, supplier, or company other than "${businessName}". Do not invent or render any brand name that was not explicitly provided. The business name may appear as plain readable text only.`,
     variationToken ? `Variation seed: ${variationToken}` : null,
   ]
     .filter(Boolean)
@@ -547,7 +551,12 @@ async function detectBrandLogo(websiteUrl) {
 
         const combined = `${src || ""} ${alt} ${cls} ${id}`.toLowerCase();
         if (src && /logo|site-logo/.test(combined)) {
-          candidateUrls.push(src);
+          // Reject images that look like third-party equipment/supplier brand logos rather than
+          // the site's own logo (common on HVAC, plumbing, and other trade contractor sites).
+          const isThirdPartyBrand = /\b(lennox|trane|carrier|rheem|york|goodman|daikin|american.standard|mitsubishi|heil|ruud|bryant|amana|bosch|navien|rinnai|honeywell|nest)\b/.test(combined);
+          if (!isThirdPartyBrand) {
+            candidateUrls.push(src);
+          }
         }
       }
 
@@ -693,15 +702,20 @@ router.post("/generate-static-ad", async (req, res) => {
     const website = clean(a.website || a.url || "");
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");
 
-    // Start logo lookup in parallel, but do not let it fail the ad.
-    const logoPromise = website
-      ? detectBrandLogo(website).catch(() => null)
-      : Promise.resolve(null);
+    // Detect logo BEFORE building the prompt so the branding instructions accurately
+    // reflect whether a real logo will be composited. Wrong logo is worse than no logo —
+    // if detection is not confident, the prompt must explicitly forbid invented brand text.
+    const logoBuf = website
+      ? await Promise.race([
+          detectBrandLogo(website).catch(() => null),
+          new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+      : null;
 
     const variationToken = String(
       body.regenerateToken || body.variant || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     );
-    const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken);
+    const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
 
     // Single OpenAI call for speed and lower failure risk.
     let imageBuffers = await generateOpenAIAdImageBuffers({
@@ -715,11 +729,6 @@ router.post("/generate-static-ad", async (req, res) => {
     if (!Array.isArray(imageBuffers) || !imageBuffers.length) {
       throw new Error("No image buffers returned from generator");
     }
-
-    const logoBuf = await Promise.race([
-      logoPromise,
-      new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
-    ]);
 
     if (logoBuf) {
       imageBuffers = await Promise.all(
