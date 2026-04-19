@@ -12,7 +12,7 @@ const PLAN_LIMITS = {
     maxTotalAdsPerCampaign: 2,
     maxChallengerAdsPerCampaign: 1,
     maxCreativeVariantsPerRound: 1,
-    minCreativeTestHours: 72,
+    minCreativeTestHours: 96,
   },
   pro: {
     key: 'pro',

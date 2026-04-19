@@ -43,12 +43,78 @@ function hasLiveCreativeTest(optimizerState) {
   );
 }
 
+// Diagnoses for which Standard tier may propose a creative/copy test.
+const STANDARD_TESTABLE_DIAGNOSES = new Set([
+  'low_ctr',
+  'weak_engagement',
+  'post_click_conversion_gap',
+]);
+
+// Hours the campaign must have been running before Standard tier can propose a test.
+const STANDARD_MIN_DATA_HOURS = 48;
+// Minimum impressions for Standard tier before any test is proposed.
+const STANDARD_MIN_IMPRESSIONS = 500;
+// Minimum spend ($) for Standard tier before any test is proposed.
+const STANDARD_MIN_SPEND = 5;
+// Days Standard tier must wait after a test resolves before proposing the next one.
+const STANDARD_COOLDOWN_DAYS = 5;
+
+function isStandardTier(optimizerState) {
+  const raw = String(
+    optimizerState?.planKey ||
+    optimizerState?.subscriptionPlan ||
+    optimizerState?.billing?.planKey ||
+    ''
+  ).trim().toLowerCase();
+  return raw === 'starter' || raw === 'standard' || raw === '';
+}
+
+function standardTestGatePassed(optimizerState, diagnosis) {
+  if (!isStandardTier(optimizerState)) return true; // Pro/Operator: no additional gate
+  if (!STANDARD_TESTABLE_DIAGNOSES.has(diagnosis)) return false;
+
+  const metrics = optimizerState?.metricsSnapshot || {};
+  const impressions = toNumber(metrics.impressions, 0);
+  const spend = toNumber(metrics.spend, 0);
+
+  if (impressions < STANDARD_MIN_IMPRESSIONS || spend < STANDARD_MIN_SPEND) return false;
+
+  // Check campaign age: createdAt on the optimizer state or latestAction
+  const createdAt = String(optimizerState?.createdAt || '').trim();
+  if (createdAt) {
+    const ageMs = Date.now() - new Date(createdAt).getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+    if (ageHours < STANDARD_MIN_DATA_HOURS) return false;
+  }
+
+  return true;
+}
+
+function standardCooldownActive(optimizerState) {
+  if (!isStandardTier(optimizerState)) return false;
+
+  // Look for the most recent resolved test in latestAction
+  const latestAction = optimizerState?.latestAction || null;
+  const actionType = String(latestAction?.actionType || '').trim();
+  const resolvedAt = String(
+    latestAction?.resolvedAt || latestAction?.completedAt || latestAction?.generatedAt || ''
+  ).trim();
+
+  const isResolvedTest =
+    actionType === 'pause_losing_creative_variant' ||
+    actionType === 'declare_creative_winner';
+
+  if (!isResolvedTest || !resolvedAt) return false;
+
+  const cooldownMs = STANDARD_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - new Date(resolvedAt).getTime() < cooldownMs;
+}
+
 function buildFallbackDecision({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
   const latestAction = optimizerState?.latestAction || null;
   const metrics = optimizerState?.metricsSnapshot || {};
-  
 
   const spend = toNumber(metrics.spend, 0);
   const impressions = toNumber(metrics.impressions, 0);
@@ -310,12 +376,23 @@ function buildFallbackDecision({ optimizerState }) {
       'Delivery has started, but signal is still too light for a reliable optimization move.';
     confidence = 0.9;
   } else if (diagnosis === 'weak_engagement') {
-    decision = 'launch_creative_test';
-    actionType = 'generate_two_creative_variants';
-    priority = 'high';
-    reason =
-      'The campaign is getting delivery without strong click response, so Smartemark should test two fresh creative angles instead of only rewriting copy again.';
-    confidence = 0.88;
+    if (!standardTestGatePassed(optimizerState, diagnosis) || standardCooldownActive(optimizerState)) {
+      decision = 'hold_and_monitor';
+      actionType = 'continue_monitoring';
+      priority = 'medium';
+      reason =
+        'Engagement is low, but not enough data has accumulated yet for a confident test — the system will continue watching and flag the right moment.';
+      confidence = 0.82;
+    } else {
+      decision = 'launch_creative_test';
+      actionType = isStandardTier(optimizerState)
+        ? 'generate_single_creative_variant'
+        : 'generate_two_creative_variants';
+      priority = 'high';
+      reason =
+        'The campaign is getting delivery without strong click response, so Smartemark should test a fresh creative angle instead of only rewriting copy again.';
+      confidence = 0.88;
+    }
   } else if (
     diagnosis === 'low_ctr' ||
     recommendedAction === 'update_primary_text'
@@ -327,6 +404,13 @@ function buildFallbackDecision({ optimizerState }) {
       reason =
         'Copy refresh already happened, so Smartemark should wait for new CTR signal before making another change.';
       confidence = 0.96;
+    } else if (!standardTestGatePassed(optimizerState, 'low_ctr') || standardCooldownActive(optimizerState)) {
+      decision = 'hold_and_monitor';
+      actionType = 'continue_monitoring';
+      priority = 'medium';
+      reason =
+        'CTR is on the lower side, but the system needs more data before suggesting a change — watching for a clearer pattern before acting.';
+      confidence = 0.8;
     } else {
       decision = 'refresh_copy';
       actionType = 'update_primary_text';
@@ -336,12 +420,21 @@ function buildFallbackDecision({ optimizerState }) {
       confidence = 0.89;
     }
   } else if (diagnosis === 'post_click_conversion_gap') {
-    decision = 'adjust_angle';
-    actionType = 'generate_single_creative_variant';
-    priority = 'high';
-    reason =
-      'Users are clicking but not converting, so Smartemark should test a sharper creative/offer angle next.';
-    confidence = 0.82;
+    if (!standardTestGatePassed(optimizerState, diagnosis) || standardCooldownActive(optimizerState)) {
+      decision = 'hold_and_monitor';
+      actionType = 'continue_monitoring';
+      priority = 'medium';
+      reason =
+        'Clicks are coming in but conversions are still light — the system is gathering more data before proposing a landing page or offer angle test.';
+      confidence = 0.78;
+    } else {
+      decision = 'adjust_angle';
+      actionType = 'generate_single_creative_variant';
+      priority = 'high';
+      reason =
+        'Users are clicking but not converting, so Smartemark should test a sharper creative/offer angle next.';
+      confidence = 0.82;
+    }
   } else if (diagnosis === 'creative_fatigue_risk') {
     decision = 'prepare_refresh';
     actionType = 'generate_two_creative_variants';

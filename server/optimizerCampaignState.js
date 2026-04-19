@@ -111,6 +111,7 @@ async function upsertOptimizerCampaignState(input = {}) {
     campaignName: String(input.campaignName || '').trim(),
     niche: String(input.niche || '').trim(),
     businessContext: safeObject(input.businessContext, {}),
+    businessBrief: safeNullableObject(input.businessBrief),
     currentStatus: String(input.currentStatus || 'ACTIVE').trim(),
     optimizationEnabled:
       typeof input.optimizationEnabled === 'boolean'

@@ -73,14 +73,14 @@ function getLaunchPlanLimits(planKey) {
       maxBusinesses: 2,
       maxAdAccounts: 2,
       imageVariants: 2,
-      maxImageRegens: 10,
+      maxImageRegens: 12,
     };
   }
 
   return {
     planKey: 'starter',
     planLabel: 'Standard',
-    maxCampaignsPerMonth: 2,
+    maxCampaignsPerMonth: 3,
     maxBusinesses: 1,
     maxAdAccounts: 1,
     imageVariants: 1,
@@ -2847,6 +2847,37 @@ const optimizerPayload = {
   // Persist the customer's onboarding answers so future optimizer actions
   // (challenger creative generation, copy refresh, strategy) stay on-brand.
   businessContext: bodyAnswers && typeof bodyAnswers === 'object' ? bodyAnswers : {},
+  // Structured brief for use by copy/creative generators — keeps challengers grounded
+  // in the original campaign intent rather than drifting with each iteration.
+  businessBrief: {
+    businessName: String(
+      bodyAnswers.businessName || form.businessName || form.name || ''
+    ).trim(),
+    niche: String(
+      bodyAnswers.businessType || bodyAnswers.industry || bodyAnswers.niche ||
+      form.businessType || form.industry || form.niche || form.cuisineType || ''
+    ).trim(),
+    offer: String(
+      bodyAnswers.offer || bodyAnswers.mainOffer || bodyAnswers.serviceOffering ||
+      form.offer || form.mainOffer || ''
+    ).trim(),
+    website: String(
+      bodyAnswers.website || bodyAnswers.websiteUrl ||
+      form.websiteUrl || form.website || form.businessWebsite || ''
+    ).trim(),
+    phone: String(normalizedPhone || '').trim(),
+    originalHeadline: String(
+      bodyAnswers.headline || bodyAnswers.adHeadline ||
+      form.headline || form.adHeadline || ''
+    ).trim(),
+    originalBody: String(
+      bodyAnswers.body || bodyAnswers.primaryText || bodyAnswers.adBody ||
+      form.body || form.primaryText || ''
+    ).trim(),
+    ctaStyle: String(
+      bodyAnswers.ctaStyle || bodyAnswers.cta || form.ctaStyle || form.cta || ''
+    ).trim(),
+  },
 };
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);

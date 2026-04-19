@@ -673,6 +673,82 @@ async function compositeLogoOntoAd(adBuf, logoBuf) {
   }
 }
 
+/* ------------------------ Daily image-gen rate limiting ------------------------ */
+
+const db = require("../db");
+
+// In-memory daily counters: key = "{identity}:{YYYY-MM-DD}" → count
+// Resets naturally on server restart (which also wipes /tmp/generated anyway).
+const _dailyGenCounts = new Map();
+
+function _todayKey() {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" UTC
+}
+
+function _dailyLimit(planKey) {
+  const k = String(planKey || "").trim().toLowerCase();
+  if (k === "operator") return 20;
+  if (k === "pro") return 12;
+  if (k === "starter" || k === "standard") return 5;
+  return 1; // visitor / unknown
+}
+
+function _getSidFromReq(req) {
+  const cookieSid = req.cookies?.sm_sid;
+  const headerSid = req.get("x-sm-sid");
+  const querySid = String(req.query?.sm_sid || req.query?.sid || "").trim();
+  const auth = req.headers.authorization || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+  return (cookieSid || headerSid || querySid || bearer || "").trim();
+}
+
+async function _resolveIdentityAndPlan(req) {
+  try {
+    const sid = _getSidFromReq(req);
+    if (!sid) return { identity: null, planKey: "visitor" };
+
+    await db.read();
+    const sessions = db.data?.sessions || [];
+    const session = sessions.find((s) => String(s?.sid || "").trim() === sid);
+    if (!session) return { identity: sid, planKey: "visitor" };
+
+    const username = String(session.username || "").trim();
+    if (!username) return { identity: sid, planKey: "visitor" };
+
+    const users = db.data?.users || [];
+    const user = users.find(
+      (u) => String(u?.username || "").trim() === username
+    );
+    const planKey = String(
+      user?.billing?.planKey ||
+        user?.planKey ||
+        session.planKey ||
+        "starter"
+    )
+      .trim()
+      .toLowerCase();
+
+    return { identity: `user:${username}`, planKey };
+  } catch {
+    return { identity: null, planKey: "visitor" };
+  }
+}
+
+function _checkAndIncrementDailyCount(identity, planKey, requestedCount) {
+  const key = `${identity || "anon"}:${_todayKey()}`;
+  const limit = _dailyLimit(planKey);
+  const current = _dailyGenCounts.get(key) || 0;
+  const remaining = limit - current;
+
+  if (remaining <= 0) {
+    return { allowed: false, limit, current, toGenerate: 0 };
+  }
+
+  const toGenerate = Math.min(requestedCount, remaining);
+  _dailyGenCounts.set(key, current + toGenerate);
+  return { allowed: true, limit, current, toGenerate };
+}
+
 /* ------------------------ /generate-static-ad ------------------------ */
 
 router.post("/generate-static-ad", async (req, res) => {
@@ -697,7 +773,21 @@ router.post("/generate-static-ad", async (req, res) => {
       body.copy && typeof body.copy === "object" ? body.copy : {};
 
     const requestedCount = Number(body.count || body.n || 1);
-    const count = Math.max(1, Math.min(2, requestedCount || 1));
+    const rawCount = Math.max(1, Math.min(2, requestedCount || 1));
+
+    // Enforce daily image-gen limit before spending API budget.
+    const { identity, planKey } = await _resolveIdentityAndPlan(req);
+    const rateCheck = _checkAndIncrementDailyCount(identity, planKey, rawCount);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        ok: false,
+        error: "daily_limit_reached",
+        message: `Daily image generation limit reached (${rateCheck.limit} per day for your plan). Try again tomorrow.`,
+        limit: rateCheck.limit,
+        current: rateCheck.current,
+      });
+    }
+    const count = rateCheck.toGenerate;
 
     const website = clean(a.website || a.url || "");
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");
