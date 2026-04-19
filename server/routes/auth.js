@@ -2723,7 +2723,14 @@ const { data: adsetData } = await axios.post(
 });
 
      const creativeMessage = String(form.adCopy || adCopy || '').trim();
-const creativeTitle = String(form.headline || form.campaignName || campaignName || 'Learn More').trim();
+// Prefer the explicit headline field from the form state. If that is absent, use the first
+// paragraph of the top-level adCopy field, which the frontend builds as
+// [finalHeadline, finalBody].filter(Boolean).join("\n\n") — so the first segment IS finalHeadline.
+// Only accept it as a headline if it is ≤10 words (guards against a body paragraph sneaking in).
+// Campaign name is NEVER a valid ad headline fallback.
+const _adCopyFirstSegment = String(adCopy || '').trim().split('\n\n')[0].split('\n')[0].trim();
+const _adCopyHeadline = _adCopyFirstSegment.split(/\s+/).filter(Boolean).length <= 10 ? _adCopyFirstSegment : '';
+const creativeTitle = String(form.headline || form.adHeadline || _adCopyHeadline || 'Learn More').trim();
 
 // No-website: CALL_NOW CTA with tel: phone link.
 // link_data.link must be a real external HTTPS URL even for call ads — Meta rejects facebook.com URLs
