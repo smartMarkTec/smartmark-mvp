@@ -1272,12 +1272,29 @@ useEffect(() => {
           if (restoredImgs.length) {
             setResult(data.result || null);
             setHasGenerated(true);
-          } else {
-            setResult(null);
-            setHasGenerated(false);
+            // Form draft restored with images — done.
+            return;
           }
 
-          // If we successfully restored FORM state, we're done.
+          // Form draft found but imageUrls was empty. Before giving up, try the
+          // route state that CampaignSetup passes back on the ← Back button click.
+          // This covers the case where the autosave fired before the image was set.
+          if (!isDraftDisabled()) {
+            const stateImgs = (location.state?.imageUrls || []).filter(Boolean);
+            if (stateImgs.length) {
+              setImageUrls(stateImgs.slice(0, 2));
+              setActiveImage(0);
+              setImageUrl(stateImgs[0] || "");
+              setResult(data.result || null);
+              setHasGenerated(true);
+              setAwaitingReady(false);
+              return;
+            }
+          }
+
+          // Nothing usable — leave clean.
+          setResult(null);
+          setHasGenerated(false);
           return;
         }
       }
@@ -2083,9 +2100,17 @@ async function generatePosterBPair(runToken) {
     };
 
     try {
+      // Send session ID so the backend resolves the correct plan key and enforces
+      // the right daily limit. Without credentials the backend sees every request
+      // as a visitor (limit=1) while the UI shows the logged-in plan limit.
+      const _genSid = (localStorage.getItem("sm_sid_v1") || "").trim();
       const res = await fetch(`${API_BASE}/generate-static-ad`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(_genSid ? { "x-sm-sid": _genSid } : {}),
+        },
         body: JSON.stringify(payload),
       });
 

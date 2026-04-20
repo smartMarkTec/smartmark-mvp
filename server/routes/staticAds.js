@@ -648,11 +648,31 @@ async function compositeLogoOntoAd(adBuf, logoBuf) {
     const maxLogoH = Math.round(adH * 0.08);
     const pad = Math.round(adW * 0.03);
 
-    const preparedLogo = await sharp(logoBuf)
-      .resize(maxLogoW, maxLogoH, {
-        fit: "inside",
-        withoutEnlargement: true,
-      })
+    // Ensure any fill/pad area introduced by resize is transparent, not black.
+    // Then guarantee an alpha channel exists before converting to PNG so the
+    // composite always blends correctly rather than painting a solid rectangle.
+    const logoMetaRaw = await sharp(logoBuf).metadata();
+    const hasAlpha = (logoMetaRaw.channels || 3) >= 4;
+
+    let logoSharp = sharp(logoBuf).resize(maxLogoW, maxLogoH, {
+      fit: "inside",
+      withoutEnlargement: true,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }, // transparent fill, not black
+    });
+
+    if (!hasAlpha) {
+      // Source has no alpha (JPEG or opaque PNG). Trim uniform border color so the
+      // logo isn't surrounded by the page background it was captured against.
+      // trim() uses the top-left corner pixel as the reference background color.
+      try {
+        logoSharp = logoSharp.trim();
+      } catch {
+        // trim failed — proceed without it
+      }
+    }
+
+    const preparedLogo = await logoSharp
+      .ensureAlpha()   // adds alpha=1 for opaque pixels; keeps existing alpha intact
       .png()
       .toBuffer();
 
