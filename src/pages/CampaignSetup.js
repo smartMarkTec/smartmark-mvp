@@ -4349,17 +4349,24 @@ const { startISO, endISO } = capTwoWeeksISO(
   endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
 );
 
-const websiteUrl = (
-  form?.websiteUrl ||
-  form?.website ||
-  answers?.websiteUrl ||
-  answers?.website ||
-  answers?.url ||
-  answers?.link ||
-  inferredLink ||
-  previewCopy?.link ||
-  ""
-).toString().trim();
+const websiteUrl = (() => {
+  let raw = (
+    form?.websiteUrl ||
+    form?.website ||
+    answers?.websiteUrl ||
+    answers?.website ||
+    answers?.url ||
+    answers?.link ||
+    inferredLink ||
+    previewCopy?.link ||
+    ""
+  ).toString().trim();
+  if (!raw) return "";
+  raw = raw.replace(/\s+/g, "");
+  if (raw.startsWith("//")) raw = "https:" + raw;
+  if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+  return raw;
+})();
 
 const finalHeadline = (
   form?.headline ||
