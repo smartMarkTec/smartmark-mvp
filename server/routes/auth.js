@@ -2654,8 +2654,17 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
       ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
       : new Date(now.getTime() + 60 * 1000).toISOString();
 
+    // Guard: if start is in the past, normalize to now+1min so Meta never receives a past start_time
+    if (new Date(startISO) <= now) {
+      startISO = new Date(now.getTime() + 60 * 1000).toISOString();
+    }
+
     let endISO = flightEnd ? new Date(flightEnd).toISOString() : null;
     if (endISO) {
+      // Guard: if end is in the past, normalize to start+3days so Meta never receives a past end_time
+      if (new Date(endISO) <= now) {
+        endISO = new Date(new Date(startISO).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      }
       const maxEnd = new Date(new Date(startISO).getTime() + 14 * 24 * 60 * 60 * 1000);
       if (new Date(endISO) > maxEnd) endISO = maxEnd.toISOString();
       if (new Date(endISO) <= new Date(startISO)) {

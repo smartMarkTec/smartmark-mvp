@@ -2873,12 +2873,15 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
 
   const [startDate, setStartDate] = useState(() => {
     const existing = ymd(form?.startDate);
-    return isYMD(existing) ? existing : todayYMD;
+    // Only restore saved start date if it is today or in the future
+    if (isYMD(existing) && new Date(`${existing}T23:59:59`).getTime() > Date.now()) return existing;
+    return todayYMD;
   });
 
   const [endDate, setEndDate] = useState(() => {
     const existing = ymd(form?.endDate);
-    if (isYMD(existing)) return existing;
+    // Only restore saved end date if it is strictly in the future
+    if (isYMD(existing) && new Date(`${existing}T23:59:59`).getTime() > Date.now()) return existing;
     const base = isYMD(ymd(form?.startDate)) ? ymd(form?.startDate) : todayYMD;
     return plusDaysYMD(base, 3);
   });
@@ -3311,8 +3314,16 @@ useEffect(() => {
         setBudget(String(pending.budget));
       }
 
-      if (pending.startDate) setStartDate(String(pending.startDate));
-      if (pending.endDate) setEndDate(String(pending.endDate));
+      if (pending.startDate) {
+        const sd = String(pending.startDate).slice(0, 10);
+        // Only restore if date is today or future; otherwise leave default (todayYMD)
+        if (new Date(`${sd}T23:59:59`).getTime() > Date.now()) setStartDate(sd);
+      }
+      if (pending.endDate) {
+        const ed = String(pending.endDate).slice(0, 10);
+        // Only restore if date is strictly in the future
+        if (new Date(`${ed}T23:59:59`).getTime() > Date.now()) setEndDate(ed);
+      }
 
       if (pending.selectedAccount) {
         setSelectedAccount(String(pending.selectedAccount).replace(/^act_/, ""));
@@ -4340,6 +4351,12 @@ const handleLaunch = async () => {
     return;
   }
 
+  // Pre-launch date guard: if the end date is already in the past, block before hitting the API
+  if (endDate && new Date(`${endDate}T23:59:59`).getTime() <= Date.now()) {
+    alert("Your campaign dates have expired. Please choose a future end date and try again.");
+    return;
+  }
+
   setLoading(true);
     try {
 const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
@@ -4586,6 +4603,10 @@ console.log("[SM][launch payload]", {
 
       if (!res.ok) {
         const msg = (json && (json.error || json.detail || json.message)) || rawText?.slice(0, 400) || `HTTP ${res.status}`;
+        // Detect Meta date-related rejections and surface a human-readable message
+        if (/end date.*past|past.*end date|time_stop|date.*expir|End Date Is In the Past/i.test(msg)) {
+          throw new Error("Your campaign dates have expired. Please choose a future end date and try again.");
+        }
         throw new Error(`FB Launch Error (${res.status}): ${msg}`);
       }
 
