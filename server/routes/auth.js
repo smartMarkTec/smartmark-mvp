@@ -2683,18 +2683,6 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
 
     const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100));
 
-console.log('[LAUNCH][adset create]', {
-  accountId,
-  campaignId,
-  pageIdFinal,
-  perAdsetBudgetCents,
-  startISO,
-  endISO,
-  targeting,
-  destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
-  optimization_goal: 'LINK_CLICKS',
-});
-
 // Instagram: only for website users who explicitly opted in.
 // CALL_NOW / no-website path never gets Instagram — incompatible CTA type.
 const includeInstagram = !!req.body.includeInstagram && !isNoWebsiteLaunch;
@@ -2702,21 +2690,39 @@ const adsetTargeting = includeInstagram
   ? { ...targeting, publisher_platforms: ['facebook', 'instagram'] }
   : targeting;
 
+// destination_type is intentionally omitted — Meta infers it from the creative CTA
+// (CALL_NOW → phone, LEARN_MORE → website). Explicitly setting destination_type:
+//   • 'WEBSITE' requires a pixel-linked promoted_object in v18.0 for many accounts
+//   • 'PHONE_CALL' is incompatible with optimization_goal 'LINK_CLICKS'
+// Omitting it avoids both invalid-parameter failures across all account configurations.
+const adsetPayload = {
+  name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+  campaign_id: campaignId,
+  daily_budget: perAdsetBudgetCents,
+  billing_event: 'IMPRESSIONS',
+  optimization_goal: 'LINK_CLICKS',
+  bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+  status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+  start_time: startISO,
+  ...(endISO ? { end_time: endISO } : {}),
+  targeting: adsetTargeting,
+};
+
+console.log('[LAUNCH][adset create]', {
+  accountId,
+  campaignId,
+  pageIdFinal,
+  isNoWebsiteLaunch,
+  perAdsetBudgetCents,
+  startISO,
+  endISO,
+  targeting: adsetTargeting,
+  adsetPayload,
+});
+
 const { data: adsetData } = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-  {
-    name: `${campaignName} (Image) - ${new Date().toISOString()}`,
-    campaign_id: campaignId,
-    daily_budget: perAdsetBudgetCents,
-    billing_event: 'IMPRESSIONS',
-    optimization_goal: 'LINK_CLICKS',
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
-    status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-    start_time: startISO,
-    ...(endISO ? { end_time: endISO } : {}),
-    targeting: adsetTargeting,
-  },
+  adsetPayload,
   { params: mkParams() }
 );
     const imageAdSetId = adsetData?.id || null;
@@ -2760,35 +2766,30 @@ const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
 const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
 const creativeLinkDataLink = destinationUrl; // same for both paths — always a real HTTPS URL
 
-if (isNoWebsiteLaunch) {
-  console.log('[LAUNCH][no-website creative shape]', {
-    ctaType: creativeCtaType,
-    ctaLink: creativeCtaLink,
-    linkDataLink: creativeLinkDataLink,
-    pageId: pageIdFinal,
-  });
-}
-
-const cr = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-  {
-    name: `${campaignName} (Image v${i + 1})`,
-    object_story_spec: {
-      page_id: pageIdFinal,
-      link_data: {
-        link: creativeLinkDataLink,
-        message: creativeMessage,
-        name: creativeTitle,
-        image_hash: hash,
-        call_to_action: {
-          type: creativeCtaType,
-          value: {
-            link: creativeCtaLink,
-          },
+const creativePayload = {
+  name: `${campaignName} (Image v${i + 1})`,
+  object_story_spec: {
+    page_id: pageIdFinal,
+    link_data: {
+      link: creativeLinkDataLink,
+      message: creativeMessage,
+      name: creativeTitle,
+      image_hash: hash,
+      call_to_action: {
+        type: creativeCtaType,
+        value: {
+          link: creativeCtaLink,
         },
       },
     },
   },
+};
+
+console.log('[LAUNCH][creative payload]', JSON.stringify(creativePayload));
+
+const cr = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+  creativePayload,
   { params: mkParams() }
 );
 
@@ -2946,9 +2947,12 @@ const optimizerPayload = {
     }
  console.error('FB Campaign Launch Error:', {
   message: err?.message || '',
+  metaErrorCode: err?.response?.data?.error?.code || null,
+  metaErrorSubcode: err?.response?.data?.error?.error_subcode || null,
+  metaErrorMessage: err?.response?.data?.error?.message || null,
+  metaErrorUserMsg: err?.response?.data?.error?.error_user_msg || null,
   responseData: err?.response?.data || null,
   responseStatus: err?.response?.status || null,
-  stack: err?.stack || null,
 });
 
     const msg = String(err?.message || '').toLowerCase();
