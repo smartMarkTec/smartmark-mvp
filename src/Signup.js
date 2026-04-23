@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import smartmarkLogo from "./assets/smartmark-logo.svg";
+import smartmarkLogo from "./assets/smartemark-logo.png";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const BG = "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";

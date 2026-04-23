@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import smartmarkLogo from "../assets/smartmark-logo.svg";
+import smartmarkLogo from "../assets/smartemark-logo.png";
 import { trackEvent } from "../analytics/gaEvents";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
