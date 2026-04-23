@@ -19,8 +19,8 @@ router.post('/save-campaign', async (req, res) => {
 
   // Enforce campaign limit per user
   const userCampaigns = db.data.campaigns.filter(c => c.username === username);
-  if (userCampaigns.length >= 2) {
-    return res.status(400).json({ error: 'Campaign limit reached (2 per user)' });
+  if (userCampaigns.length >= 10) {
+    return res.status(400).json({ error: 'Campaign limit reached (10 per user)' });
   }
 
   // Add ID if not present

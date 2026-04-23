@@ -549,11 +549,15 @@ async function detectBrandLogo(websiteUrl) {
         const cls = clean((tag.match(/class=["']([^"']+)["']/i) || [])[1] || "");
         const id = clean((tag.match(/id=["']([^"']+)["']/i) || [])[1] || "");
 
-        const combined = `${src || ""} ${alt} ${cls} ${id}`.toLowerCase();
-        if (src && /logo|site-logo/.test(combined)) {
+        const srcLower = (src || "").toLowerCase();
+        const combined = `${srcLower} ${alt} ${cls} ${id}`.toLowerCase();
+        // Require "logo" to appear in the src URL itself — not just alt/class/id.
+        // This rejects equipment badges and partner logos that have alt="Our Logo"
+        // but whose image file is clearly not the site's own branding.
+        if (src && /logo|site-logo/.test(srcLower)) {
           // Reject images that look like third-party equipment/supplier brand logos rather than
           // the site's own logo (common on HVAC, plumbing, and other trade contractor sites).
-          const isThirdPartyBrand = /\b(lennox|trane|carrier|rheem|york|goodman|daikin|american.standard|mitsubishi|heil|ruud|bryant|amana|bosch|navien|rinnai|honeywell|nest)\b/.test(combined);
+          const isThirdPartyBrand = /\b(lennox|trane|carrier|rheem|york|goodman|daikin|american.standard|mitsubishi|heil|ruud|bryant|amana|bosch|navien|rinnai|honeywell|nest|fujitsu|lg|samsung|gree|panasonic|weil.mclain|burnham|lochinvar|bradford.white|a\.o\.smith|ao.smith|noritz|takagi)\b/.test(combined);
           if (!isThirdPartyBrand) {
             candidateUrls.push(src);
           }
@@ -615,9 +619,12 @@ async function detectBrandLogo(websiteUrl) {
           if (!meta.width || !meta.height) continue;
 
           const aspect = meta.width / meta.height;
-          if (meta.width < 80 || meta.height < 20) continue;
+          // Raised minimums: real business logos are at least 120×30 px.
+          // Tightened aspect ratio: 0.8–6.0 excludes favicons, tall banners,
+          // and ultra-wide equipment badges that were slipping through.
+          if (meta.width < 120 || meta.height < 30) continue;
           if (meta.width > 2000 || meta.height > 1200) continue;
-          if (aspect < 0.6 || aspect > 8.5) continue;
+          if (aspect < 0.8 || aspect > 6.0) continue;
         } catch {
           continue;
         }

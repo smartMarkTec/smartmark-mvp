@@ -3488,7 +3488,7 @@ useEffect(() => {
     .then((res) => (res.ok ? res.json() : Promise.reject()))
     .then(async (data) => {
       const fullList = Array.isArray(data) ? data : data?.data || [];
-      const list = fullList.slice(0, 2);
+      const list = fullList;
 
       if (cancelled) return;
 
@@ -4473,32 +4473,39 @@ const forceHostOnRenderMedia = async (candidates) => {
 
 let candidateImgs = [];
 
-if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+// Draft images take exclusive priority: if the user has a draft, never blend in
+// a different campaign's saved creatives — that's what causes campaign 1 to leak
+// into campaign 2. The global backups (fetchable/cache/imageDrafts) are also
+// gated here because they're not campaign-specific and can carry stale images.
+const hasDraftImages = Array.isArray(draftCreatives?.images) && draftCreatives.images.length > 0;
+
+if (hasDraftImages) {
+  candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
+  if (Array.isArray(navImageUrls) && navImageUrls.length) {
+    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+  }
+} else {
+  // No draft → fall back to saved creatives for the selected campaign (re-launch path)
+  if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+    try {
+      const saved = getSavedCreatives(selectedCampaignId);
+      if (Array.isArray(saved?.images)) {
+        candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+      }
+    } catch {}
+  }
+  if (Array.isArray(navImageUrls) && navImageUrls.length) {
+    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+  }
   try {
-    const saved = getSavedCreatives(selectedCampaignId);
-    if (Array.isArray(saved?.images)) {
-      candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
-    }
+    candidateImgs = candidateImgs
+      .concat(loadFetchableImagesBackup(resolvedUser) || [])
+      .concat(getCachedFetchableImages(resolvedUser) || []);
+  } catch {}
+  try {
+    candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
   } catch {}
 }
-
-if (Array.isArray(draftCreatives?.images) && draftCreatives.images.length) {
-  candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
-}
-
-if (Array.isArray(navImageUrls) && navImageUrls.length) {
-  candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
-}
-
-try {
-  candidateImgs = candidateImgs
-    .concat(loadFetchableImagesBackup(resolvedUser) || [])
-    .concat(getCachedFetchableImages(resolvedUser) || []);
-} catch {}
-
-try {
-  candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
-} catch {}
 
 let filteredImages = await forceHostOnRenderMedia(candidateImgs);
 
@@ -7147,6 +7154,24 @@ const selectedCampaignCreatives =
   imageUrl={modalImg}
   onClose={() => setShowImageModal(false)}
 />
+
+<div style={{
+  textAlign: "center",
+  padding: "18px 16px 10px",
+  color: "#9ca3af",
+  fontSize: 12,
+  fontWeight: 600,
+  letterSpacing: 0.1,
+}}>
+  Questions?{" "}
+  <a
+    href="mailto:support@smartemark.com"
+    style={{ color: "#5b5cf0", textDecoration: "none", fontWeight: 700 }}
+  >
+    support@smartemark.com
+  </a>
+</div>
+
     </div>
   </div>
 );
