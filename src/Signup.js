@@ -243,10 +243,19 @@ const Signup = () => {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img
-              src={smartmarkLogo}
-              alt="Smartemark"
-              style={{ width: 42, height: 42, borderRadius: 12 }}
+            <div
+              role="img"
+              aria-label="Smartemark"
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                flexShrink: 0,
+                backgroundImage: `url(${smartmarkLogo})`,
+                backgroundSize: "256%",
+                backgroundPosition: "51% 48%",
+                backgroundRepeat: "no-repeat",
+              }}
             />
             <div style={{ fontSize: 28, fontWeight: 900 }}>Smartemark</div>
           </div>

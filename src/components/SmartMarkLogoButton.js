@@ -27,12 +27,19 @@ const SmartMarkLogoButton = ({
       }}
       aria-label="Go to home"
     >
-      <img
-        src={smartemarkLogo}
-        alt="Smartemark"
-        width={size}
-        height={size}
-        style={{ borderRadius: 12, display: "block" }}
+      <div
+        role="img"
+        aria-label="Smartemark"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 12,
+          display: "block",
+          backgroundImage: `url(${smartemarkLogo})`,
+          backgroundSize: "256%",
+          backgroundPosition: "51% 48%",
+          backgroundRepeat: "no-repeat",
+        }}
       />
     </button>
   );

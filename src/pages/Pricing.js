@@ -278,10 +278,20 @@ const Pricing = () => {
               cursor: "pointer",
             }}
           >
-            <img
-              src={smartmarkLogo}
-              alt="Smartemark"
-              style={{ width: 24, height: 24, borderRadius: 8, opacity: 0.95 }}
+            <div
+              role="img"
+              aria-label="Smartemark"
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 8,
+                opacity: 0.95,
+                flexShrink: 0,
+                backgroundImage: `url(${smartmarkLogo})`,
+                backgroundSize: "256%",
+                backgroundPosition: "51% 48%",
+                backgroundRepeat: "no-repeat",
+              }}
             />
             <span style={{ fontWeight: 800, fontSize: 14 }}>Smartemark</span>
           </button>
