@@ -3605,6 +3605,11 @@ useEffect(() => {
     if (!cameFromFbConnect) return;
     if (!fbConnected) return;
     if (!selectedAccount) return;
+    // Never attach draft creatives to a campaign after a successful launch
+    if (isDraftDisabled(resolvedUser) || isDraftDisabledLegacy()) {
+      setCameFromFbConnect(false);
+      return;
+    }
 
     const draftImages = (draftCreatives?.images || []).slice(0, 2).map(toAbsoluteMedia).filter(Boolean);
     if (!draftImages.length) {
@@ -3675,25 +3680,22 @@ useEffect(() => {
       const existingMap = readCreativeMap(resolvedUser, acctId);
       const prev = existingMap[campaignId] || {};
 
+      // Only use campaign-specific meta — never bleed draft context (previewCopy/inferredLink)
       const nextHeadline = String(
         data?.meta?.headline ||
           prev?.meta?.headline ||
-          previewCopy?.headline ||
           ""
       ).trim();
 
       const nextBody = String(
         data?.meta?.body ||
           prev?.meta?.body ||
-          previewCopy?.body ||
           ""
       ).trim();
 
       const nextLink = String(
         data?.meta?.link ||
           prev?.meta?.link ||
-          previewCopy?.link ||
-          inferredLink ||
           ""
       ).trim();
 
