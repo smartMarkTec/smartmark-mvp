@@ -7155,23 +7155,6 @@ const selectedCampaignCreatives =
   onClose={() => setShowImageModal(false)}
 />
 
-<div style={{
-  textAlign: "center",
-  padding: "18px 16px 10px",
-  color: "#9ca3af",
-  fontSize: 12,
-  fontWeight: 600,
-  letterSpacing: 0.1,
-}}>
-  Questions?{" "}
-  <a
-    href="mailto:support@smartemark.com"
-    style={{ color: "#5b5cf0", textDecoration: "none", fontWeight: 700 }}
-  >
-    support@smartemark.com
-  </a>
-</div>
-
     </div>
   </div>
 );
