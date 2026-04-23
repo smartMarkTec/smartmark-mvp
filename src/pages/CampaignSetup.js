@@ -4361,6 +4361,26 @@ const websiteUrl = (() => {
     previewCopy?.link ||
     ""
   ).toString().trim();
+
+  // Mobile fallback: if navigation state was lost (answers = {}), the website URL
+  // might only exist in FORM_DRAFT_KEY — the same key launchPhoneRaw reads from.
+  // Read both symmetrically so a website launch doesn't fall through to phone-only.
+  if (!raw) {
+    try {
+      const draftRaw = lsGet(resolvedUser, FORM_DRAFT_KEY) || localStorage.getItem(FORM_DRAFT_KEY);
+      if (draftRaw) {
+        const saved = JSON.parse(draftRaw);
+        raw = String(
+          saved?.data?.answers?.website ||
+          saved?.data?.answers?.websiteUrl ||
+          saved?.data?.answers?.url ||
+          saved?.data?.answers?.link ||
+          ""
+        ).trim();
+      }
+    } catch {}
+  }
+
   if (!raw) return "";
   raw = raw.replace(/\s+/g, "");
   if (raw.startsWith("//")) raw = "https:" + raw;
@@ -4532,6 +4552,11 @@ console.log("[SM][launch payload]", {
   acctId,
   pageId,
   websiteUrl,
+  websiteBlank,
+  isNoWebsite,
+  launchPhone,
+  answersNoWebsite: answers?.noWebsite,
+  statePresent: !!(location.state && Object.keys(location.state).length),
   filteredImages,
   payload,
 });

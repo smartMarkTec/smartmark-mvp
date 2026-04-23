@@ -2399,6 +2399,19 @@ const isNoWebsiteLaunch =
   !_rawWebsiteForCheck &&
   (String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes' || !!normalizedPhone);
 
+console.log('[LAUNCH][intent]', {
+  isNoWebsiteLaunch,
+  rawWebsiteForCheck: _rawWebsiteForCheck || '(empty)',
+  destinationUrl: normalizeLink(
+    form.websiteUrl || form.website || form.businessWebsite ||
+    form.businessUrl || form.url ||
+    req.body.websiteUrl || req.body.url || ''
+  ) || 'https://smartemark.com (fallback)',
+  normalizedPhone: normalizedPhone || '(none)',
+  noWebsiteFlag: String(bodyAnswers.noWebsite || '(unset)'),
+  includeInstagram: !!req.body.includeInstagram,
+});
+
 if (!isNoWebsiteLaunch && !normalizedPhone && !_rawWebsiteForCheck) {
   // No website AND no phone — clear failure
   return res.status(400).json({
@@ -2678,6 +2691,8 @@ console.log('[LAUNCH][adset create]', {
   startISO,
   endISO,
   targeting,
+  destination_type: isNoWebsiteLaunch ? 'PHONE_CALL' : 'WEBSITE',
+  optimization_goal: 'LINK_CLICKS',
 });
 
 // Instagram: only for website users who explicitly opted in.
@@ -2720,6 +2735,9 @@ const { data: adsetData } = await axios.post(
   destinationUrl,
   hash,
   message: form.adCopy || adCopy || '',
+  ctaType: isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE',
+  ctaLink: isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl,
+  isNoWebsiteLaunch,
   variantIndex: i + 1,
 });
 
