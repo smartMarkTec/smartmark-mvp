@@ -2387,16 +2387,17 @@ const bodyAnswers = req.body.answers && typeof req.body.answers === 'object'
 const normalizedPhone = normalizePhone(bodyAnswers.phone || form.phone || '');
 
 // Derive phone-only intent from actual values, not just the noWebsite flag.
-// The flag can be stale (restored from old draft). If no real URL was submitted
-// AND a valid phone is present, treat as phone-only regardless of the flag.
+// The flag can be stale (restored from old draft). A valid URL being present
+// always wins — treat as website launch regardless of noWebsite flag value.
+// Only phone-only when NO URL was submitted (and noWebsite=yes OR phone present).
 const _rawWebsiteForCheck = normalizeLink(
   form.websiteUrl || form.website || form.businessWebsite ||
   form.businessUrl || form.url ||
   req.body.websiteUrl || req.body.url || ''
 );
 const isNoWebsiteLaunch =
-  String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes' ||
-  (!_rawWebsiteForCheck && !!normalizedPhone);
+  !_rawWebsiteForCheck &&
+  (String(bodyAnswers.noWebsite || '').trim().toLowerCase() === 'yes' || !!normalizedPhone);
 
 if (!isNoWebsiteLaunch && !normalizedPhone && !_rawWebsiteForCheck) {
   // No website AND no phone — clear failure
