@@ -2560,24 +2560,16 @@ if (!VALIDATE_ONLY) {
     ),
   ];
 
-  const uniqueBusinessNames = [
-    ...new Set(
-      accountCreativeRows
-        .map((row) => String(row?.name || '').trim().toLowerCase())
-        .filter(Boolean)
-    ),
-  ];
-
   const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
-  const normalizedCampaignName = String(campaignName || '').trim().toLowerCase();
 
   const nextAdAccountCount = uniqueAccountIds.includes(normalizedAccountId)
     ? uniqueAccountIds.length
     : uniqueAccountIds.length + 1;
 
-  const nextBusinessCount = uniqueBusinessNames.includes(normalizedCampaignName)
-    ? uniqueBusinessNames.length
-    : uniqueBusinessNames.length + 1;
+  // Business identity is based on ad account — one ad account = one business.
+  // Previously used campaign name as the key, which caused every new campaign
+  // to count as a new business and incorrectly trip the business limit.
+  const nextBusinessCount = nextAdAccountCount;
 
   if (nextAdAccountCount > launchPlanLimits.maxAdAccounts) {
     return res.status(400).json({
@@ -2597,7 +2589,7 @@ if (!VALIDATE_ONLY) {
       planLabel: launchPlanLimits.planLabel,
       limitType: 'businesses',
       maxAllowed: launchPlanLimits.maxBusinesses,
-      currentCount: uniqueBusinessNames.length,
+      currentCount: uniqueAccountIds.length,
     });
   }
 }
@@ -4424,7 +4416,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
     const list = Array.isArray(response.data?.data) ? response.data.data : [];
 
     return res.json({
-      data: list.slice(0, 2),
+      data: list,
       source: 'facebook',
     });
   } catch (err) {
@@ -4453,7 +4445,6 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
           effective_status: r.status || 'ACTIVE',
           start_time: r.createdAt || r.updatedAt || null,
         }))
-        .slice(0, 2);
 
       if (cached.length > 0) {
         console.warn('[campaigns] Facebook fetch failed, serving cached campaigns instead:', {
