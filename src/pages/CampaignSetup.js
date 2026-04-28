@@ -4400,6 +4400,12 @@ const websiteUrl = (() => {
     } catch {}
   }
 
+  if (!raw) {
+    // Last-resort: dedicated persistent key written by FormPage before navigation and refreshed
+    // before OAuth redirect. No TTL, not purged post-launch — survives all route-state and TTL failures.
+    try { raw = String(localStorage.getItem("sm_last_website_url_v1") || "").trim(); } catch {}
+  }
+
   if (!raw) return "";
   raw = raw.replace(/\s+/g, "");
   if (raw.startsWith("//")) raw = "https:" + raw;
@@ -5324,6 +5330,13 @@ const selectedCampaignCreatives =
                   link: String(inferredLink || previewCopy?.link || "").trim(),
                   ctxKey: safeCtx,
                 });
+              } catch {}
+
+              // Refresh the dedicated persistent website URL key before OAuth redirect.
+              // This key survives the redirect unlike route state and has no TTL unlike the preview backup.
+              try {
+                const siteUrl = String(inferredLink || previewCopy?.link || "").trim();
+                if (siteUrl) localStorage.setItem("sm_last_website_url_v1", siteUrl);
               } catch {}
 
               try {

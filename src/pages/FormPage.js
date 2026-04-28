@@ -2855,6 +2855,11 @@ async function generatePosterBPair(runToken) {
               lsSet(FORM_DRAFT_KEY, JSON.stringify(formPayload));
             } catch {}
 
+            // Persist the website URL to a dedicated, TTL-free, non-purged key so CampaignSetup
+            // can always find it — even after OAuth redirect, page reload, or post-launch draft purge.
+            // Always writes (empty string for no-website users) to overwrite any stale prior URL.
+            try { localStorage.setItem("sm_last_website_url_v1", String(answers?.url || "").trim()); } catch {}
+
             try {
               localStorage.setItem("smartmark_media_selection", "image");
               if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
