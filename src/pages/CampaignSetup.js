@@ -6177,13 +6177,13 @@ const selectedCampaignCreatives =
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
+            <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Daily Budget</label>
             <input
               type="number"
               min="1"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
-              placeholder="Enter budget"
+              placeholder="Enter daily budget"
               style={{
                 padding: "12px 14px",
                 borderRadius: 12,
@@ -6195,6 +6195,7 @@ const selectedCampaignCreatives =
                 outline: "none",
               }}
             />
+            <span style={{ color: "#98a2b3", fontSize: 11, fontWeight: 500 }}>This is your daily Facebook ad spend.</span>
           </div>
 
           <div
@@ -6501,13 +6502,13 @@ const selectedCampaignCreatives =
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
+        <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Daily Budget</label>
         <input
           type="number"
           min="1"
           value={budget}
           onChange={(e) => setBudget(e.target.value)}
-          placeholder="Enter budget"
+          placeholder="Enter daily budget"
           style={{
             padding: "12px 14px",
             borderRadius: 12,
@@ -6519,6 +6520,7 @@ const selectedCampaignCreatives =
             outline: "none",
           }}
         />
+        <span style={{ color: "#98a2b3", fontSize: 11, fontWeight: 500 }}>This is your daily Facebook ad spend.</span>
       </div>
 
       <div
