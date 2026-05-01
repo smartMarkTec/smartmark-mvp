@@ -86,21 +86,23 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 if (morgan) app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 /* ----------------------- STATIC: GENERATED ASSETS ----------------------- */
-let generatedPath;
-if (process.env.RENDER) {
-  generatedPath = "/tmp/generated";
-  try {
-    fs.mkdirSync(generatedPath, { recursive: true });
-  } catch {}
-  console.log("Serving /generated from:", generatedPath);
-} else {
-  generatedPath = path.join(__dirname, "public/generated");
-  try {
-    fs.mkdirSync(generatedPath, { recursive: true });
-  } catch {}
-  console.log("Serving /generated from:", generatedPath);
-}
+// Resolution order (first wins):
+//   1. GENERATED_DIR env var  — set this in Render to your persistent disk mount,
+//                               e.g. GENERATED_DIR=/var/data/generated
+//   2. /tmp/generated         — Render without a persistent disk (ephemeral, survives
+//                               between requests but NOT container restarts)
+//   3. public/generated       — local development
+const generatedPath = (() => {
+  if (process.env.GENERATED_DIR) return process.env.GENERATED_DIR;
+  if (process.env.RENDER) return "/tmp/generated";
+  return path.join(__dirname, "public/generated");
+})();
+try {
+  fs.mkdirSync(generatedPath, { recursive: true });
+} catch {}
+// Write back so staticAds.js (required later in this file) sees the resolved path.
 process.env.GENERATED_DIR = generatedPath;
+console.log("[generated] image dir:", generatedPath);
 
 // Serve generated files (static AI image ads)
 const staticOpts = {
