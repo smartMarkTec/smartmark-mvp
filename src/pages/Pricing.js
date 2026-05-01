@@ -31,7 +31,7 @@ const plans = [
   {
     name: "Standard",
     planKey: "starter",
-    price: "$99",
+    price: "$99.99",
     subtitle:
       "A simple, powerful way to launch and manage ads with real AI help.",
     badge: "Standard",
@@ -54,7 +54,7 @@ const plans = [
   {
     name: "Pro",
     planKey: "pro",
-    price: "$149",
+    price: "$149.99",
     subtitle:
       "For businesses that want stronger strategy, more testing, and more active optimization.",
     badge: "Most Popular",
@@ -78,7 +78,7 @@ const plans = [
   {
     name: "Operator",
     planKey: "operator",
-    price: "$249",
+    price: "$249.99",
     subtitle:
       "For businesses that want the deepest Smartemark automation layer and strongest in-product system.",
     badge: "Advanced",
@@ -158,8 +158,6 @@ const Pricing = () => {
         color: TEXT,
         fontFamily: FONT,
         position: "relative",
-        overflowX: "hidden",
-        overflowY: "visible",
       }}
     >
       <style>{`
