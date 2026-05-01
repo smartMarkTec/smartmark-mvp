@@ -158,16 +158,13 @@ const Pricing = () => {
         color: TEXT,
         fontFamily: FONT,
         position: "relative",
+        overflowX: "clip",
       }}
     >
       <style>{`
         html, body, #root {
-          background: ${BG};
           margin: 0;
           padding: 0;
-          width: 100%;
-          min-height: 100%;
-          overflow-x: hidden;
         }
 
         body {

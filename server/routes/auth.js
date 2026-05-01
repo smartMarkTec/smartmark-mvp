@@ -2535,9 +2535,25 @@ if (!VALIDATE_ONLY) {
     params: { access_token: userToken, fields: 'id,name,effective_status', limit: 100 },
   });
 
-  const activeCampaigns = (existing.data?.data || []).filter(
-    (c) => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
+  // Build the set of campaign IDs that Smartemark successfully launched for this
+  // owner on this ad account. Only these count against the plan limit.
+  // Legacy/manual/external campaigns already in the Meta account must not block
+  // a Smartemark launch — the user did not create them through Smartemark.
+  const _acctNorm = String(accountId || '').replace(/^act_/, '').trim();
+  const _smCampaignIds = new Set(
+    (db.data.campaign_creatives || [])
+      .filter((r) =>
+        String(r?.ownerKey || '').trim() === String(ownerKey || '').trim() &&
+        String(r?.accountId || '').replace(/^act_/, '').trim() === _acctNorm
+      )
+      .map((r) => String(r?.campaignId || '').trim())
+      .filter(Boolean)
   );
+
+  const activeCampaigns = (existing.data?.data || []).filter((c) => {
+    const isActive = !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase());
+    return isActive && _smCampaignIds.has(String(c.id || '').trim());
+  });
 
   const activeCount = activeCampaigns.length;
 
