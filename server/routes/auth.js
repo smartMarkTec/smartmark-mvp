@@ -2292,6 +2292,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return null;
   }
 
+  // Track Meta campaign ID created during this launch so we can delete it if the
+  // launch fails partway through — prevents phantom campaigns consuming plan slots.
+  let _launchCreatedCampaignId = null;
+
   try {
     const {
       form = {},
@@ -2681,6 +2685,8 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
       { params: mkParams() }
     );
     const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
+    // Record for cleanup in case the rest of the launch fails.
+    if (campaignId && campaignId !== 'VALIDATION_ONLY') _launchCreatedCampaignId = campaignId;
 
     const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100));
 
@@ -2937,6 +2943,20 @@ const optimizerPayload = {
       resolvedPageId: pageIdFinal,
     });
   } catch (err) {
+    // If the Meta campaign object was created before the failure, delete it so it
+    // does not occupy a plan slot on the next launch attempt.
+    if (_launchCreatedCampaignId && userToken) {
+      try {
+        await axios.delete(
+          `https://graph.facebook.com/v18.0/${_launchCreatedCampaignId}`,
+          { params: { access_token: userToken } }
+        );
+        console.log('[LAUNCH][cleanup] deleted phantom campaign', _launchCreatedCampaignId);
+      } catch (cleanupErr) {
+        console.warn('[LAUNCH][cleanup] could not delete phantom campaign', _launchCreatedCampaignId, cleanupErr?.response?.data?.error?.message || cleanupErr?.message);
+      }
+    }
+
     let errorMsg = 'Failed to launch campaign.';
     if (err.response?.data?.error) errorMsg = err.response.data.error.message;
 

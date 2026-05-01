@@ -746,14 +746,11 @@ async function _resolveIdentityAndPlan(req) {
     const user = users.find(
       (u) => String(u?.username || "").trim() === username
     );
-    const planKey = String(
-      user?.billing?.planKey ||
-        user?.planKey ||
-        session.planKey ||
-        "starter"
-    )
-      .trim()
-      .toLowerCase();
+    // Only grant a paying-plan limit if an explicit plan key is recorded.
+    // A logged-in user with no billing plan set is non-paying → "visitor" (1/day).
+    const rawPlanKey =
+      user?.billing?.planKey || user?.planKey || session.planKey || "";
+    const planKey = String(rawPlanKey).trim().toLowerCase() || "visitor";
 
     return { identity: `user:${username}`, planKey };
   } catch {
