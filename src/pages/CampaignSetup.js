@@ -4608,12 +4608,32 @@ console.log("[SM][launch payload]", {
       }
 
       if (!res.ok) {
-        const msg = (json && (json.error || json.detail || json.message)) || rawText?.slice(0, 400) || `HTTP ${res.status}`;
-        // Detect Meta date-related rejections and surface a human-readable message
+        // Extract the most specific message the backend provided.
+        // json.error is sometimes the backend's generic fallback ("Failed to launch campaign.")
+        // while json.detail holds the real cause — either a plain string or a Meta error object.
+        const GENERIC_BE = 'Failed to launch campaign.';
+        const errStr = typeof json?.error === 'string' ? json.error.trim() : '';
+        let msg = '';
+        if (errStr && errStr !== GENERIC_BE) {
+          // Backend gave a specific error string (e.g. plan limit, date, validation).
+          msg = errStr;
+        } else {
+          // Fall through to detail, which carries the real error for 500-class failures.
+          const d = json?.detail;
+          if (typeof d === 'string' && d.trim()) {
+            msg = d.trim();
+          } else if (d && typeof d === 'object') {
+            msg = String(d?.error?.message || d?.message || '').trim();
+          }
+          // If detail was also empty, use the generic string rather than nothing.
+          if (!msg) msg = errStr;
+        }
+        if (!msg) msg = String(json?.message || '').trim() || rawText?.slice(0, 400) || `HTTP ${res.status}`;
+        // Detect Meta date-related rejections and surface a human-readable message.
         if (/end date.*past|past.*end date|time_stop|date.*expir|End Date Is In the Past/i.test(msg)) {
           throw new Error("Your campaign dates have expired. Please choose a future end date and try again.");
         }
-        throw new Error(`FB Launch Error (${res.status}): ${msg}`);
+        throw new Error(msg);
       }
 
       json = json || {};
@@ -4765,8 +4785,8 @@ console.log("[SM][launch payload]", {
 
       setTimeout(() => setLaunched(false), 1500);
     } catch (err) {
-      alert("Failed to launch campaign: " + (err.message || ""));
-      console.error(err);
+      alert("Launch failed:\n\n" + (err.message || "Unknown error. Please try again."));
+      console.error("[SM][launch error]", err);
     }
     setLoading(false);
   };
