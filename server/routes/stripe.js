@@ -527,32 +527,54 @@ router.get("/billing-status", async (req, res) => {
 
     const billing = auth.user.billing || {};
 
+    // Diagnostic: always log DB billing state so Render logs show the full picture.
+    console.log("[stripe] billing-status:", {
+      u: auth.user.username,
+      dbPlanKey: billing.planKey || "(empty)",
+      dbHasAccess: billing.hasAccess,
+      dbStatus: billing.status || "(empty)",
+      dbSubId: billing.stripeSubscriptionId
+        ? `…${String(billing.stripeSubscriptionId).slice(-8)}`
+        : "(none)",
+      dbPriceId: billing.stripePriceId
+        ? `…${String(billing.stripePriceId).slice(-8)}`
+        : "(none)",
+    });
+
     // Recovery: if planKey is missing, try two sources in order.
     // Source A: env-var price-ID map (fast, no network call).
     // Source B: live Stripe subscription metadata (authoritative, env-var independent).
     // Both paths persist the recovered value so all downstream plan-limit checks
     // (campaign cap, optimizer tier, image gen) read the correct plan from DB.
+    // All three fields (planKey, planName, billingLabel) are tracked so the response
+    // is fully correct even before the DB write completes.
     let effectivePlanKey = billing.planKey || "";
+    let effectivePlanName = billing.planName || "";
+    let effectiveBillingLabel = billing.billingLabel || "";
 
     // Source A: env-var price-ID map
     if (!effectivePlanKey && billing.stripePriceId) {
       const derived = derivePlanMetaFromPriceId(billing.stripePriceId);
       if (derived.planKey) {
         effectivePlanKey = derived.planKey;
+        effectivePlanName = derived.planName || billing.planName || "";
+        effectiveBillingLabel = derived.billingLabel || billing.billingLabel || "";
         try {
           await setUserBillingByIdentity({
             username: auth.user.username,
             email: auth.user.email,
             patch: {
               planKey: derived.planKey,
-              planName: derived.planName || billing.planName || "",
-              billingLabel: derived.billingLabel || billing.billingLabel || "",
+              planName: effectivePlanName,
+              billingLabel: effectiveBillingLabel,
             },
           });
-          console.log("[stripe] billing-status: recovered planKey (price map) for", auth.user.username, "→", derived.planKey);
+          console.log("[stripe] billing-status: source-A recovered →", derived.planKey, "for", auth.user.username);
         } catch (persistErr) {
-          console.warn("[stripe] billing-status: could not persist price-map planKey:", persistErr?.message);
+          console.warn("[stripe] billing-status: source-A persist failed:", persistErr?.message);
         }
+      } else {
+        console.log("[stripe] billing-status: source-A failed — priceId not in env map:", billing.stripePriceId.slice(-8));
       }
     }
 
@@ -560,12 +582,23 @@ router.get("/billing-status", async (req, res) => {
     // e.g. STRIPE_PRICE_* env vars missing or mismatched).
     // The planKey was embedded in subscription_data.metadata at checkout creation
     // so it is always present regardless of env var state.
-    if (!effectivePlanKey && billing.hasAccess && billing.stripeSubscriptionId) {
+    // Condition uses status in addition to hasAccess in case hasAccess was
+    // incorrectly stored as false while subscription status is still active.
+    const _subId = String(billing.stripeSubscriptionId || "").trim();
+    const _isActiveInStripe =
+      billing.hasAccess ||
+      ["active", "trialing"].includes(String(billing.status || "").trim().toLowerCase());
+
+    if (!effectivePlanKey && _isActiveInStripe && _subId) {
       try {
-        const liveSub = await stripe.subscriptions.retrieve(billing.stripeSubscriptionId);
+        console.log("[stripe] billing-status: source-B fetching live sub…", _subId.slice(-8));
+        const liveSub = await stripe.subscriptions.retrieve(_subId);
         const fromMeta = String(liveSub?.metadata?.planKey || "").trim().toLowerCase();
+        console.log("[stripe] billing-status: source-B sub.metadata.planKey =", fromMeta || "(empty)");
         if (["starter", "pro", "operator"].includes(fromMeta)) {
           effectivePlanKey = fromMeta;
+          effectivePlanName = PLAN_NAME_MAP[fromMeta] || fromMeta;
+          effectiveBillingLabel = PLAN_NAME_MAP[fromMeta] || fromMeta;
           const livePriceId = String(liveSub?.items?.data?.[0]?.price?.id || "").trim();
           try {
             await setUserBillingByIdentity({
@@ -573,20 +606,24 @@ router.get("/billing-status", async (req, res) => {
               email: auth.user.email,
               patch: {
                 planKey: fromMeta,
-                planName: PLAN_NAME_MAP[fromMeta] || fromMeta,
-                billingLabel: PLAN_NAME_MAP[fromMeta] || fromMeta,
+                planName: effectivePlanName,
+                billingLabel: effectiveBillingLabel,
                 ...(livePriceId ? { stripePriceId: livePriceId } : {}),
               },
             });
-            console.log("[stripe] billing-status: recovered planKey (live sub metadata) for", auth.user.username, "→", fromMeta);
+            console.log("[stripe] billing-status: source-B recovered →", fromMeta, "for", auth.user.username);
           } catch (persistErr) {
-            console.warn("[stripe] billing-status: could not persist sub-metadata planKey:", persistErr?.message);
+            console.warn("[stripe] billing-status: source-B persist failed:", persistErr?.message);
           }
+        } else {
+          console.warn("[stripe] billing-status: source-B sub metadata has no valid planKey for", auth.user.username);
         }
       } catch (subErr) {
-        console.warn("[stripe] billing-status: live subscription fetch failed:", subErr?.message);
+        console.warn("[stripe] billing-status: source-B Stripe fetch failed:", subErr?.message);
       }
     }
+
+    console.log("[stripe] billing-status: returning planKey =", effectivePlanKey || "(empty)", "for", auth.user.username);
 
     return res.json({
       ok: true,
@@ -598,8 +635,8 @@ router.get("/billing-status", async (req, res) => {
       billing: {
         provider: billing.provider || "",
         planKey: effectivePlanKey,
-        planName: billing.planName || "",
-        billingLabel: billing.billingLabel || "",
+        planName: effectivePlanName,
+        billingLabel: effectiveBillingLabel,
         founder: !!billing.founder,
         hiddenPlan: !!billing.hiddenPlan,
         offerKey: billing.offerKey || "",

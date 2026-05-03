@@ -4172,10 +4172,20 @@ const adminActive = true;
       return false;
     }
 
+    const resolvedPlanKey = String(j?.billing?.planKey || "").trim();
+    console.log("[SM] billing-status received:", {
+      planKey: resolvedPlanKey || "(empty)",
+      hasAccess: j?.billing?.hasAccess,
+      status: j?.billing?.status,
+      subId: j?.billing?.stripeSubscriptionId
+        ? `…${String(j.billing.stripeSubscriptionId).slice(-8)}`
+        : "(none)",
+    });
+
     setBillingInfo({
       checked: true,
       hasAccess: !!j?.billing?.hasAccess,
-      planKey: String(j?.billing?.planKey || "").trim(),
+      planKey: resolvedPlanKey,
       status: String(j?.billing?.status || "").trim(),
       email: String(j?.user?.email || "").trim(),
       username: String(j?.user?.username || "").trim(),
