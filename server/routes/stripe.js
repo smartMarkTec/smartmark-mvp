@@ -256,19 +256,21 @@ async function markSubscriptionFromStripe({
   const meta = derivePlanMetaFromPriceId(priceId);
 
   // Always update billing/subscription state fields.
-  // Only overwrite plan identity fields (planKey, planName, etc.) when derivation
-  // succeeds — so a failed price→plan lookup (e.g. mismatched env var) never
-  // silently overwrites a correct planKey that was previously stored.
+  // Only overwrite identity fields (stripeCustomerId, stripeSubscriptionId,
+  // stripePriceId, planKey, etc.) when the incoming value is non-empty.
+  // An incomplete or non-subscription webhook (e.g. checkout.session.completed
+  // for a setup_intent or one-time charge where session.subscription is null)
+  // must never erase valid IDs that are already stored in DB.
   const patch = {
     provider: "stripe",
-    stripeCustomerId: customerId || "",
-    stripeSubscriptionId: subscriptionId || "",
-    stripePriceId: priceId || "",
     status: String(status || "").trim(),
     hasAccess: ["active", "trialing"].includes(
       String(status || "").trim().toLowerCase()
     ),
     currentPeriodEnd: currentPeriodEnd || null,
+    ...(customerId ? { stripeCustomerId: customerId } : {}),
+    ...(subscriptionId ? { stripeSubscriptionId: subscriptionId } : {}),
+    ...(priceId ? { stripePriceId: priceId } : {}),
     ...(meta.planKey
       ? {
           planKey: meta.planKey,
@@ -539,6 +541,9 @@ router.get("/billing-status", async (req, res) => {
       dbPriceId: billing.stripePriceId
         ? `…${String(billing.stripePriceId).slice(-8)}`
         : "(none)",
+      dbCustId: billing.stripeCustomerId
+        ? `…${String(billing.stripeCustomerId).slice(-8)}`
+        : "(none)",
     });
 
     // Recovery: if planKey is missing, try two sources in order.
@@ -620,6 +625,59 @@ router.get("/billing-status", async (req, res) => {
         }
       } catch (subErr) {
         console.warn("[stripe] billing-status: source-B Stripe fetch failed:", subErr?.message);
+      }
+    }
+
+    // Source C: Stripe customer subscription list (fires when subId AND priceId are
+    // both missing — i.e. a bad webhook erased them — but stripeCustomerId survived).
+    // Lists the customer's active subscriptions directly from Stripe and restores
+    // all three identity fields (subId, priceId, planKey) in one pass.
+    const _customerId = String(billing.stripeCustomerId || "").trim();
+    if (!effectivePlanKey && _isActiveInStripe && !_subId && _customerId) {
+      try {
+        console.log("[stripe] billing-status: source-C listing subs for cust…", _customerId.slice(-8));
+        const subList = await stripe.subscriptions.list({
+          customer: _customerId,
+          status: "active",
+          limit: 1,
+        });
+        const liveSub = subList?.data?.[0] || null;
+        if (liveSub) {
+          const fromMeta = String(liveSub?.metadata?.planKey || "").trim().toLowerCase();
+          const foundSubId = String(liveSub?.id || "").trim();
+          const foundPriceId = String(liveSub?.items?.data?.[0]?.price?.id || "").trim();
+          console.log("[stripe] billing-status: source-C sub=…", foundSubId.slice(-8), "planKey=", fromMeta || "(empty)");
+
+          const recoveryPatch = {};
+          if (foundSubId) recoveryPatch.stripeSubscriptionId = foundSubId;
+          if (foundPriceId) recoveryPatch.stripePriceId = foundPriceId;
+
+          if (["starter", "pro", "operator"].includes(fromMeta)) {
+            effectivePlanKey = fromMeta;
+            effectivePlanName = PLAN_NAME_MAP[fromMeta] || fromMeta;
+            effectiveBillingLabel = PLAN_NAME_MAP[fromMeta] || fromMeta;
+            recoveryPatch.planKey = fromMeta;
+            recoveryPatch.planName = effectivePlanName;
+            recoveryPatch.billingLabel = effectiveBillingLabel;
+          }
+
+          if (Object.keys(recoveryPatch).length > 0) {
+            try {
+              await setUserBillingByIdentity({
+                username: auth.user.username,
+                email: auth.user.email,
+                patch: recoveryPatch,
+              });
+              console.log("[stripe] billing-status: source-C recovered for", auth.user.username, "→ planKey=", effectivePlanKey || "(ids restored, plan unknown)");
+            } catch (persistErr) {
+              console.warn("[stripe] billing-status: source-C persist failed:", persistErr?.message);
+            }
+          }
+        } else {
+          console.warn("[stripe] billing-status: source-C no active sub found for cust…", _customerId.slice(-8));
+        }
+      } catch (subErr) {
+        console.warn("[stripe] billing-status: source-C list failed:", subErr?.message);
       }
     }
 
