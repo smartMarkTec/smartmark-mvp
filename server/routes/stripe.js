@@ -253,36 +253,35 @@ async function markSubscriptionFromStripe({
   status = "",
   currentPeriodEnd = null,
 }) {
-  const {
-    planKey,
-    founder,
-    hidden,
-    planName,
-    billingLabel,
-    offerKey,
-  } = derivePlanMetaFromPriceId(priceId);
+  const meta = derivePlanMetaFromPriceId(priceId);
 
-  return await setUserBillingByIdentity({
-    username,
-    email,
-    patch: {
-      provider: "stripe",
-      stripeCustomerId: customerId || "",
-      stripeSubscriptionId: subscriptionId || "",
-      stripePriceId: priceId || "",
-      planKey: planKey || "",
-      founder: !!founder,
-      hiddenPlan: !!hidden,
-      offerKey: offerKey || "",
-      planName: planName || "",
-      billingLabel: billingLabel || "",
-      status: String(status || "").trim(),
-      hasAccess: ["active", "trialing"].includes(
-        String(status || "").trim().toLowerCase()
-      ),
-      currentPeriodEnd: currentPeriodEnd || null,
-    },
-  });
+  // Always update billing/subscription state fields.
+  // Only overwrite plan identity fields (planKey, planName, etc.) when derivation
+  // succeeds — so a failed price→plan lookup (e.g. mismatched env var) never
+  // silently overwrites a correct planKey that was previously stored.
+  const patch = {
+    provider: "stripe",
+    stripeCustomerId: customerId || "",
+    stripeSubscriptionId: subscriptionId || "",
+    stripePriceId: priceId || "",
+    status: String(status || "").trim(),
+    hasAccess: ["active", "trialing"].includes(
+      String(status || "").trim().toLowerCase()
+    ),
+    currentPeriodEnd: currentPeriodEnd || null,
+    ...(meta.planKey
+      ? {
+          planKey: meta.planKey,
+          founder: !!meta.founder,
+          hiddenPlan: !!meta.hidden,
+          offerKey: meta.offerKey || "",
+          planName: meta.planName || "",
+          billingLabel: meta.billingLabel || "",
+        }
+      : {}),
+  };
+
+  return await setUserBillingByIdentity({ username, email, patch });
 }
 
 async function syncCheckoutSessionToUser(sessionId, fallbackUser = null) {
@@ -528,15 +527,18 @@ router.get("/billing-status", async (req, res) => {
 
     const billing = auth.user.billing || {};
 
-    // If planKey is missing but the Stripe price ID is stored, re-derive it now.
-    // This recovers users whose planKey was not written when checkout was synced —
-    // typically because STRIPE_PRICE_* env vars were absent or mismatched at that time.
+    // Recovery: if planKey is missing, try two sources in order.
+    // Source A: env-var price-ID map (fast, no network call).
+    // Source B: live Stripe subscription metadata (authoritative, env-var independent).
+    // Both paths persist the recovered value so all downstream plan-limit checks
+    // (campaign cap, optimizer tier, image gen) read the correct plan from DB.
     let effectivePlanKey = billing.planKey || "";
+
+    // Source A: env-var price-ID map
     if (!effectivePlanKey && billing.stripePriceId) {
       const derived = derivePlanMetaFromPriceId(billing.stripePriceId);
       if (derived.planKey) {
         effectivePlanKey = derived.planKey;
-        // Persist so plan limits (campaign cap, optimizer tier, etc.) also resolve correctly.
         try {
           await setUserBillingByIdentity({
             username: auth.user.username,
@@ -547,10 +549,42 @@ router.get("/billing-status", async (req, res) => {
               billingLabel: derived.billingLabel || billing.billingLabel || "",
             },
           });
-          console.log("[stripe] billing-status: recovered planKey for", auth.user.username, "→", derived.planKey);
+          console.log("[stripe] billing-status: recovered planKey (price map) for", auth.user.username, "→", derived.planKey);
         } catch (persistErr) {
-          console.warn("[stripe] billing-status: could not persist recovered planKey:", persistErr?.message);
+          console.warn("[stripe] billing-status: could not persist price-map planKey:", persistErr?.message);
         }
+      }
+    }
+
+    // Source B: live Stripe subscription metadata (fires when Source A fails —
+    // e.g. STRIPE_PRICE_* env vars missing or mismatched).
+    // The planKey was embedded in subscription_data.metadata at checkout creation
+    // so it is always present regardless of env var state.
+    if (!effectivePlanKey && billing.hasAccess && billing.stripeSubscriptionId) {
+      try {
+        const liveSub = await stripe.subscriptions.retrieve(billing.stripeSubscriptionId);
+        const fromMeta = String(liveSub?.metadata?.planKey || "").trim().toLowerCase();
+        if (["starter", "pro", "operator"].includes(fromMeta)) {
+          effectivePlanKey = fromMeta;
+          const livePriceId = String(liveSub?.items?.data?.[0]?.price?.id || "").trim();
+          try {
+            await setUserBillingByIdentity({
+              username: auth.user.username,
+              email: auth.user.email,
+              patch: {
+                planKey: fromMeta,
+                planName: PLAN_NAME_MAP[fromMeta] || fromMeta,
+                billingLabel: PLAN_NAME_MAP[fromMeta] || fromMeta,
+                ...(livePriceId ? { stripePriceId: livePriceId } : {}),
+              },
+            });
+            console.log("[stripe] billing-status: recovered planKey (live sub metadata) for", auth.user.username, "→", fromMeta);
+          } catch (persistErr) {
+            console.warn("[stripe] billing-status: could not persist sub-metadata planKey:", persistErr?.message);
+          }
+        }
+      } catch (subErr) {
+        console.warn("[stripe] billing-status: live subscription fetch failed:", subErr?.message);
       }
     }
 
