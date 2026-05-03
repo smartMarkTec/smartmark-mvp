@@ -528,6 +528,32 @@ router.get("/billing-status", async (req, res) => {
 
     const billing = auth.user.billing || {};
 
+    // If planKey is missing but the Stripe price ID is stored, re-derive it now.
+    // This recovers users whose planKey was not written when checkout was synced —
+    // typically because STRIPE_PRICE_* env vars were absent or mismatched at that time.
+    let effectivePlanKey = billing.planKey || "";
+    if (!effectivePlanKey && billing.stripePriceId) {
+      const derived = derivePlanMetaFromPriceId(billing.stripePriceId);
+      if (derived.planKey) {
+        effectivePlanKey = derived.planKey;
+        // Persist so plan limits (campaign cap, optimizer tier, etc.) also resolve correctly.
+        try {
+          await setUserBillingByIdentity({
+            username: auth.user.username,
+            email: auth.user.email,
+            patch: {
+              planKey: derived.planKey,
+              planName: derived.planName || billing.planName || "",
+              billingLabel: derived.billingLabel || billing.billingLabel || "",
+            },
+          });
+          console.log("[stripe] billing-status: recovered planKey for", auth.user.username, "→", derived.planKey);
+        } catch (persistErr) {
+          console.warn("[stripe] billing-status: could not persist recovered planKey:", persistErr?.message);
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       authenticated: true,
@@ -537,7 +563,7 @@ router.get("/billing-status", async (req, res) => {
       },
       billing: {
         provider: billing.provider || "",
-        planKey: billing.planKey || "",
+        planKey: effectivePlanKey,
         planName: billing.planName || "",
         billingLabel: billing.billingLabel || "",
         founder: !!billing.founder,
