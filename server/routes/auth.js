@@ -2798,7 +2798,7 @@ if (!VALIDATE_ONLY) {
       blockingCampaigns: activeCampaigns.map((c) => ({ id: c.id, status: c.effective_status, name: c.name })),
     });
     return res.status(400).json({
-      error: `Limit reached for ${launchPlanLimits.planLabel}: maximum of ${launchPlanLimits.maxCampaignsPerMonth} active campaigns.`,
+      error: `You've reached your plan limit of ${launchPlanLimits.maxCampaignsPerMonth} active Smartemark campaigns. Pause, archive, or end a running campaign to launch a new one.`,
       planKey: launchPlanLimits.planKey,
       planLabel: launchPlanLimits.planLabel,
       limitType: 'campaigns',

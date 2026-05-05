@@ -38,7 +38,7 @@ const plans = [
     accentGlow: "rgba(76,99,255,0.16)",
     cta: "Get Started",
     features: [
-      "2 campaigns per month",
+      "Up to 3 active campaigns",
       "1 business",
       "1 connected ad account",
       "AI-generated ad copy",
@@ -63,7 +63,7 @@ const plans = [
     cta: "Choose Pro",
     features: [
       "Everything in Standard",
-      "6 campaigns per month",
+      "Up to 6 active campaigns",
       "2 businesses",
       "2 connected ad accounts",
       "More creative variations per campaign",
@@ -86,7 +86,7 @@ const plans = [
     cta: "Choose Operator",
     features: [
       "Everything in Pro",
-      "10 campaigns per month",
+      "Up to 10 active campaigns",
       "3 businesses",
       "3 connected ad accounts",
       "Highest number of creative variations",
