@@ -53,6 +53,10 @@ function normalizeBillingPlanKey(raw) {
 function getLaunchPlanLimits(planKey) {
   const key = normalizeBillingPlanKey(planKey);
 
+  // NOTE: despite the historical name "maxCampaignsPerMonth", this field is treated
+  // as "max active Smartemark campaigns running simultaneously" — NOT a lifetime monthly
+  // launch quota. A user can launch as many campaigns as they want over time; what is
+  // limited is how many can be ACTIVE (non-paused, non-archived, non-deleted) at once.
   if (key === 'operator') {
     return {
       planKey: 'operator',
@@ -1972,6 +1976,55 @@ router.get('/debug/cookies', (req, res) => {
   });
 });
 
+/* Read-only: inspect campaign_creatives records for a given ownerKey.
+ * Requires debug_key. Never creates or modifies anything.
+ * Usage: GET /auth/debug/campaign-creatives?debug_key=<KEY>&owner_key=<OWNERKEY>
+ */
+router.get('/debug/campaign-creatives', async (req, res) => {
+  try {
+    if (!hasValidDebugKey(req)) {
+      return res.status(401).json({ ok: false, error: 'Missing or invalid debug_key' });
+    }
+
+    const rawOwnerKey = String(getDebugOwnerKeyOverride(req) || '').trim();
+
+    await ensureUsersAndSessions();
+    await db.read();
+    db.data = db.data || {};
+    db.data.campaign_creatives = Array.isArray(db.data.campaign_creatives)
+      ? db.data.campaign_creatives
+      : [];
+
+    let records = db.data.campaign_creatives;
+    if (rawOwnerKey) {
+      records = records.filter((r) =>
+        String(r?.ownerKey || '').trim() === rawOwnerKey
+      );
+    }
+
+    return res.json({
+      ok: true,
+      ownerKeyFilter: rawOwnerKey || '(all)',
+      totalInDb: db.data.campaign_creatives.length,
+      matchingCount: records.length,
+      records: records.map((r) => ({
+        ownerKey: r.ownerKey,
+        campaignId: r.campaignId,
+        accountId: r.accountId,
+        name: r.name,
+        status: r.status,
+        launchComplete: r.launchComplete ?? '(legacy — not set, assumed true)',
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        imageCount: Array.isArray(r.images) ? r.images.length : 0,
+      })),
+    });
+  } catch (err) {
+    console.error('[debug/campaign-creatives] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
+  }
+});
+
 router.get('/whoami', async (req, res) => {
   try {
     const s = await requireSession(req);
@@ -1986,6 +2039,114 @@ router.get('/whoami', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
+  }
+});
+
+/* -------- Launch limit debug endpoint --------
+ * Safe read-only endpoint to verify the campaign limit logic without launching anything.
+ * Requires SMARTEMARK_DEBUG_KEY to be set on the server (same key used by other debug routes).
+ *
+ * Usage:
+ *   curl -s "https://<host>/auth/facebook/adaccount/<ACCOUNT_ID>/launch-limit-debug?debug_key=<KEY>&owner_key=<OWNERKEY>" | jq
+ */
+router.get('/facebook/adaccount/:accountId/launch-limit-debug', async (req, res) => {
+  try {
+    if (!hasValidDebugKey(req)) {
+      return res.status(401).json({ ok: false, error: 'Missing or invalid debug_key' });
+    }
+
+    const { accountId } = req.params;
+    const rawOwnerKey = String(getDebugOwnerKeyOverride(req) || '').trim();
+    if (!rawOwnerKey) {
+      return res.status(400).json({ ok: false, error: 'owner_key query param is required' });
+    }
+
+    const ownerUser = await findUserByOwnerKey(rawOwnerKey);
+    const _rawPlanKey = String(ownerUser?.billing?.planKey || '').trim();
+    const billingPlanKey = normalizeBillingPlanKey(_rawPlanKey || 'starter');
+    const limits = getLaunchPlanLimits(billingPlanKey);
+
+    await ensureUsersAndSessions();
+    await db.read();
+    db.data = db.data || {};
+    db.data.campaign_creatives = Array.isArray(db.data.campaign_creatives)
+      ? db.data.campaign_creatives
+      : [];
+
+    const _acctNorm = String(accountId || '').replace(/^act_/, '').trim();
+    const dbRecords = (db.data.campaign_creatives || []).filter((r) =>
+      String(r?.ownerKey || '').trim() === rawOwnerKey &&
+      String(r?.accountId || '').replace(/^act_/, '').trim() === _acctNorm
+    );
+    const smartemarkOwnedCampaignIds = dbRecords
+      .map((r) => String(r?.campaignId || '').trim())
+      .filter(Boolean);
+    const _smCampaignIds = new Set(smartemarkOwnedCampaignIds);
+
+    // Fetch current Meta campaigns (read-only)
+    let metaCampaigns = [];
+    let metaFetchError = null;
+    try {
+      const { ownerKey: resolvedOwnerKey, userToken } = await resolveFacebookTokenFromReq(req, {
+        accountId,
+        preferredOwnerKey: rawOwnerKey,
+      });
+      if (userToken) {
+        const r = await axios.get(`https://graph.facebook.com/v18.0/act_${_acctNorm}/campaigns`, {
+          params: { access_token: userToken, fields: 'id,name,effective_status', limit: 100 },
+        });
+        metaCampaigns = r.data?.data || [];
+      }
+    } catch (e) {
+      metaFetchError = e?.response?.data?.error?.message || e?.message || 'Meta API error';
+    }
+
+    const SLOT_OCCUPYING_STATUSES_EXCLUDE = new Set(['ARCHIVED', 'DELETED', 'PAUSED']);
+    const activeSmartemarkCampaigns = [];
+    const ignoredMetaCampaignIds = [];
+
+    for (const c of metaCampaigns) {
+      const cId = String(c.id || '').trim();
+      const status = (c.effective_status || '').toUpperCase();
+      const isSmartemark = _smCampaignIds.has(cId);
+      const occupiesSlot = !SLOT_OCCUPYING_STATUSES_EXCLUDE.has(status);
+      if (isSmartemark && occupiesSlot) {
+        activeSmartemarkCampaigns.push({ id: cId, name: c.name, status });
+      } else if (!isSmartemark) {
+        ignoredMetaCampaignIds.push(cId);
+      }
+    }
+
+    const activeCount = activeSmartemarkCampaigns.length;
+    const wouldBlock = activeCount >= limits.maxCampaignsPerMonth;
+
+    return res.json({
+      ok: true,
+      email: ownerUser?.email || '(not found)',
+      ownerKey: rawOwnerKey,
+      accountId,
+      normalizedAccountId: _acctNorm,
+      planKey: limits.planKey,
+      rawDbPlanKey: _rawPlanKey || '(empty)',
+      maxActiveCampaigns: limits.maxCampaignsPerMonth,
+      metaCampaignCount: metaCampaigns.length,
+      metaCampaignIds: metaCampaigns.map((c) => ({ id: c.id, name: c.name, status: c.effective_status })),
+      smartemarkDbRecordCount: dbRecords.length,
+      smartemarkOwnedCampaignIds,
+      activeSmartemarkCampaignIds: activeSmartemarkCampaigns,
+      ignoredMetaCampaignIds,
+      ignoredDbRecords: [],
+      activeCount,
+      wouldBlock,
+      reason: wouldBlock
+        ? `${activeCount} active Smartemark campaigns >= plan max of ${limits.maxCampaignsPerMonth}`
+        : `${activeCount} active Smartemark campaigns — under plan max of ${limits.maxCampaignsPerMonth}`,
+      metaFetchError: metaFetchError || null,
+      note: 'PAUSED, ARCHIVED, and DELETED campaigns do not occupy plan slots. Only non-paused, non-deleted Smartemark-owned campaigns count.',
+    });
+  } catch (err) {
+    console.error('[launch-limit-debug] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
   }
 });
 
@@ -2519,7 +2680,12 @@ if (rawCity && rawState) {
 // ---- End local city/state targeting ----
 
 const ownerUser = await findUserByOwnerKey(ownerKey);
-const billingPlanKey = normalizeBillingPlanKey(ownerUser?.billing?.planKey || 'starter');
+const _rawPlanKey = String(ownerUser?.billing?.planKey || '').trim();
+const _billingHasAccess = ownerUser?.billing?.hasAccess;
+if (!_rawPlanKey && _billingHasAccess) {
+  console.warn('[LAUNCH][plan-key] WARNING: hasAccess=true but planKey is empty for ownerKey', ownerKey, '— billing may not have synced yet. Defaulting to starter limits.');
+}
+const billingPlanKey = normalizeBillingPlanKey(_rawPlanKey || 'starter');
 const launchPlanLimits = getLaunchPlanLimits(billingPlanKey);
 
 if (!VALIDATE_ONLY) {
@@ -2550,14 +2716,87 @@ if (!VALIDATE_ONLY) {
       .filter(Boolean)
   );
 
-  const activeCampaigns = (existing.data?.data || []).filter((c) => {
-    const isActive = !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase());
-    return isActive && _smCampaignIds.has(String(c.id || '').trim());
-  });
+  // A campaign occupies a plan slot only when it is running or under review.
+  // PAUSED, ARCHIVED, and DELETED campaigns must not block a new launch —
+  // users should be able to pause and restart without being locked out.
+  const SLOT_OCCUPYING_STATUSES_EXCLUDE = new Set(['ARCHIVED', 'DELETED', 'PAUSED']);
+  const activeCampaigns = [];
+  for (const c of (existing.data?.data || [])) {
+    const cId = String(c.id || '').trim();
+    const status = (c.effective_status || '').toUpperCase();
+    const isSmartemark = _smCampaignIds.has(cId);
+    const occupiesSlot = !SLOT_OCCUPYING_STATUSES_EXCLUDE.has(status);
+    const counted = isSmartemark && occupiesSlot;
+
+    let reason;
+    if (!isSmartemark) {
+      reason = 'meta_only_not_smartemark';
+    } else if (!occupiesSlot) {
+      if (status === 'PAUSED') reason = 'paused_not_running';
+      else if (status === 'ARCHIVED') reason = 'archived_or_deleted';
+      else if (status === 'DELETED') reason = 'archived_or_deleted';
+      else reason = 'ended_or_not_current';
+    } else {
+      reason = 'active_smartemark_campaign';
+    }
+
+    console.log('[LAUNCH][limit-campaign]', {
+      campaignId: cId,
+      campaignName: c.name || '',
+      source: isSmartemark ? 'smartemark_db' : 'meta_only',
+      ownerMatch: true,
+      accountMatch: true,
+      hasCampaignId: !!cId,
+      hasSuccessfulLaunchEvidence: isSmartemark,
+      metaStatus: status || 'UNKNOWN',
+      counted,
+      reason,
+    });
+
+    if (counted) activeCampaigns.push(c);
+  }
+
+  // Also log any DB records whose Meta campaigns were not returned by the API
+  // (deleted off-platform or never fetched). These don't count but are useful for debugging.
+  const returnedIds = new Set((existing.data?.data || []).map((c) => String(c.id || '').trim()));
+  for (const dbId of _smCampaignIds) {
+    if (!returnedIds.has(dbId)) {
+      console.log('[LAUNCH][limit-campaign]', {
+        campaignId: dbId,
+        source: 'smartemark_db',
+        ownerMatch: true,
+        accountMatch: true,
+        hasCampaignId: true,
+        hasSuccessfulLaunchEvidence: true,
+        metaStatus: 'NOT_RETURNED_BY_META_API',
+        counted: false,
+        reason: 'not_returned_by_meta_api_assumed_deleted',
+      });
+    }
+  }
 
   const activeCount = activeCampaigns.length;
 
+  console.log('[LAUNCH][limit-check]', {
+    ownerKey,
+    accountId,
+    planKey: launchPlanLimits.planKey,
+    maxCampaignsPerMonth: launchPlanLimits.maxCampaignsPerMonth,
+    smCampaignIdsInDb: _smCampaignIds.size,
+    activeCampaignsCountingAgainstLimit: activeCount,
+    allMetaCampaignsReturned: (existing.data?.data || []).length,
+    slotOccupyingCampaignIds: activeCampaigns.map((c) => c.id),
+  });
+
   if (activeCount >= launchPlanLimits.maxCampaignsPerMonth) {
+    console.log('[LAUNCH][limit-campaign]', {
+      ownerKey,
+      planKey: launchPlanLimits.planKey,
+      planLabel: launchPlanLimits.planLabel,
+      activeCount,
+      maxAllowed: launchPlanLimits.maxCampaignsPerMonth,
+      blockingCampaigns: activeCampaigns.map((c) => ({ id: c.id, status: c.effective_status, name: c.name })),
+    });
     return res.status(400).json({
       error: `Limit reached for ${launchPlanLimits.planLabel}: maximum of ${launchPlanLimits.maxCampaignsPerMonth} active campaigns.`,
       planKey: launchPlanLimits.planKey,
@@ -2683,6 +2922,20 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
         endISO = new Date(new Date(startISO).getTime() + 24 * 60 * 60 * 1000).toISOString();
       }
     }
+
+    console.log('[LAUNCH][creative-payload]', {
+  ownerKey,
+  accountId,
+  ctxKey: String(req.body?.ctxKey || form?.ctxKey || '').trim() || '(not provided)',
+  headline: String(form.headline || form.adHeadline || '').trim().slice(0, 80) || '(from adCopy)',
+  primaryTextPreview: String(adCopy || '').trim().slice(0, 120),
+  businessName: String(bodyAnswers.businessName || form.businessName || form.name || '').trim(),
+  businessType: String(bodyAnswers.businessType || bodyAnswers.industry || form.businessType || '').trim(),
+  service: String(bodyAnswers.mainBenefit || bodyAnswers.service || '').trim(),
+  promotion: String(bodyAnswers.offer || bodyAnswers.saveAmount || '').trim(),
+  imageCount: (Array.isArray(req.body?.imageVariants) ? req.body.imageVariants : []).length,
+  answersHasIndustry: !!(bodyAnswers.industry || bodyAnswers.businessType),
+});
 
     console.log('[LAUNCH][campaign create]', {
   accountId,
@@ -2859,6 +3112,9 @@ const cr = await axios.post(
       images: usedImages,
       videos: [],
       fbVideoIds: [],
+      // launchComplete=true is proof that campaign, adset, and all ads were fully created.
+      // This write only happens AFTER every Meta object succeeds — it is the success marker.
+      launchComplete: true,
       updatedAt: nowIso,
       ...(idx === -1 ? { createdAt: nowIso } : {}),
     };

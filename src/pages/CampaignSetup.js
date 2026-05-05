@@ -4603,6 +4603,19 @@ console.log("[SM][launch payload]", {
   payload,
 });
 
+console.log("[LAUNCH][creative-payload]", {
+  ctxKey: String(location.state?.ctxKey || "").trim() || "(not in state)",
+  headline: finalHeadline.slice(0, 80) || "(empty)",
+  primaryTextPreview: finalBody.slice(0, 120) || "(empty)",
+  businessName: String(form?.businessName || answers?.businessName || "").trim() || "(empty)",
+  businessType: String(form?.businessType || answers?.businessType || answers?.industry || "").trim() || "(empty — may produce generic copy)",
+  service: String(answers?.mainBenefit || answers?.service || "").trim() || "(empty)",
+  promotion: String(answers?.offer || answers?.saveAmount || "").trim() || "(empty)",
+  imageCount: filteredImages.length,
+  usingDraftCreatives: !!(location.state?.imageUrls?.length),
+  answersHasIndustry: !!(answers?.industry || answers?.businessType),
+});
+
       const res = await authFetch(`/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

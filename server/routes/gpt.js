@@ -251,6 +251,19 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
     const a = (req.body && req.body.answers) || {};
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+    console.log("[CREATIVE][context]", {
+      route: "summarize-ad-copy",
+      businessName: String(a.businessName || "").trim() || "(empty)",
+      industry: String(a.industry || "").trim() || "(empty)",
+      businessType: String(a.businessType || "").trim() || "(empty)",
+      niche: String(a.niche || "").trim() || "(empty)",
+      effectiveIndustry: String(a.industry || a.businessType || a.niche || "").trim() || "(EMPTY — will use last-resort fallback)",
+      city: String(a.city || "").trim() || "(empty)",
+      mainBenefit: String(a.mainBenefit || "").trim().slice(0, 80) || "(empty)",
+      offer: String(a.offer || "").trim() || "(empty)",
+      hasPhone: !!(a.phone),
+    });
+
     // --- local helpers ---
     const norm = (s = "") =>
       String(s || "")
@@ -352,7 +365,8 @@ const safeSubline = (s = "") => {
 
 const buildFallbackHeadline = () => {
   // Derive from industry + location only — never from raw benefit text (too echo-prone).
-  const industry = String(a.industry || "").trim().toLowerCase();
+  // Check businessType and niche as fallbacks for industry (some clients populate those instead).
+  const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
   const city = String(a.city || "").trim();
 
   if (/hvac|heating|cooling|air/.test(industry))   return city ? `HVAC service in ${city}` : "Trusted local HVAC service";
@@ -378,7 +392,8 @@ const buildFallbackHeadline = () => {
 
 const buildFallbackSubline = (headline) => {
   // Build from industry + audience + offer — never from raw benefit text (too echo-prone).
-  const industry = String(a.industry || "").trim().toLowerCase();
+  // Also check businessType and niche as fallbacks (consistent with buildFallbackHeadline).
+  const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
   const audience = String(a.idealCustomer || "").trim().toLowerCase();
   const city = String(a.city || "").trim();
   const offer = String(a.offer || a.saveAmount || "").trim();

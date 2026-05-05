@@ -813,6 +813,19 @@ router.post("/generate-static-ad", async (req, res) => {
     }
     const count = rateCheck.toGenerate;
 
+    console.log("[CREATIVE][context]", {
+      route: "generate-static-ad",
+      businessName: String(a.businessName || a.brand || "").trim() || "(empty)",
+      industry: String(a.industry || "").trim() || "(empty)",
+      businessType: String(a.businessType || "").trim() || "(empty)",
+      niche: String(a.niche || "").trim() || "(empty)",
+      effectiveIndustry: String(a.industry || a.businessType || a.niche || "business").trim(),
+      location: String(a.location || a.city || "").trim() || "(empty)",
+      offer: String(a.offer || a.saveAmount || "").trim() || "(empty)",
+      hasCraftedCopy: !!(body.copy && typeof body.copy === "object" && (body.copy.headline || body.copy.subline)),
+      craftedHeadlinePreview: String((body.copy || {}).headline || "").trim().slice(0, 60) || "(empty)",
+    });
+
     const website = clean(a.website || a.url || "");
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");
 
