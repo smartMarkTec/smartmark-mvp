@@ -597,9 +597,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     `Create a square (1:1) social media ad creative for "${businessName}", a ${industry} business. This is a polished paid-advertising creative intended to run on Facebook and Instagram.`,
     ``,
     `PHOTOGRAPHY STYLE — THIS IS THE MOST IMPORTANT DIRECTIVE:`,
-    `Render this as photorealistic commercial photography — the kind produced by a professional photographer shooting a campaign for a major consumer brand. Real-world lighting, authentic materials and textures, natural shadows, genuine depth of field. The final image must look like an actual photograph taken on a professional camera, not a 3D render, not digital illustration, not vector art, not graphic design without a real photographic base.`,
+    `This image must look like a real photograph taken by a professional commercial photographer for a paid advertising campaign. Specific photographic qualities required: accurate real-world lighting with believable color temperature and natural shadows, authentic surface materials and textures (not digitally smoothed or artificially perfect), genuine optical depth of field with natural lens fall-off, and subtle photographic grain appropriate to the exposure. The scene must feel like a location or studio that actually exists — grounded, real, and believable. When in doubt, choose naturalism over perfection.`,
     ``,
-    `DO NOT USE any of these styles: illustration, digital painting, cartoon, anime, watercolor, comic-book look, 3D CGI render, plastic-looking CGI surfaces, fantasy lighting, glowing neon color grading, hand-drawn aesthetics, overly smooth AI-synthesis texture, or any treatment that makes the image look artificial, generated, or non-photographic. Avoid the "AI image" look — prioritize authentic photographic grain, real-world imperfection, and commercial-photography polish.`,
+    `DO NOT USE any of these styles: illustration, digital painting, cartoon, anime, watercolor, comic-book look, 3D CGI render, plastic-looking CGI surfaces, fantasy or studio-artificial lighting, glowing neon color grading, hand-drawn aesthetics, overly smooth AI-synthesis texture, digitally perfect surfaces with no grain or imperfection, or any treatment that makes the image look generated, stylized, or non-photographic. Avoid the "AI image" look entirely — real photography has imperfection, authentic texture, and natural optical characteristics that must be present here.`,
     ``,
     industryScene
       ? `SCENE: ${industryScene}`
@@ -641,6 +641,8 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     logoFound
       ? `BRANDING: a real business logo will be composited after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere. The business name may appear as plain readable text only.`
       : `BRANDING: no logo is available — do not draw any logo, icon, emblem, seal, badge, brand mark, or graphic symbol. Do not write the name of any equipment manufacturer, supplier, or third-party company other than "${businessName}". The business name may appear as plain readable text only.`,
+    ``,
+    `FINAL PHOTOREALISM CHECK: The photographic scene in this ad must look like it was captured with a real camera — authentic grain, real-world materials, believable natural light, imperfect and true-to-life. If any part of the scene looks illustrated, cartoon-like, CGI-smooth, digitally perfect, or synthetically rendered, it is wrong. The text and button sit on top of a real-looking photograph. The photograph itself must never look designed, stylized, or artificially generated.`,
     variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
