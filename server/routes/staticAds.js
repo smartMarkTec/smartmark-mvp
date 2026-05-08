@@ -394,18 +394,39 @@ function getIndustryScene(industry, hash, a = {}) {
 }
 
 /* Named layout recipes for controlled composition variety.
-   Each specifies how the visual and type elements should be arranged. */
+   Each entry covers both STRUCTURE (where things go) and DESIGN QUALITY (how they're executed).
+   CTA styling, scrim/panel quality, and accent marks are described per-recipe so the model
+   renders a designed ad, not just positioned text on a photo. */
 const LAYOUT_RECIPES = [
-  "Full-bleed photography fills the entire canvas. Headline and support copy in the lower-left on a semi-transparent dark gradient overlay. CTA as a small button or label in the lower-right. Clean modern editorial style.",
-  "Split layout: left half is a solid brand-color block with the large bold headline and support copy stacked vertically. Right half is the photographic scene bleeding to the right edge. Hard clean dividing edge between the two.",
-  "Split layout: left half is the photographic scene. Right half is a white or light neutral background with headline, support copy, and CTA stacked cleanly. Professional, modern commercial style.",
-  "Upper two-thirds: photographic scene hero image. Lower third: a solid-color branded footer bar with business name, CTA, and contact info arranged horizontally. Inspired by professional service-company print advertising.",
-  "Minimal full-bleed: open photography with generous negative space. Small elegant headline in the upper-left or lower-left corner. Very little text — premium editorial feel. The scene does the talking.",
-  "Bold headline dominance: large, bold, high-contrast headline fills the upper third. Mid-section: the photographic scene. Lower band: support copy and CTA on a clean-color strip. Strong typographic emphasis.",
-  "Hero image fills the top half. Below: a clean horizontal strip showing three short service features or benefits with icons. Footer with CTA and contact. Like a polished professional print ad.",
-  "Full-scene photography with a smooth gradient overlay — transparent at center, fading to a solid brand color at the top and bottom edges. Headline centered or upper-center in high-contrast text. Modern social-native style.",
-  "Offer-centric: the offer or key message given maximum typographic prominence — very large text treatment. Supporting photography in the background as a blurred or partial element. CTA prominent below.",
-  "Mostly clean background with intentional whitespace. One premium product or scene photograph in an inset frame or contained rectangle. Elegant restrained typography. High-end brand feel.",
+  // 0 — full-bleed with lower gradient scrim
+  "Full-bleed photography fills the entire canvas. Headline and support copy sit in the lower-left on a smooth gradient scrim — fading from fully transparent at center to 70–80% dark opacity at the bottom edge, giving text a solid contrast foundation without looking muddy or smeared. A thin 1–2px horizontal rule sits directly above the headline. CTA rendered as a small pill-shaped or tight rectangular button with solid fill and high-contrast label. Clean modern editorial social-ad style.",
+
+  // 1 — split: text panel left, image right
+  "Split layout: left half is a solid brand-color panel with the bold headline and support copy stacked vertically. Right half is the photographic scene bleeding to the right edge, meeting the panel with a clean hard edge — a 2–4px accent stripe at the seam adds a finished touch. CTA on the left panel rendered as a filled rectangular button with a color distinct from the panel background. Support copy set in a noticeably lighter weight than the headline for clear typographic contrast.",
+
+  // 2 — split: image left, text panel right
+  "Split layout: left half is the photographic scene. Right half is a white or very light neutral panel with headline, support copy, and CTA stacked with generous spacing. A thin vertical accent line may mark the seam. CTA rendered as a filled pill or rectangle button — brand-color fill with white label, or dark fill with light label — never loose unstyled text. Support copy lighter or thinner in weight than the headline. Clean professional commercial style.",
+
+  // 3 — image hero top, branded footer bar
+  "Upper two-thirds: photographic scene as the dominant hero image. Lower third: a solid-color branded footer bar — use a deep, confident tone (dark navy, charcoal, warm dark, or brand color) with business name left-aligned, CTA as a distinct outlined or filled button center or right, and contact detail (phone or website) on the far right. A thin light rule separates image from footer. Looks like a polished professional service-company ad — grounded, purposeful, complete.",
+
+  // 4 — premium minimal
+  "Minimal full-bleed: open photography with deliberate generous negative space. Small, elegant headline in the upper-left or lower-left — refined letter-spacing, premium typeface weight, no backing panel needed if the scene provides contrast. A single thin horizontal rule beneath the headline separates it from a small styled CTA label below. No support body copy — headline, rule, CTA only. The scene carries the ad; design elements are minimal and precise.",
+
+  // 5 — bold headline hero with type-forward emphasis
+  "Bold headline dominance: the headline fills the upper third at maximum weight — the largest typographic element in the composition by a clear margin. A thin accent rule or narrow color bar sits directly beneath the headline block. The photographic scene occupies the mid-section. Lower band: a solid-color strip holds support copy and a CTA button with contrasting fill and tight horizontal padding. The headline should feel unmissable — this is a type-led ad.",
+
+  // 6 — service feature strip layout
+  "Hero photographic image fills the top half. Below: a clean light-background panel divided into three compact columns, each with a minimal icon and a 2–4 word feature label beneath it. A thin rule or subtle shadow separates image from panel. A narrow branded footer below the feature columns holds the CTA as a filled button and one contact detail. Every element is contained and intentional — looks like a polished professional print ad.",
+
+  // 7 — centered headline with gradient vignette
+  "Full-scene photography with a smooth gradient vignette overlay — transparent at center, fading to a solid or semi-solid brand color at both top and bottom edges, creating legible framing zones. Headline centered or upper-center in white or high-contrast text with optional refined letter-spacing. A small rounded-corner offer badge or service callout may sit just below the headline when an offer is present — semi-transparent or solid fill, tight padding. CTA centered at the bottom zone as a styled button. Modern social-native style.",
+
+  // 8 — offer-centric poster layout
+  "Offer-centric layout: the offer or headline given poster-scale typographic treatment — large, dominant, unmissable. A bold rectangular or pill-shaped callout badge may frame it with a contrasting fill. Supporting photography blurred as a background or placed as a contained panel element. A clearly styled CTA button sits below — solid fill, clean label, strong contrast. If a specific offer amount or term is present, it gets its own large type treatment, visually separated from the headline.",
+
+  // 9 — premium inset / clean whitespace
+  "Mostly clean background — white, off-white, or a single muted tone. One premium photograph placed in a contained inset: a floating rectangle with a subtle shadow, a rounded-rectangle crop, or a precise framed panel with a thin border. Headline in a confident but refined weight — not compressed or ultra-bold. Support copy lighter in weight. CTA as a clean outlined or lightly filled button. At most two design elements beyond photo and text. High-end, restrained, brand-safe.",
 ];
 
 /* Returns true if a string looks like raw user input — first-person company voice,
@@ -609,7 +630,13 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
       ? `  Offer: "${offer}"`
       : `  Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `TYPOGRAPHY: the headline dominates — large, bold, high-contrast, fully legible. Use a modern sans-serif or strong commercial display typeface appropriate for a professional paid ad. All copy must be fully legible at social-feed viewing sizes.`,
+    `TYPOGRAPHY: the headline is the dominant typographic element — set it at the largest size and heaviest weight of the chosen typeface. Use a modern sans-serif or strong commercial display face appropriate for a professional paid ad. Support copy should be noticeably lighter or thinner in weight than the headline — not just smaller, but visibly a different weight so the eye instantly separates the two levels. All copy must be fully legible at social-feed viewing sizes.`,
+    ``,
+    `DESIGN TREATMENT — these details separate a plain ad from a polished one:`,
+    `  CTA as a shaped element: the CTA must always be rendered as a designed container — a pill, a tight rectangle, or a strip — with a solid fill or a clean border. Never render the CTA as loose unstyled text. The label should be short, high-contrast, and legible at a glance.`,
+    `  Design accents (use 1–2 maximum, keep them subtle): a thin 1–2px horizontal rule above or below the headline block; a narrow color accent stripe on a panel edge or split seam; a small rounded-corner callout badge for an offer or feature label; a text backing panel with clean edges or slight rounding. Use only what fits the chosen layout — restraint is the goal.`,
+    `  Scrim and panel quality: any gradient scrim must be smooth and purposeful — fade cleanly from transparent to dark, not smeared or muddy. Any color panel must have a defined, clean edge. Semi-transparent panels should be dark enough to ensure text legibility without obscuring the photo entirely.`,
+    `  Overall design goal: premium-minimal. The ad should feel intentional and designed, not cluttered or decorated. Every element earns its place.`,
     ``,
     logoFound
       ? `BRANDING: a real business logo will be composited after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere. The business name may appear as plain readable text only.`
