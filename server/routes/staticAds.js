@@ -223,100 +223,173 @@ const VISUAL_MOODS = [
   "the service result or product shown in its real-world context — commercial lifestyle photography, authentic setting and lighting",
 ];
 
-/* Industry → specific photographic scene guidance.
-   Each entry is a concrete, photography-grounded scene description so the model renders
-   the right visual for the business type rather than guessing a generic scene. */
+/* Industry → specific photographic scene descriptions.
+   HVAC has 16 entries covering distinct service contexts — thermostat is index 4 (1-of-16, ~6%).
+   Other industries have 4–6 entries. All are hash-indexed (not Math.random) so the
+   variationToken deterministically drives scene selection and different tokens get different scenes. */
 const INDUSTRY_SCENES = {
   hvac: [
-    "a modern ductless mini-split air handler mounted flush on a white wall in a clean, well-lit contemporary living room — real interior photography, warm ambient light, realistic wall texture and hardwood flooring visible",
-    "a residential split-system outdoor condenser unit installed on a concrete pad beside a well-landscaped house exterior — professional exterior photography, natural daylight, realistic vinyl siding and mature shrubs",
-    "a sleek digital thermostat mounted on a freshly painted wall in a comfortable home interior — close-up commercial product photography, shallow depth of field, warm residential lighting, blurred living room background",
-    "a bright, comfortable residential living room interior conveying whole-home comfort — architectural interior photography, natural light streaming through large windows, realistic furniture and flooring, no people",
-    "a clean HVAC service van parked in a suburban residential driveway — no driver visible, commercial vehicle photography, modest brick home in background, clear blue sky",
+    /* 0 */ "a residential central air split-system condenser unit on a concrete equipment pad beside a well-landscaped home exterior — professional exterior photography, natural daylight, realistic vinyl siding and mature shrubs",
+    /* 1 */ "a clean HVAC service van parked in a suburban residential driveway, modest brick home behind it — no driver visible, commercial vehicle photography, clear blue sky, mid-morning light",
+    /* 2 */ "a bright, comfortable residential living room conveying whole-home comfort — architectural interior photography, natural light streaming through large windows, soft furnishings and hardwood flooring, no people",
+    /* 3 */ "a modern ductless mini-split air handler mounted flush on a white wall in a clean contemporary living room — real interior photography, warm ambient light, realistic wall texture and flooring visible",
+    /* 4 */ "a sleek digital programmable thermostat mounted on a neutral painted wall — close-up commercial product photography, shallow depth of field, warm residential lighting, softly blurred room background",
+    /* 5 */ "a white ceiling supply air vent in a freshly painted residential room — close-up architectural interior photography, clean natural light, minimal and fresh composition",
+    /* 6 */ "HVAC service tools and equipment laid out neatly beside an outdoor condenser unit — still-life commercial photography, natural light, no person visible, realistic metal and rubber textures",
+    /* 7 */ "a brand-new high-efficiency outdoor condenser unit on a clean concrete pad beside a modern home — professional exterior photography, natural morning light, fresh landscaping, no workers visible",
+    /* 8 */ "a residential air handler unit in a finished utility room with a fresh replacement air filter beside it — close-up interior photography, bright shop lighting, realistic metal and fiberglass textures",
+    /* 9 */ "a bright, airy home interior with a visible air purifier on a side table and open windows — lifestyle interior photography, warm natural light, comfortable modern furnishings, clean and healthy atmosphere",
+    /* 10 */ "a cozy residential living room on a cold winter day, warm amber interior light visible, frost on exterior windows — lifestyle exterior/interior photography, dusk light, welcoming and warm feeling, no people",
+    /* 11 */ "a modern suburban home on a sunny summer day, outdoor AC condenser unit visible in a clean landscaped side yard — wide exterior photography, bright blue sky, green grass, natural light",
+    /* 12 */ "a dramatic editorial close-up of a high-efficiency outdoor condenser unit, blurred suburban house in soft background — commercial advertising photography, natural backlit golden light, premium equipment focus",
+    /* 13 */ "a dramatic macro close-up of condenser fin coil and copper refrigerant lines — commercial product photography, natural side light, realistic aluminum and copper textures, shallow depth of field",
+    /* 14 */ "a wide-angle shot of a well-maintained two-story suburban home, outdoor AC unit clearly visible in side yard — professional real estate exterior photography, clear sky, natural midday light",
+    /* 15 */ "a newly installed high-efficiency furnace and air handler in a clean modern mechanical room — commercial interior photography, bright LED lighting, pristine white walls, realistic equipment detail",
   ],
   plumbing: [
     "a clean, modern bathroom with polished chrome fixtures and fresh white subway tile — professional interior photography, bright natural light, realistic porcelain and chrome",
-    "a professional service van parked on a quiet residential street — no people, commercial vehicle photography, suburban neighborhood setting, natural daylight",
+    "a professional plumbing service van parked on a quiet residential street — no people, commercial vehicle photography, suburban neighborhood, natural daylight",
     "copper and PEX piping neatly installed under a kitchen sink — close-up commercial photography, warm shop lighting, realistic metal textures and wood cabinet surfaces",
+    "a gleaming modern kitchen with polished chrome faucet and undermount sink — interior photography, natural window light, realistic stone countertop and stainless steel",
+    "a freshly tiled walk-in shower with polished chrome fixtures and frameless glass door — professional interior photography, bright natural light, clean premium materials",
+    "a clean professional pipe fitting with soldered copper joints — macro commercial photography, natural light, realistic metal texture and depth of field",
   ],
   electrical: [
-    "a clean residential electrical panel with neat, organized wiring installed in a finished garage — close-up commercial photography, bright shop lighting, realistic metal enclosure",
-    "modern recessed LED lighting glowing in a well-finished living room — professional interior photography, warm ambient light, realistic ceiling and furnishings",
+    "a clean residential electrical panel with neat organized wiring in a finished garage — close-up commercial photography, bright shop lighting, realistic metal enclosure",
+    "modern recessed LED lighting in a well-finished living room — professional interior photography, warm ambient light, realistic ceiling and furnishings",
     "a professional electrician's branded service van on a suburban street — no people, commercial vehicle photography, residential neighborhood background",
+    "a newly installed outdoor electrical panel with weatherproof cover on a stucco house exterior — close-up exterior photography, natural daylight, realistic materials",
+    "a beautifully lit dining room with pendant lights and dimmer switches — editorial interior photography, warm evening ambiance, realistic wood and fabric finishes",
+    "a clean breaker panel being inspected — commercial product photography, bright overhead lighting, realistic metal and plastic components",
   ],
   roofing: [
-    "a freshly installed dimensional asphalt shingle roof on a two-story residential home — wide exterior photography, natural daylight, realistic shingles, gutters, and mature trees in background",
-    "a close-up of premium roofing shingles laid in a precise overlapping pattern — macro commercial photography, natural light, realistic granule texture and shadow detail",
-    "a wide exterior shot of a large home with a beautiful roof line against a deep blue sky — professional real estate exterior photography, golden-hour light",
+    "a freshly installed dimensional asphalt shingle roof on a two-story residential home — wide exterior photography, natural daylight, realistic shingles, gutters, and mature trees",
+    "a close-up of premium roofing shingles in a precise overlapping pattern — macro commercial photography, natural light, realistic granule texture and shadow detail",
+    "a wide exterior shot of a large home with a beautiful roof line against a deep blue sky — professional exterior photography, golden-hour light",
+    "a clean rooftop view looking down a freshly shingled slope against a blue sky horizon — editorial exterior photography, natural daylight, sharp architectural lines",
+    "a professional roofing crew truck parked in a residential driveway — no people visible, commercial vehicle photography, suburban home in background",
   ],
   landscaping: [
-    "a beautifully manicured front yard with crisp lawn edging, lush green grass, and flowering shrubs — professional exterior photography, bright natural morning light, realistic landscaping",
+    "a beautifully manicured front yard with crisp edging, lush green grass, and flowering shrubs — professional exterior photography, bright natural morning light",
     "a professionally designed backyard patio with planted beds, clean mulch, and stone edging — garden photography, natural afternoon light, vibrant greens",
+    "a freshly mowed lawn with clean diagonal mowing lines and sharp sidewalk edging — exterior photography, bright natural light, healthy green grass",
+    "a colorful landscape planting bed with annuals and fresh dark mulch alongside a home foundation — close-up exterior photography, natural morning light",
   ],
   cleaning: [
-    "a spotlessly clean, bright white kitchen with gleaming countertops and stainless appliances — professional interior photography, natural light from window, realistic cabinet and countertop materials",
-    "a pristine living room interior with fresh vacuum lines in plush carpet — professional interior photography, warm ambient light, realistic furniture and textures",
+    "a spotlessly clean bright kitchen with gleaming countertops and stainless appliances — professional interior photography, natural window light, realistic cabinet and countertop materials",
+    "a pristine living room with fresh vacuum lines in plush carpet — professional interior photography, warm ambient light, realistic furniture and textures",
+    "a gleaming bathroom with polished chrome fixtures and sparkling tile — interior photography, bright natural light, fresh and sanitized atmosphere",
+    "freshly cleaned hardwood floor reflecting soft window light in an open living area — interior photography, natural light, clean and inviting",
   ],
   dental: [
-    "a modern, welcoming dental office reception area with clean white and warm-wood finishes — professional commercial interior photography, bright natural light",
-    "a confident, natural smile — editorial portrait photography, soft studio lighting, shallow depth of field, authentic-looking teeth, neutral background",
+    "a modern welcoming dental office reception area with clean white and warm-wood finishes — professional commercial interior photography, bright natural light",
+    "a confident natural smile in close-up — editorial portrait photography, soft studio lighting, shallow depth of field, authentic-looking teeth, neutral background",
+    "a clean modern dental treatment room with polished equipment and bright operatory light — commercial interior photography, clinical but welcoming",
+    "a close-up of a dental model showing clean well-aligned teeth — product photography, soft studio lighting, white background",
   ],
   restaurant: [
-    "a beautifully plated signature dish on a restaurant table with warm ambient lighting — professional editorial food photography, natural-looking soft light, realistic tableware and linen",
-    "a warm, inviting restaurant dining room with set tables and low pendant lighting — professional interior photography, atmospheric ambient light, realistic wood and fabric finishes",
+    "a beautifully plated signature dish on a restaurant table with warm ambient lighting — professional editorial food photography, soft natural light, realistic tableware and linen",
+    "a warm inviting restaurant dining room with set tables and low pendant lighting — professional interior photography, atmospheric ambient light, realistic wood and fabric finishes",
+    "fresh ingredients artfully arranged on a cutting board — editorial food photography, natural overhead light, vibrant colors, realistic textures",
+    "a stylish restaurant bar with warm lighting and polished glassware — commercial interior photography, atmospheric evening ambiance",
   ],
   auto: [
-    "a clean, well-lit auto repair shop with a car on the lift — commercial interior photography, professional overhead lighting, realistic concrete floor and tool equipment",
+    "a clean well-lit auto repair shop with a car on the lift — commercial interior photography, professional overhead lighting, realistic concrete floor and tool equipment",
     "a gleaming vehicle exterior freshly detailed in an open lot — commercial product photography, natural outdoor light, realistic paint reflections and chrome",
+    "a mechanic's tool chest with organized chrome tools in a clean shop — still-life commercial photography, realistic lighting, authentic metal textures",
+    "a car engine bay being serviced — close-up commercial photography, realistic engine components and professional tools visible",
   ],
   pest: [
-    "a bright, clean kitchen interior free of clutter — professional interior photography, natural light, spotless counters and appliances",
+    "a bright clean kitchen interior free of clutter — professional interior photography, natural light, spotless counters and appliances",
     "a professional pest control service truck on a residential street — no people, commercial vehicle photography, suburban neighborhood background",
+    "a clean well-maintained home exterior with a manicured yard — professional exterior photography, clear daylight, fresh and protected feeling",
   ],
   realEstate: [
     "a beautiful home exterior with a manicured lawn, clear sky, and welcoming front entrance — professional real estate exterior photography, natural daylight",
-    "a bright, airy open-concept living room with large windows — professional real estate interior photography, natural window light, realistic furnishings",
+    "a bright airy open-concept living room with large windows — professional real estate interior photography, natural window light, realistic furnishings",
+    "a stunning kitchen with granite counters, stainless appliances, and warm pendant lighting — real estate interior photography, natural and artificial light blend",
+    "a wide aerial-perspective shot of a suburban neighborhood with well-kept homes — professional architectural photography, golden-hour light",
   ],
   fitness: [
     "a modern gym interior with well-spaced equipment and motivating lighting — commercial interior photography, bright overhead lighting, realistic rubber flooring and equipment",
-    "a clean, open personal training studio with natural light — professional interior photography, inviting and energetic atmosphere",
+    "a clean open personal training studio with natural light — professional interior photography, inviting and energetic atmosphere",
+    "a row of dumbbells on a clean rack in a modern gym — commercial product photography, natural light, realistic metal and rubber textures",
   ],
   salon: [
-    "a modern, upscale salon interior with styling chairs, mirrors, and soft overhead lighting — professional commercial interior photography, bright and clean, realistic materials",
+    "a modern upscale salon interior with styling chairs, mirrors, and soft overhead lighting — professional commercial interior photography, bright and clean, realistic materials",
     "a beautifully finished haircut or blowout — editorial beauty photography, soft diffused studio lighting, natural-looking result",
+    "a styling station with professional tools neatly arranged — close-up commercial photography, clean and polished",
   ],
   insurance: [
     "a comfortable family home exterior on a sunny day — professional real estate photography style, natural daylight, inviting and secure feeling",
-    "a warm, professional insurance agency office interior — commercial interior photography, natural light, clean and trustworthy aesthetic",
+    "a warm professional insurance office interior — commercial interior photography, natural light, clean and trustworthy aesthetic",
+    "a new car parked in a clean driveway in front of a home — commercial lifestyle photography, natural morning light",
   ],
   legal: [
     "a professional law office interior with bookshelves and a clean conference table — commercial interior photography, warm natural light, polished wood and leather",
     "a courthouse exterior or professional building facade — architectural exterior photography, natural daylight, serious and trustworthy",
+    "a legal document on a clean desk with a pen — editorial commercial photography, natural window light, clean minimal composition",
   ],
   marketing: [
-    "a modern marketing agency open-plan office with computers and whiteboards — commercial interior photography, bright natural light, clean and creative environment",
-    "a close-up of a laptop or monitor displaying a clean, professional digital interface — commercial product photography, shallow depth of field, neutral background",
+    "a modern marketing agency open-plan office with computers and whiteboards — commercial interior photography, bright natural light, clean creative environment",
+    "a close-up of a laptop displaying a clean professional digital interface — commercial product photography, shallow depth of field, neutral background",
+    "a clean desk workspace with a notepad, laptop, and coffee — lifestyle commercial photography, natural window light, minimal and professional",
   ],
 };
 
-function getIndustryScene(industry) {
+/* Context keyword → HVAC scene index subsets.
+   When the user's offer/benefit text signals a specific service type, scene selection
+   narrows to the most relevant scenes. Hash picks deterministically within the subset. */
+const HVAC_CONTEXT_BUCKETS = [
+  { re: /\b(tune.?up|maintenance|annual|seasonal.check|check.?up|inspect|filter.change|filter.replace|service.check)\b/i, indices: [8, 6, 5, 13] },
+  { re: /\b(repair|fix|broken|not.cooling|not.heating|emergency|diagnostic|failure|broke|malfunction)\b/i,               indices: [6, 7, 0, 12] },
+  { re: /\b(install|installation|new.system|new.unit|replace|replacement|upgrade|new.equipment)\b/i,                      indices: [7, 15, 0, 3] },
+  { re: /\b(comfort|indoor.air|air.quality|iaq|clean.air|allergen|purif|fresh.air|healthy.air)\b/i,                       indices: [9, 2, 3, 5] },
+  { re: /\b(heat|heating|furnace|warm|boiler|winter)\b/i,                                                                 indices: [10, 15, 8, 2] },
+  { re: /\b(cool|cooling|ac\b|air.cond|summer|hot)\b/i,                                                                   indices: [11, 0, 3, 12] },
+  { re: /\b(promo|special|offer|discount|financing|deal|save\b|savings|rebate|credit)\b/i,                                indices: [12, 11, 0, 7] },
+  { re: /\b(effici|energy|electric.bill|utility.bill|lower.bill|save.money|high.effici)\b/i,                              indices: [15, 7, 0, 9] },
+];
+
+/* Select a scene from the appropriate industry pool.
+   - hash is the djb2 token hash from buildAdPromptFromAnswers (deterministic per variationToken)
+   - a is the raw form answers object (used for context-keyword nudging on HVAC)
+   Returns null for unknown industries, which falls through to VISUAL_MOODS. */
+function getIndustryScene(industry, hash, a = {}) {
   const ind = String(industry || "").toLowerCase();
-  if (/hvac|heating|cooling|air.?cond/.test(ind))   return pickOne(INDUSTRY_SCENES.hvac);
-  if (/plumb/.test(ind))                             return pickOne(INDUSTRY_SCENES.plumbing);
-  if (/electr/.test(ind))                            return pickOne(INDUSTRY_SCENES.electrical);
-  if (/roof/.test(ind))                              return pickOne(INDUSTRY_SCENES.roofing);
-  if (/landscap|lawn/.test(ind))                     return pickOne(INDUSTRY_SCENES.landscaping);
-  if (/clean|maid/.test(ind))                        return pickOne(INDUSTRY_SCENES.cleaning);
-  if (/dental|dent/.test(ind))                       return pickOne(INDUSTRY_SCENES.dental);
-  if (/restaurant|food|cater/.test(ind))             return pickOne(INDUSTRY_SCENES.restaurant);
-  if (/auto|car|vehicle/.test(ind))                  return pickOne(INDUSTRY_SCENES.auto);
-  if (/pest/.test(ind))                              return pickOne(INDUSTRY_SCENES.pest);
-  if (/real.?estate|realt/.test(ind))                return pickOne(INDUSTRY_SCENES.realEstate);
-  if (/fitness|gym|personal.?train/.test(ind))       return pickOne(INDUSTRY_SCENES.fitness);
-  if (/salon|hair|beauty/.test(ind))                 return pickOne(INDUSTRY_SCENES.salon);
-  if (/insur/.test(ind))                             return pickOne(INDUSTRY_SCENES.insurance);
-  if (/legal|law/.test(ind))                         return pickOne(INDUSTRY_SCENES.legal);
-  if (/market|advertis|agency/.test(ind))            return pickOne(INDUSTRY_SCENES.marketing);
+  const h = Number.isFinite(hash) ? hash : Math.floor(Math.random() * 999983);
+
+  if (/hvac|heating|cooling|air.?cond/.test(ind)) {
+    const pool = INDUSTRY_SCENES.hvac;
+    // Check form context for service-type keywords to narrow scene to relevant bucket
+    const ctx = String([
+      a.mainBenefit || "", a.offer || "", a.description || "",
+      a.details || "", a.offerHeadline || "", a.secondary || "",
+    ].join(" "));
+    for (const bucket of HVAC_CONTEXT_BUCKETS) {
+      if (bucket.re.test(ctx)) {
+        return pool[bucket.indices[h % bucket.indices.length]];
+      }
+    }
+    return pool[h % pool.length];
+  }
+
+  const pick = (arr) => arr[h % arr.length];
+  if (/plumb/.test(ind))                           return pick(INDUSTRY_SCENES.plumbing);
+  if (/electr/.test(ind))                          return pick(INDUSTRY_SCENES.electrical);
+  if (/roof/.test(ind))                            return pick(INDUSTRY_SCENES.roofing);
+  if (/landscap|lawn/.test(ind))                   return pick(INDUSTRY_SCENES.landscaping);
+  if (/clean|maid/.test(ind))                      return pick(INDUSTRY_SCENES.cleaning);
+  if (/dental|dent/.test(ind))                     return pick(INDUSTRY_SCENES.dental);
+  if (/restaurant|food|cater/.test(ind))           return pick(INDUSTRY_SCENES.restaurant);
+  if (/auto|car|vehicle/.test(ind))                return pick(INDUSTRY_SCENES.auto);
+  if (/pest/.test(ind))                            return pick(INDUSTRY_SCENES.pest);
+  if (/real.?estate|realt/.test(ind))              return pick(INDUSTRY_SCENES.realEstate);
+  if (/fitness|gym|personal.?train/.test(ind))     return pick(INDUSTRY_SCENES.fitness);
+  if (/salon|hair|beauty/.test(ind))               return pick(INDUSTRY_SCENES.salon);
+  if (/insur/.test(ind))                           return pick(INDUSTRY_SCENES.insurance);
+  if (/legal|law/.test(ind))                       return pick(INDUSTRY_SCENES.legal);
+  if (/market|advertis|agency/.test(ind))          return pick(INDUSTRY_SCENES.marketing);
   return null; // unknown industry — fall through to VISUAL_MOODS
 }
 
@@ -495,7 +568,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const moodIdx = (hash >> 3) % VISUAL_MOODS.length;
 
   // Industry-specific photographic scene takes priority over generic visual mood.
-  const industryScene = getIndustryScene(industry);
+  // Pass hash so the variationToken drives scene selection deterministically,
+  // and pass a so HVAC context keywords can narrow to the relevant scene bucket.
+  const industryScene = getIndustryScene(industry, hash, a);
 
   return [
     `Create a square (1:1) social media ad creative for "${businessName}", a ${industry} business. This is a polished paid-advertising creative intended to run on Facebook and Instagram.`,
