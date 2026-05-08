@@ -209,18 +209,130 @@ function pickOne(arr) {
 
 /* Visual emphasis cues — rotated by variation token so each run explores a different
    composition without hardcoding scenes or demographics.
-   People are one valid option among many — not the default. */
+   Each entry specifies a photographic style so the model defaults to real-world photography. */
 const VISUAL_MOODS = [
-  "the equipment, vehicle, or product itself as the hero — no people, let the hardware do the talking",
-  "a building exterior, storefront, or job-site environment — architecture and setting, no workers",
-  "a comfortable finished interior relevant to the business — clean, well-lit, no crew or staff",
-  "a close-up detail of the product, material, tool, or finished result — texture and craft foreground",
-  "a clean, minimal graphic composition — strong type on a simple well-lit background, no people",
-  "an outdoor environment relevant to the business — yard, roof, street, or landscape, no workers",
-  "a single person in a natural, unposed moment — used sparingly and only when people clearly fit",
-  "a commercial or editorial graphic layout — bold, modern, type-forward with supporting imagery",
-  "a wide environmental scene showing the business context — before/after, setting, or worksite without people",
-  "a product or service in use in a realistic context — show the result or the environment, not the worker",
+  "the key equipment, product, or service vehicle as the hero — commercial product photography, clean studio or natural-light background, no people",
+  "a building exterior, storefront, or job-site setting — architectural exterior photography, natural daylight, realistic materials and surfaces",
+  "a comfortable finished interior relevant to the business — professional interior photography, natural light from windows, no crew or staff visible",
+  "a close-up detail of the product, material, tool, or finished result — macro commercial photography, real-world texture, shallow depth of field",
+  "a clean editorial composition — bold professional typography on a simply photographed or minimally styled background, no people",
+  "an outdoor environment relevant to the business — professional location photography, natural daylight, no workers visible",
+  "a single person in a natural, candid, unposed moment — editorial lifestyle photography, only when people clearly fit the business type",
+  "a bold graphic layout — type-forward commercial design with a supporting photographic element, modern editorial style",
+  "a wide environmental scene showing the business context or setting — professional architectural or location photography, no people present",
+  "the service result or product shown in its real-world context — commercial lifestyle photography, authentic setting and lighting",
+];
+
+/* Industry → specific photographic scene guidance.
+   Each entry is a concrete, photography-grounded scene description so the model renders
+   the right visual for the business type rather than guessing a generic scene. */
+const INDUSTRY_SCENES = {
+  hvac: [
+    "a modern ductless mini-split air handler mounted flush on a white wall in a clean, well-lit contemporary living room — real interior photography, warm ambient light, realistic wall texture and hardwood flooring visible",
+    "a residential split-system outdoor condenser unit installed on a concrete pad beside a well-landscaped house exterior — professional exterior photography, natural daylight, realistic vinyl siding and mature shrubs",
+    "a sleek digital thermostat mounted on a freshly painted wall in a comfortable home interior — close-up commercial product photography, shallow depth of field, warm residential lighting, blurred living room background",
+    "a bright, comfortable residential living room interior conveying whole-home comfort — architectural interior photography, natural light streaming through large windows, realistic furniture and flooring, no people",
+    "a clean HVAC service van parked in a suburban residential driveway — no driver visible, commercial vehicle photography, modest brick home in background, clear blue sky",
+  ],
+  plumbing: [
+    "a clean, modern bathroom with polished chrome fixtures and fresh white subway tile — professional interior photography, bright natural light, realistic porcelain and chrome",
+    "a professional service van parked on a quiet residential street — no people, commercial vehicle photography, suburban neighborhood setting, natural daylight",
+    "copper and PEX piping neatly installed under a kitchen sink — close-up commercial photography, warm shop lighting, realistic metal textures and wood cabinet surfaces",
+  ],
+  electrical: [
+    "a clean residential electrical panel with neat, organized wiring installed in a finished garage — close-up commercial photography, bright shop lighting, realistic metal enclosure",
+    "modern recessed LED lighting glowing in a well-finished living room — professional interior photography, warm ambient light, realistic ceiling and furnishings",
+    "a professional electrician's branded service van on a suburban street — no people, commercial vehicle photography, residential neighborhood background",
+  ],
+  roofing: [
+    "a freshly installed dimensional asphalt shingle roof on a two-story residential home — wide exterior photography, natural daylight, realistic shingles, gutters, and mature trees in background",
+    "a close-up of premium roofing shingles laid in a precise overlapping pattern — macro commercial photography, natural light, realistic granule texture and shadow detail",
+    "a wide exterior shot of a large home with a beautiful roof line against a deep blue sky — professional real estate exterior photography, golden-hour light",
+  ],
+  landscaping: [
+    "a beautifully manicured front yard with crisp lawn edging, lush green grass, and flowering shrubs — professional exterior photography, bright natural morning light, realistic landscaping",
+    "a professionally designed backyard patio with planted beds, clean mulch, and stone edging — garden photography, natural afternoon light, vibrant greens",
+  ],
+  cleaning: [
+    "a spotlessly clean, bright white kitchen with gleaming countertops and stainless appliances — professional interior photography, natural light from window, realistic cabinet and countertop materials",
+    "a pristine living room interior with fresh vacuum lines in plush carpet — professional interior photography, warm ambient light, realistic furniture and textures",
+  ],
+  dental: [
+    "a modern, welcoming dental office reception area with clean white and warm-wood finishes — professional commercial interior photography, bright natural light",
+    "a confident, natural smile — editorial portrait photography, soft studio lighting, shallow depth of field, authentic-looking teeth, neutral background",
+  ],
+  restaurant: [
+    "a beautifully plated signature dish on a restaurant table with warm ambient lighting — professional editorial food photography, natural-looking soft light, realistic tableware and linen",
+    "a warm, inviting restaurant dining room with set tables and low pendant lighting — professional interior photography, atmospheric ambient light, realistic wood and fabric finishes",
+  ],
+  auto: [
+    "a clean, well-lit auto repair shop with a car on the lift — commercial interior photography, professional overhead lighting, realistic concrete floor and tool equipment",
+    "a gleaming vehicle exterior freshly detailed in an open lot — commercial product photography, natural outdoor light, realistic paint reflections and chrome",
+  ],
+  pest: [
+    "a bright, clean kitchen interior free of clutter — professional interior photography, natural light, spotless counters and appliances",
+    "a professional pest control service truck on a residential street — no people, commercial vehicle photography, suburban neighborhood background",
+  ],
+  realEstate: [
+    "a beautiful home exterior with a manicured lawn, clear sky, and welcoming front entrance — professional real estate exterior photography, natural daylight",
+    "a bright, airy open-concept living room with large windows — professional real estate interior photography, natural window light, realistic furnishings",
+  ],
+  fitness: [
+    "a modern gym interior with well-spaced equipment and motivating lighting — commercial interior photography, bright overhead lighting, realistic rubber flooring and equipment",
+    "a clean, open personal training studio with natural light — professional interior photography, inviting and energetic atmosphere",
+  ],
+  salon: [
+    "a modern, upscale salon interior with styling chairs, mirrors, and soft overhead lighting — professional commercial interior photography, bright and clean, realistic materials",
+    "a beautifully finished haircut or blowout — editorial beauty photography, soft diffused studio lighting, natural-looking result",
+  ],
+  insurance: [
+    "a comfortable family home exterior on a sunny day — professional real estate photography style, natural daylight, inviting and secure feeling",
+    "a warm, professional insurance agency office interior — commercial interior photography, natural light, clean and trustworthy aesthetic",
+  ],
+  legal: [
+    "a professional law office interior with bookshelves and a clean conference table — commercial interior photography, warm natural light, polished wood and leather",
+    "a courthouse exterior or professional building facade — architectural exterior photography, natural daylight, serious and trustworthy",
+  ],
+  marketing: [
+    "a modern marketing agency open-plan office with computers and whiteboards — commercial interior photography, bright natural light, clean and creative environment",
+    "a close-up of a laptop or monitor displaying a clean, professional digital interface — commercial product photography, shallow depth of field, neutral background",
+  ],
+};
+
+function getIndustryScene(industry) {
+  const ind = String(industry || "").toLowerCase();
+  if (/hvac|heating|cooling|air.?cond/.test(ind))   return pickOne(INDUSTRY_SCENES.hvac);
+  if (/plumb/.test(ind))                             return pickOne(INDUSTRY_SCENES.plumbing);
+  if (/electr/.test(ind))                            return pickOne(INDUSTRY_SCENES.electrical);
+  if (/roof/.test(ind))                              return pickOne(INDUSTRY_SCENES.roofing);
+  if (/landscap|lawn/.test(ind))                     return pickOne(INDUSTRY_SCENES.landscaping);
+  if (/clean|maid/.test(ind))                        return pickOne(INDUSTRY_SCENES.cleaning);
+  if (/dental|dent/.test(ind))                       return pickOne(INDUSTRY_SCENES.dental);
+  if (/restaurant|food|cater/.test(ind))             return pickOne(INDUSTRY_SCENES.restaurant);
+  if (/auto|car|vehicle/.test(ind))                  return pickOne(INDUSTRY_SCENES.auto);
+  if (/pest/.test(ind))                              return pickOne(INDUSTRY_SCENES.pest);
+  if (/real.?estate|realt/.test(ind))                return pickOne(INDUSTRY_SCENES.realEstate);
+  if (/fitness|gym|personal.?train/.test(ind))       return pickOne(INDUSTRY_SCENES.fitness);
+  if (/salon|hair|beauty/.test(ind))                 return pickOne(INDUSTRY_SCENES.salon);
+  if (/insur/.test(ind))                             return pickOne(INDUSTRY_SCENES.insurance);
+  if (/legal|law/.test(ind))                         return pickOne(INDUSTRY_SCENES.legal);
+  if (/market|advertis|agency/.test(ind))            return pickOne(INDUSTRY_SCENES.marketing);
+  return null; // unknown industry — fall through to VISUAL_MOODS
+}
+
+/* Named layout recipes for controlled composition variety.
+   Each specifies how the visual and type elements should be arranged. */
+const LAYOUT_RECIPES = [
+  "Full-bleed photography fills the entire canvas. Headline and support copy in the lower-left on a semi-transparent dark gradient overlay. CTA as a small button or label in the lower-right. Clean modern editorial style.",
+  "Split layout: left half is a solid brand-color block with the large bold headline and support copy stacked vertically. Right half is the photographic scene bleeding to the right edge. Hard clean dividing edge between the two.",
+  "Split layout: left half is the photographic scene. Right half is a white or light neutral background with headline, support copy, and CTA stacked cleanly. Professional, modern commercial style.",
+  "Upper two-thirds: photographic scene hero image. Lower third: a solid-color branded footer bar with business name, CTA, and contact info arranged horizontally. Inspired by professional service-company print advertising.",
+  "Minimal full-bleed: open photography with generous negative space. Small elegant headline in the upper-left or lower-left corner. Very little text — premium editorial feel. The scene does the talking.",
+  "Bold headline dominance: large, bold, high-contrast headline fills the upper third. Mid-section: the photographic scene. Lower band: support copy and CTA on a clean-color strip. Strong typographic emphasis.",
+  "Hero image fills the top half. Below: a clean horizontal strip showing three short service features or benefits with icons. Footer with CTA and contact. Like a polished professional print ad.",
+  "Full-scene photography with a smooth gradient overlay — transparent at center, fading to a solid brand color at the top and bottom edges. Headline centered or upper-center in high-contrast text. Modern social-native style.",
+  "Offer-centric: the offer or key message given maximum typographic prominence — very large text treatment. Supporting photography in the background as a blurred or partial element. CTA prominent below.",
+  "Mostly clean background with intentional whitespace. One premium product or scene photograph in an inset frame or contained rectangle. Elegant restrained typography. High-end brand feel.",
 ];
 
 /* Returns true if a string looks like raw user input — first-person company voice,
@@ -368,48 +480,66 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
-  // Hash the full token so mood is distributed across all options, not locked to last char.
-  // djb2-style fold: each character contributes, so token suffix doesn't dominate.
+  // djb2-style hash so the full token drives variety, not just its last character.
   function tokenHash(s) {
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
     return Math.abs(h);
   }
-  const moodIdx = variationToken
-    ? tokenHash(variationToken) % VISUAL_MOODS.length
-    : Math.floor(Math.random() * VISUAL_MOODS.length);
+  const hash = variationToken
+    ? tokenHash(variationToken)
+    : Math.floor(Math.random() * 999983);
+
+  // Pick layout recipe and visual mood independently so they combine into varied compositions.
+  const layoutRecipe = LAYOUT_RECIPES[hash % LAYOUT_RECIPES.length];
+  const moodIdx = (hash >> 3) % VISUAL_MOODS.length;
+
+  // Industry-specific photographic scene takes priority over generic visual mood.
+  const industryScene = getIndustryScene(industry);
 
   return [
-    `Create a square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
-    `Style: clean, polished, and professional — like a real paid social ad. No heavy border frames, no thick decorative edges, no flyer or poster layout. The image should feel like a modern social ad creative, not a printed announcement.`,
+    `Create a square (1:1) social media ad creative for "${businessName}", a ${industry} business. This is a polished paid-advertising creative intended to run on Facebook and Instagram.`,
     ``,
-    `Visual direction: ${VISUAL_MOODS[moodIdx]}. Unless the visual direction above specifically mentions a person, do not add any human figure — prefer equipment, environment, buildings, product, or graphic elements instead.`,
+    `PHOTOGRAPHY STYLE — THIS IS THE MOST IMPORTANT DIRECTIVE:`,
+    `Render this as photorealistic commercial photography — the kind produced by a professional photographer shooting a campaign for a major consumer brand. Real-world lighting, authentic materials and textures, natural shadows, genuine depth of field. The final image must look like an actual photograph taken on a professional camera, not a 3D render, not digital illustration, not vector art, not graphic design without a real photographic base.`,
     ``,
-    `Composition: you have creative freedom over background, visual style, color palette, and type treatment — but the layout must follow these safe-zone rules so the final ad looks professional and complete:`,
-    `  1. Text clearance: all text must sit at least 9% inset from every edge of the image. No headline, support text, CTA, or footer detail may touch or bleed into the outer 9% margin. This prevents clipping at any render resolution.`,
+    `DO NOT USE any of these styles: illustration, digital painting, cartoon, anime, watercolor, comic-book look, 3D CGI render, plastic-looking CGI surfaces, fantasy lighting, glowing neon color grading, hand-drawn aesthetics, overly smooth AI-synthesis texture, or any treatment that makes the image look artificial, generated, or non-photographic. Avoid the "AI image" look — prioritize authentic photographic grain, real-world imperfection, and commercial-photography polish.`,
+    ``,
+    industryScene
+      ? `SCENE: ${industryScene}`
+      : `VISUAL DIRECTION: ${VISUAL_MOODS[moodIdx]}`,
+    (industryScene || !VISUAL_MOODS[moodIdx].toLowerCase().includes("person"))
+      ? `Do not add any human figure unless the scene description above explicitly includes a person.`
+      : null,
+    ``,
+    `AD LAYOUT: ${layoutRecipe}`,
+    ``,
+    `COMPOSITION RULES — required for a professional result:`,
+    `  1. Text clearance: all text elements must sit at least 9% inset from every edge of the image. No headline, support copy, CTA, or footer detail may touch or bleed into the outer 9% margin.`,
     logoFound
-      ? `  2. Logo zone: reserve the top-right corner — roughly the top 12% height and rightmost 22% width — completely clear of text and important visual elements. A real business logo will be composited into that zone after generation. Nothing should compete with it.`
-      : `  2. No logo zone needed — no logo will be composited. Use the full image area freely, but do not draw any logo, brand mark, seal, badge, or graphic symbol anywhere.`,
-    `  3. Hierarchy: headline reads first (largest, highest contrast), support text second (smaller, lighter), CTA last (distinct button or label treatment). These three elements must be visually separated, not stacked tight.`,
-    `  4. Breathing room: leave generous white space or visual separation between the headline block and any other element — at least 4% of image height between the headline and the next element below it.`,
-    `  Within these rules, the visual direction, color, layout style, and background are entirely your creative choice.`,
+      ? `  2. Logo zone: reserve the top-right corner — top 12% height × rightmost 22% width — completely clear of text and important visuals. A real business logo will be composited into that zone after generation.`
+      : `  2. No logo zone: do not draw any logo, brand mark, seal, badge, or graphic symbol anywhere in the image.`,
+    `  3. Visual hierarchy: headline reads first (largest, highest contrast), support text second (smaller), CTA last (distinct button or label). These must be visually separated — not stacked tight.`,
+    `  4. Breathing room: at least 4% of image height of clear visual separation between the headline block and the next element below it.`,
+    `  5. Complete text: every single word of every text element must render fully and legibly. If a line does not fit at the chosen size, reduce font size. Never truncate, clip, or add "..." to any copy.`,
     ``,
-    `Ad copy to render:`,
+    `AD COPY TO RENDER:`,
     `  Headline: "${headline}"`,
-    supportLine ? `  Support: "${supportLine}"` : null,
+    supportLine ? `  Support text: "${supportLine}"` : null,
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
     phone ? `  Phone: ${phone}` : null,
-    `Brand: "${businessName}"`,
+    `  Brand name: "${businessName}"`,
     offer
-      ? `Offer: "${offer}"`
-      : `Do not invent any promotional offer, sale, or discount.`,
+      ? `  Offer: "${offer}"`
+      : `  Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `Typography: the headline is the dominant typographic element — large, bold, high-contrast, fully legible. Every single word of every line must render completely. If any line does not fit at the size chosen, reduce the font size until every word is fully visible. Never truncate, clip, or add "..." to any copy element.`,
+    `TYPOGRAPHY: the headline dominates — large, bold, high-contrast, fully legible. Use a modern sans-serif or strong commercial display typeface appropriate for a professional paid ad. All copy must be fully legible at social-feed viewing sizes.`,
+    ``,
     logoFound
-      ? `Branding: a real business logo will be composited onto this image after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere in the image. The business name may appear as plain readable text if the layout calls for it, but no graphic symbol of any kind.`
-      : `Branding: no logo is available — do not draw any logo, icon, emblem, seal, badge, brand mark, or graphic symbol anywhere in the image. Do not write the name of any equipment manufacturer, supplier, or company other than "${businessName}". Do not invent or render any brand name that was not explicitly provided. The business name may appear as plain readable text only.`,
-    variationToken ? `Variation seed: ${variationToken}` : null,
+      ? `BRANDING: a real business logo will be composited after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere. The business name may appear as plain readable text only.`
+      : `BRANDING: no logo is available — do not draw any logo, icon, emblem, seal, badge, brand mark, or graphic symbol. Do not write the name of any equipment manufacturer, supplier, or third-party company other than "${businessName}". The business name may appear as plain readable text only.`,
+    variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -849,7 +979,7 @@ router.post("/generate-static-ad", async (req, res) => {
       prompt,
       size: "1024x1024",
       output_format: "png",
-      quality: "auto",
+      quality: "high",
       n: count,
     });
 
