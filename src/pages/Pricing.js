@@ -89,7 +89,7 @@ const plans = [
       "Up to 10 active campaigns",
       "3 businesses",
       "3 connected ad accounts",
-      "Highest number of creative variations",
+      "Highest level of creative enhancement",
       "Advanced A/B testing",
       "Deepest campaign research",
       "Operator-grade AI strategizing",
