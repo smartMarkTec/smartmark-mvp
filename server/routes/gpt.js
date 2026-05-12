@@ -299,7 +299,7 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
     const safeHeadline = (s = "") => {
       s = stripWeOur(s);
       s = s.replace(/["""']/g, "").replace(/[.,;:!?]+$/g, "").trim();
-      s = clampWords(s, 6);
+      s = clampWords(s, 8);
       if (!s) return "";
       return s[0].toUpperCase() + s.slice(1);
     };
@@ -431,10 +431,11 @@ const system =
   "If the brief says 'furnace installation with financing', don't write 'Furnace installation, financing available' — write 'New furnace, pay over time.' or 'Heat this winter, pay later.' " +
   "If the brief says 'roof replacement, free estimates', write 'New roof, no guesswork.' or 'Free estimate, real price.' " +
   "" +
-  "HEADLINE: 4–6 words. Short, concrete, benefit-driven. Name the specific job, outcome, or timing — not the business category. " +
-  "NEVER write a question headline ('Need...?', 'Looking for...?', 'Want...?') — questions test poorly. " +
-  "NEVER add city or location. NEVER use generic phrases ('quality service', 'professional X', 'trusted Y', 'local experts'). " +
-  "Strong examples: 'AC fixed same day.' — 'Leak found, fixed fast.' — 'New roof before winter.' — 'Same-day electrician, real prices.' " +
+  "HEADLINE: 5–8 words. Write a complete, natural-sounding thought — NOT a compressed fragment. " +
+  "Name the specific job, outcome, or timing. Read it aloud: it should sound like something a real ad would say. " +
+  "NEVER write a question headline ('Need...?', 'Looking for...?'). NEVER add city or location. NEVER use generic phrases ('quality service', 'professional X', 'trusted Y', 'local experts'). " +
+  "DO NOT write comma-separated fragment headlines like 'Quality HVAC, Reliable' or 'Cool air, quality care' — these are slogans, not useful ad copy. Write complete thoughts. " +
+  "Strong examples: 'AC down? Fixed same day.' — 'Roof replaced before the rain.' — 'Licensed plumber, shows up on time.' — 'New furnace installed this week.' — 'Cooling restored fast.' " +
   "" +
   "SUBLINE: 2–3 sentences, 20–50 words. Say what the business does, who it helps, and what makes it worth calling — in plain, direct, human language. No drama, no exaggeration, no padding. " +
   "PHONE RULE: If Phone is in the brief, end the subline with a natural call phrase using that exact number (e.g. 'Call (713) 555-1234 to schedule.'). Never invent or placeholder a number. " +
@@ -446,7 +447,7 @@ const system =
   "Dental → 'Book an appointment'. Legal → 'Book a consultation'. General service → 'Get a free quote' / 'Schedule today'. " +
   "NEVER return 'Learn more' as the CTA — it is too weak for any service business. " +
   "" +
-  "Return strict JSON: headline (4–6 words, no city), subline (2–3 sentences, 20–50 words), offer (brief string if promotion exists, else empty string ''), bullets (array up to 3 short facts), disclaimers (optional short string), cta (2–5 words). " +
+  "Return strict JSON: headline (5–8 words, complete thought, no city), subline (2–3 sentences, 20–50 words), offer (brief string if promotion exists, else empty string ''), bullets (array up to 3 short facts), disclaimers (optional short string), cta (2–5 words). " +
   "Hard rules: NO URLs anywhere. NO 'our/we/I/my' language. NO superlatives (best, #1, guaranteed, fastest, revolutionary). " +
   "NEVER write: 'transform', 'game-changer', 'effortlessly', 'seamless', 'hassle-free', 'cutting-edge', 'quality service is just a call away', 'service you can trust', 'next level', 'designed with you in mind'. " +
   "OFFER RULE: If no promotion is in the brief, return offer as an empty string ''. Never invent a discount or promotion.";

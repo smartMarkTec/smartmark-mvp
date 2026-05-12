@@ -402,13 +402,13 @@ const LAYOUT_RECIPES = [
   "Full-bleed photographic scene fills the entire canvas. Headline and support copy sit in the lower portion with a smooth gradient scrim beneath them — the scrim fades naturally from fully transparent at center to a dark overlay at the bottom, giving text legible contrast without obscuring the photo. CTA as a small pill or compact rectangle with solid fill. No borders, no panels, no frames — just the photo and clean text.",
 
   // 1 — premium split: light text panel left, photo right
-  "Split composition: the left 40–45% of the canvas is a clean, light panel — white, off-white, or a very light neutral background. The right 55–60% is the photographic scene, meeting the panel with a clean edge. On the left panel: headline in large, heavy, dark type broken across 2 lines for impact (e.g. 'PERFECT COMFORT. / EVERY SEASON.') — this two-line format is essential for visual weight. Below the headline: a thin brand-accent color horizontal rule (1–2px), then the support copy in a smaller lighter weight. CTA or contact info at the bottom of the panel. Optional: a full-width footer strip at the very bottom spanning both halves, holding service highlights and contact info. The left panel must feel uncluttered — generous spacing, strong typographic hierarchy, nothing decorative beyond the accent rule.",
+  "Split composition: the left 40–45% of the canvas is a clean, light panel — white, off-white, or a very light neutral background. The right 55–60% is the photographic scene, meeting the panel with a clean edge. On the left panel: headline in large, heavy, dark type broken across 2 lines for impact — this two-line format is essential for visual weight. Below the headline: a thin brand-accent color horizontal rule (1–2px), then the support copy in a smaller lighter weight. CTA or contact info at the bottom of the panel. The left panel must feel uncluttered — generous spacing, strong typographic hierarchy, nothing decorative beyond the accent rule. No additional footer strips or feature lists below — keep it clean.",
 
   // 2 — photo left, text right
   "The photographic scene fills the left 55–60% of the canvas. A clean, lightly colored background on the right holds the headline, support copy, and CTA stacked with clear spacing. No frames around the photo, no fake border at the edge, no extra decorative elements. The photo and text are the only things in the composition.",
 
-  // 3 — photo hero top, premium service footer
-  "The photographic scene fills the upper 65–70% of the canvas. Below: a solid-color footer bar in a deep, grounded tone (dark navy, charcoal, or a strong brand color). The footer has two zones: the left portion holds 2–3 compact service highlights — each with a simple clean icon (e.g. snowflake for cooling, flame for heating, checkmark for service or reliability) above a short bold label and a single-line description; the right portion holds contact information — phone number displayed prominently in large clean type, website URL in smaller text below it. Icons must be simple and clean — geometric symbols only, not illustrated. The footer should feel like a polished professional service-company info strip, not a cluttered banner. Thin separator between photo and footer only if it aids the visual transition.",
+  // 3 — photo hero top, simple footer bar
+  "The photographic scene fills the upper 65–70% of the canvas. Below: a clean solid-color footer bar in a deep, grounded tone (dark navy, charcoal, or a strong brand color). The footer contains only: the CTA as a clearly styled button, and — if provided — the phone number or website in clean readable type. No icons, no multi-column service grids, no feature labels. The bar should feel like a clean professional ad footer, not a brochure panel. The photo does the storytelling; the bar provides the single next action.",
 
   // 4 — minimal, text over open negative space
   "Minimal full-bleed: the scene is chosen for open negative space — clear sky, open wall, simple floor — where text can sit directly on the photo with natural contrast. Short headline placed cleanly in the open area. A clean CTA button below. No scrim unless the photo genuinely needs contrast help, and if so, only a very light one. Nothing else. The photo sells the ad.",
@@ -444,9 +444,9 @@ function looksLikeRawClaim(s = "") {
 function deriveHeadline(a = {}, craftedCopy = {}) {
   const copyHeadline = clean(craftedCopy.headline || "");
 
-  // 1. Use pre-crafted headline only if it doesn't look like raw user input
-  // Keep to ≤28 chars (~4-5 words) so image AI renders it complete without clipping
-  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return wordTrim(copyHeadline, 28);
+  // 1. Use pre-crafted headline if it doesn't look like raw user input.
+  // Allow up to 40 chars — enough for a natural 6-7 word headline without truncating it mid-thought.
+  if (copyHeadline && !looksLikeRawClaim(copyHeadline)) return wordTrim(copyHeadline, 40);
 
   // Combine incoming copy + raw benefit as source material for pattern matching
   const rawPool = copyHeadline || clean(a.mainBenefit || a.benefit || "");
@@ -466,24 +466,24 @@ function deriveHeadline(a = {}, craftedCopy = {}) {
 
   // 4. Industry-specific short headlines (randomized to avoid repetition)
   const ind = inferIndustry(a).toLowerCase();
-  if (/hvac|heating|cooling|air.?cond/.test(ind))      return pickOne(["Trusted HVAC Service", "Comfort All Year Round", "Your Local HVAC Experts", "Heating & Cooling Done Right", "Stay Comfortable, Year-Round"]);
-  if (/plumb/.test(ind))                                return pickOne(["Reliable Plumbing Service", "Fast Local Plumbers", "Plumbing You Can Count On", "Fix It Right the First Time"]);
-  if (/electr/.test(ind))                               return pickOne(["Professional Electrical", "Reliable Electrical Service", "Local Electricians You Trust"]);
-  if (/roof/.test(ind))                                 return pickOne(["Trusted Roofing Experts", "Quality Roofing, Every Time", "Protect Your Home from the Top"]);
-  if (/landscap|lawn/.test(ind))                        return pickOne(["Beautiful Yards, Every Season", "Curb Appeal That Stands Out", "Your Lawn, Our Expertise"]);
-  if (/restaurant|food|cater/.test(ind))                return pickOne(["Great Food, Local Flavor", "Fresh Food, Every Time", "Taste the Difference Locally"]);
-  if (/market|advertis|agency/.test(ind))               return pickOne(["More Leads, Less Guesswork", "Marketing That Actually Works", "Grow Your Business Smarter"]);
-  if (/insur/.test(ind))                                return pickOne(["Coverage You Can Count On", "Protect What Matters Most", "Insurance Made Simple"]);
-  if (/dental|dent/.test(ind))                          return pickOne(["Healthy Smiles Start Here", "A Smile Worth Showing Off", "Your Comfort, Our Priority"]);
-  if (/legal|law/.test(ind))                            return pickOne(["Trusted Legal Help", "Your Rights, Our Focus", "Legal Advice You Can Trust"]);
-  if (/auto|car|vehicle/.test(ind))                     return pickOne(["Reliable Auto Service", "Your Car in Good Hands", "Expert Auto Care, Every Visit"]);
-  if (/clean|maid/.test(ind))                           return pickOne(["Clean Home, Clear Mind", "Spotless, Every Single Time", "Professional Cleaning You'll Love"]);
-  if (/pest/.test(ind))                                 return pickOne(["Pest-Free Living", "Keep Pests Out for Good", "Your Home, Pest-Free"]);
-  if (/real.?estate|realt/.test(ind))                   return pickOne(["Find Your Next Home", "Local Real Estate Experts", "Buy or Sell with Confidence"]);
-  if (/fitness|gym|personal.?train/.test(ind))          return pickOne(["Train Smarter, Live Better", "Reach Your Fitness Goals", "Real Results, Real Progress"]);
-  if (/salon|hair|beauty/.test(ind))                    return pickOne(["Look Good, Feel Great", "Beauty That Turns Heads", "Your Best Look Starts Here"]);
-  if (/pet|animal|vet/.test(ind))                       return pickOne(["Care You Can Trust", "Your Pet Deserves the Best", "Compassionate Pet Care"]);
-  if (/child|kid|daycare|school/.test(ind))             return pickOne(["Nurturing Young Minds", "Where Kids Thrive", "A Safe Place to Grow"]);
+  if (/hvac|heating|cooling|air.?cond/.test(ind))      return pickOne(["AC fixed same day.", "Heating and cooling done right.", "Comfort restored fast.", "Same-day HVAC service."]);
+  if (/plumb/.test(ind))                                return pickOne(["Leak fixed fast.", "Plumbing problems solved today.", "Licensed plumber, shows up on time."]);
+  if (/electr/.test(ind))                               return pickOne(["Electrical work done safely.", "Licensed electrician, real prices.", "Power issues fixed fast."]);
+  if (/roof/.test(ind))                                 return pickOne(["Roof replaced before it rains.", "New roof, free estimate.", "Roofing done right the first time."]);
+  if (/landscap|lawn/.test(ind))                        return pickOne(["Lawn looking great every week.", "Professional lawn care, no hassle.", "Curb appeal done right."]);
+  if (/restaurant|food|cater/.test(ind))                return pickOne(["Fresh food, ready when you are.", "Real ingredients, real flavor.", "Great food, made right here."]);
+  if (/market|advertis|agency/.test(ind))               return pickOne(["More leads, less guesswork.", "Marketing that brings in customers.", "Ads that actually work."]);
+  if (/insur/.test(ind))                                return pickOne(["Coverage that fits your life.", "Protected when it matters most.", "Insurance made simple."]);
+  if (/dental|dent/.test(ind))                          return pickOne(["Healthy smile starts here.", "Dental care done right.", "Comfortable visits, healthy results."]);
+  if (/legal|law/.test(ind))                            return pickOne(["Legal help when you need it.", "Real legal advice, real results.", "Protect what matters most."]);
+  if (/auto|car|vehicle/.test(ind))                     return pickOne(["Car fixed right the first time.", "Fast auto repair, honest prices.", "Same-day service, real mechanics."]);
+  if (/clean|maid/.test(ind))                           return pickOne(["Home cleaned top to bottom.", "Spotless every single visit.", "Professional cleaning done right."]);
+  if (/pest/.test(ind))                                 return pickOne(["Pests gone, guaranteed.", "Home protected from pests today.", "Pest-free living starts here."]);
+  if (/real.?estate|realt/.test(ind))                   return pickOne(["Find the right home today.", "Buy or sell with confidence.", "Real estate done right."]);
+  if (/fitness|gym|personal.?train/.test(ind))          return pickOne(["Reach your fitness goals faster.", "Real results, real training.", "Get fit with a real plan."]);
+  if (/salon|hair|beauty/.test(ind))                    return pickOne(["Look great, feel confident.", "Salon results that last.", "Professional styling, every time."]);
+  if (/pet|animal|vet/.test(ind))                       return pickOne(["Your pet deserves the best.", "Compassionate care for every pet.", "Healthy pets, happy families."]);
+  if (/child|kid|daycare|school/.test(ind))             return pickOne(["Where kids thrive every day.", "Safe, nurturing care they deserve.", "A great place to grow and learn."]);
 
   // 5. Short business name as final fallback
   const businessName = clean(a.businessName || a.brand || "");
@@ -551,12 +551,23 @@ function deriveCTA(a = {}, craftedCopy = {}) {
   const cta = clean(craftedCopy.cta || a.cta || "");
   if (cta) return clip(cta, 26);
 
-  if (clean(a.offer || a.promo || craftedCopy.offer || "")) return "Claim Offer";
+  if (clean(a.offer || a.promo || craftedCopy.offer || "")) return "Claim Your Offer";
 
-  // No website but phone provided — use a call-based CTA
+  // Phone-only — call is the natural CTA
   if (!clean(a.website || a.url || "") && clean(a.phone || "")) return "Call Now";
 
-  return "Learn More";
+  // Industry-aware last resort — "Learn More" is too weak for service businesses
+  const _ind = inferIndustry(a).toLowerCase();
+  if (/hvac|heating|cooling|air.?cond/.test(_ind)) return "Schedule Service";
+  if (/plumb/.test(_ind))                           return "Get a Free Quote";
+  if (/electr/.test(_ind))                          return "Get a Free Quote";
+  if (/roof/.test(_ind))                            return "Get a Free Estimate";
+  if (/landscap|lawn/.test(_ind))                   return "Get a Free Quote";
+  if (/clean|maid/.test(_ind))                      return "Book a Cleaning";
+  if (/dental|dent/.test(_ind))                     return "Book an Appointment";
+  if (/legal|law/.test(_ind))                       return "Book a Consultation";
+  if (/auto|car|vehicle/.test(_ind))                return "Schedule Service";
+  return "Get a Free Quote";
 }
 
 function deriveOffer(a = {}, craftedCopy = {}) {
@@ -608,7 +619,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
       ? `Do not add any human figure unless the scene description above explicitly includes a person.`
       : null,
     ``,
-    `AD LAYOUT: ${layoutRecipe}`,
+    `COMPOSITION APPROACH — adapt naturally: ${layoutRecipe} This is a strong direction for this type of ad, not a rigid template — if the photographic scene and copy naturally suggest a slightly different arrangement, use your judgment to create the most premium, clean result.`,
     ``,
     `COMPOSITION RULES — required for a professional result:`,
     `  1. Text clearance: all text elements must sit at least 9% inset from every edge of the image. No headline, support copy, CTA, or footer detail may touch or bleed into the outer 9% margin.`,
@@ -634,12 +645,12 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     !website ? `No website was provided — do NOT display any website URL, domain name, or web address anywhere in this image, including in any footer, contact strip, or small print.` : null,
     !phone ? `No phone number was provided — do NOT display any phone number anywhere in this image.` : null,
     ``,
-    `TYPOGRAPHY: the headline is the dominant typographic element — set at the largest size and heaviest weight of the chosen typeface. For headlines of 3 or more words, break across 2 short lines for maximum visual impact: two punchy lines feel dramatically stronger than one long cramped line. The headline must be unmissably large — at least 2× the size of the support copy. Use a bold modern sans-serif or strong commercial display face. Support copy should be clearly lighter and thinner in weight than the headline so the eye instantly separates the two levels. ${website || phone ? "Contact info (phone/website listed above) should appear in a dedicated footer zone at the bottom — phone prominently, website smaller below it." : "No contact info was provided — do not add any contact strip or footer with contact details."} All text must be fully legible at social-feed viewing sizes.`,
+    `TYPOGRAPHY: the headline is the dominant typographic element — unmissably large, at least 2× the size of the support copy, in the heaviest available weight of a bold modern sans-serif or commercial display face. Use your judgment on line breaks and sizing to make the headline as readable and impactful as possible for this specific ad and layout. Support copy should be clearly lighter in weight. ${website || phone ? "Contact info (phone/website listed above) should appear in a dedicated area at the bottom — phone prominently, website smaller." : "No contact info was provided — do not add any contact strip or footer with contact details."} All text must be fully legible at social-feed viewing sizes.`,
     ``,
     `DESIGN TREATMENT:`,
     `  CTA: render as a polished, modern button — pill shape or rounded rectangle, with balanced horizontal padding (the label should not crowd the edges), a solid fill color with strong contrast against the label text, and a subtle shadow or slight depth treatment that lifts it off the background. The button should feel intentional and clickable — the kind you'd see in a real premium digital ad — without being oversized, flashy, or decorated. Never render the CTA as loose unstyled text.`,
     `  Text contrast: if the photo does not provide enough natural contrast for the headline, use a smooth gradient scrim (fading from transparent to dark) or a plain semi-transparent strip behind the text — one of these, not both. The photo should still be clearly visible.`,
-    `  Accent rule: a thin horizontal rule (1–2px) in a brand-accent color between the headline and support copy is strongly recommended — it is one of the clearest signals that an ad is professionally designed rather than just text on a photo. Use it. This is the only decorative element beyond the CTA button and any gradient scrim.`,
+    `  Accent rule: a thin horizontal rule (1–2px) in a brand-accent color between the headline and support copy is optional — include it if it improves visual separation and feels natural, skip it if the layout reads cleanly without it. This is the only decorative element beyond the CTA button and any gradient scrim.`,
     `  AVOID: photo frames, inset photo boxes, callout badge stickers, multi-column icon strips, thick decorative borders, and anything that makes the ad look like a poster, flyer, or template collage. The final result should look like a clean professional ad photo, not a designed document.`,
     ``,
     logoFound
