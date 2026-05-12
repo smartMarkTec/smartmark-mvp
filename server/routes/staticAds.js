@@ -581,11 +581,13 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const website = clean(a.website || a.url || "");
   const phone = clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
-  const headline = wordTrim(deriveHeadline(a, craftedCopy), 28);
+  // No outer wordTrim — deriveHeadline already handles truncation internally.
+  // The previous double-truncation at 28 chars was causing cut-off headlines.
+  const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
-  // djb2-style hash so the full token drives variety, not just its last character.
+  // djb2-style hash — drives scene selection and variation deterministically per token.
   function tokenHash(s) {
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
@@ -595,69 +597,50 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     ? tokenHash(variationToken)
     : Math.floor(Math.random() * 999983);
 
-  // Pick layout recipe and visual mood independently so they combine into varied compositions.
-  const layoutRecipe = LAYOUT_RECIPES[hash % LAYOUT_RECIPES.length];
+  // Industry-specific scene (hash-indexed for deterministic variety per token).
+  // Falls back to generic VISUAL_MOODS for unknown industries.
   const moodIdx = (hash >> 3) % VISUAL_MOODS.length;
-
-  // Industry-specific photographic scene takes priority over generic visual mood.
-  // Pass hash so the variationToken drives scene selection deterministically,
-  // and pass a so HVAC context keywords can narrow to the relevant scene bucket.
   const industryScene = getIndustryScene(industry, hash, a);
+  const sceneDescription = industryScene || VISUAL_MOODS[moodIdx];
+  const noPersonClause = (industryScene || !sceneDescription.toLowerCase().includes("person"))
+    ? "No people in the scene unless the description above explicitly mentions one."
+    : null;
+
+  // Contact lines — only what was actually provided
+  const hasContact = website || phone;
 
   return [
-    `Create a square (1:1) social media ad creative for "${businessName}", a ${industry} business. This is a polished paid-advertising creative intended to run on Facebook and Instagram.`,
+    `Generate a polished square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
     ``,
-    `PHOTOGRAPHY STYLE — THIS IS THE MOST IMPORTANT DIRECTIVE:`,
-    `This image must look like a real photograph taken by a professional commercial photographer for a paid advertising campaign. Specific photographic qualities required: accurate real-world lighting with believable color temperature and natural shadows, authentic surface materials and textures (not digitally smoothed or artificially perfect), genuine optical depth of field with natural lens fall-off, and subtle photographic grain appropriate to the exposure. The scene must feel like a location or studio that actually exists — grounded, real, and believable. When in doubt, choose naturalism over perfection.`,
+    `PHOTOGRAPHIC STYLE — most important: This image must look like a real photograph taken by a professional commercial photographer. Real-world lighting with natural shadows, authentic surface textures, genuine depth of field, and subtle photographic grain. The scene must feel like it actually exists. Not illustration, not CGI, not cartoon, not over-smoothed — a real photo.`,
     ``,
-    `DO NOT USE any of these styles: illustration, digital painting, cartoon, anime, watercolor, comic-book look, 3D CGI render, plastic-looking CGI surfaces, fantasy or studio-artificial lighting, glowing neon color grading, hand-drawn aesthetics, overly smooth AI-synthesis texture, digitally perfect surfaces with no grain or imperfection, or any treatment that makes the image look generated, stylized, or non-photographic. Avoid the "AI image" look entirely — real photography has imperfection, authentic texture, and natural optical characteristics that must be present here.`,
+    `SCENE: ${sceneDescription}`,
+    noPersonClause,
     ``,
-    industryScene
-      ? `SCENE: ${industryScene}`
-      : `VISUAL DIRECTION: ${VISUAL_MOODS[moodIdx]}`,
-    (industryScene || !VISUAL_MOODS[moodIdx].toLowerCase().includes("person"))
-      ? `Do not add any human figure unless the scene description above explicitly includes a person.`
-      : null,
-    ``,
-    `COMPOSITION APPROACH — adapt naturally: ${layoutRecipe} This is a strong direction for this type of ad, not a rigid template — if the photographic scene and copy naturally suggest a slightly different arrangement, use your judgment to create the most premium, clean result.`,
-    ``,
-    `COMPOSITION RULES — required for a professional result:`,
-    `  1. Text clearance: all text elements must sit at least 9% inset from every edge of the image. No headline, support copy, CTA, or footer detail may touch or bleed into the outer 9% margin.`,
-    logoFound
-      ? `  2. Logo zone: reserve the top-right corner — top 12% height × rightmost 22% width — completely clear of text and important visuals. A real business logo will be composited into that zone after generation.`
-      : `  2. No logo zone: do not draw any logo, brand mark, seal, badge, or graphic symbol anywhere in the image.`,
-    `  3. Visual hierarchy: headline reads first (largest, highest contrast), support text second (smaller), CTA last (distinct button or label). These must be visually separated — not stacked tight.`,
-    `  4. Breathing room: at least 4% of image height of clear visual separation between the headline block and the next element below it.`,
-    `  5. Complete text: every single word of every text element must render fully and legibly. If a line does not fit at the chosen size, reduce font size. Never truncate, clip, or add "..." to any copy.`,
-    ``,
-    `AD COPY TO RENDER:`,
+    `AD COPY — render exactly as written:`,
     `  Headline: "${headline}"`,
-    supportLine ? `  Support text: "${supportLine}"` : null,
-    `  CTA: "${cta}"`,
+    supportLine ? `  Supporting line: "${supportLine}"` : null,
+    `  CTA button: "${cta}"`,
     website ? `  Website: ${website}` : null,
     phone ? `  Phone: ${phone}` : null,
-    `  Brand name: "${businessName}"`,
-    offer
-      ? `  Offer: "${offer}"`
-      : `  Do not invent any promotional offer, sale, or discount.`,
+    `  Business name: "${businessName}"`,
+    offer ? `  Offer: "${offer}"` : null,
     ``,
-    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed in AD COPY TO RENDER above. Never invent, guess, or hallucinate any website URL, domain name, or phone number.`,
-    !website ? `No website was provided — do NOT display any website URL, domain name, or web address anywhere in this image, including in any footer, contact strip, or small print.` : null,
-    !phone ? `No phone number was provided — do NOT display any phone number anywhere in this image.` : null,
+    `TEXT RULES — strictly enforced:`,
+    `  Every word of every text element must be completely visible and legible. No truncation, no clipping, no ellipsis. If text is tight, reduce font size — never cut words. Headline is the largest, boldest element. Supporting line is clearly smaller. CTA is a clean styled button with solid fill. Keep generous space between text elements. All text must stay at least 8% from every image edge.`,
     ``,
-    `TYPOGRAPHY: the headline is the dominant typographic element — unmissably large, at least 2× the size of the support copy, in the heaviest available weight of a bold modern sans-serif or commercial display face. Use your judgment on line breaks and sizing to make the headline as readable and impactful as possible for this specific ad and layout. Support copy should be clearly lighter in weight. ${website || phone ? "Contact info (phone/website listed above) should appear in a dedicated area at the bottom — phone prominently, website smaller." : "No contact info was provided — do not add any contact strip or footer with contact details."} All text must be fully legible at social-feed viewing sizes.`,
+    hasContact
+      ? `CONTACT — strictly enforced: Only show the exact contact details listed above. Never invent any website URL, domain name, or phone number.`
+      : `CONTACT — strictly enforced: No website or phone was provided. Do NOT display any URL, domain name, or phone number anywhere in the image.`,
     ``,
-    `DESIGN TREATMENT:`,
-    `  CTA: render as a polished, modern button — pill shape or rounded rectangle, with balanced horizontal padding (the label should not crowd the edges), a solid fill color with strong contrast against the label text, and a subtle shadow or slight depth treatment that lifts it off the background. The button should feel intentional and clickable — the kind you'd see in a real premium digital ad — without being oversized, flashy, or decorated. Never render the CTA as loose unstyled text.`,
-    `  Text contrast: if the photo does not provide enough natural contrast for the headline, use a smooth gradient scrim (fading from transparent to dark) or a plain semi-transparent strip behind the text — one of these, not both. The photo should still be clearly visible.`,
-    `  Accent rule: a thin horizontal rule (1–2px) in a brand-accent color between the headline and support copy is optional — include it if it improves visual separation and feels natural, skip it if the layout reads cleanly without it. This is the only decorative element beyond the CTA button and any gradient scrim.`,
-    `  AVOID: photo frames, inset photo boxes, callout badge stickers, multi-column icon strips, thick decorative borders, and anything that makes the ad look like a poster, flyer, or template collage. The final result should look like a clean professional ad photo, not a designed document.`,
+    `COMPOSITION: Clean, modern social ad. The photo is the hero — text sits naturally over or beside the scene with good contrast. A gradient scrim or semi-transparent strip is fine for legibility if needed; keep it subtle. CTA as a pill or rectangle button. No cluttered footers, no icon rows, no badge stickers, no brochure layouts. Minimal, premium, ad-quality.`,
     ``,
     logoFound
-      ? `BRANDING: a real business logo will be composited after generation — do not draw any logo, icon, emblem, seal, badge, or invented brand mark anywhere. The business name may appear as plain readable text only.`
-      : `BRANDING: no logo is available — do not draw any logo, icon, emblem, seal, badge, brand mark, or graphic symbol. Do not write the name of any equipment manufacturer, supplier, or third-party company other than "${businessName}". The business name may appear as plain readable text only.`,
+      ? `LOGO: A real business logo will be composited after generation. Do not draw any logo, brand mark, icon, emblem, or graphic symbol.`
+      : `BRANDING: No logo. Do not draw any logo, brand mark, seal, or graphic symbol. Do not write any manufacturer, supplier, or third-party brand name other than "${businessName}".`,
+    !offer ? `Do not invent any promotional offer, discount, or sale.` : null,
     ``,
-    `FINAL PHOTOREALISM CHECK: The photographic scene in this ad must look like it was captured with a real camera — authentic grain, real-world materials, believable natural light, imperfect and true-to-life. If any part of the scene looks illustrated, cartoon-like, CGI-smooth, digitally perfect, or synthetically rendered, it is wrong. The text and button sit on top of a real-looking photograph. The photograph itself must never look designed, stylized, or artificially generated.`,
+    `PHOTOREALISM FINAL CHECK: The scene must look captured with a real camera — authentic grain, real surfaces, believable natural light. If any part looks illustrated, CGI, or synthetic, it is wrong. The photograph itself must never look generated or stylized.`,
     variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
@@ -744,7 +727,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const website = clean(a.website || a.url || "");
   const phone = clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
-  const headline = wordTrim(deriveHeadline(a, craftedCopy), 28);
+  const headline = deriveHeadline(a, craftedCopy); // deriveHeadline handles its own truncation
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
