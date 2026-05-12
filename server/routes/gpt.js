@@ -164,7 +164,7 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
   }
   if (productHead === "quality") productHead = "products";
 
-  const stripQuotes = (s = "") => String(s || "").replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "").trim();
+  const stripQuotes = (s = "") => String(s || "").replace(/^["'""‘’\s]+|["'""‘’\s]+$/g, "").trim();
 
   const normalizeSpaces = (s = "") => String(s || "").replace(/\s+/g, " ").trim();
 
@@ -172,7 +172,7 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
 
   const enforceSublineLen = (s = "") => {
     s = stripWeOur(stripQuotes(s));
-    s = s.replace(/[“”"']/g, "").trim();
+    s = s.replace(/["""']/g, "").trim();
     s = normalizeSpaces(s);
 
     // Trim to max 60 words
@@ -298,7 +298,7 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
 
     const safeHeadline = (s = "") => {
       s = stripWeOur(s);
-      s = s.replace(/[“”"']/g, "").replace(/[.,;:!?]+$/g, "").trim();
+      s = s.replace(/["""']/g, "").replace(/[.,;:!?]+$/g, "").trim();
       s = clampWords(s, 6);
       if (!s) return "";
       return s[0].toUpperCase() + s.slice(1);
@@ -307,7 +307,7 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
 const safeSubline = (s = "") => {
   s = stripWeOur(s);
   s = String(s || "")
-    .replace(/[“”"']/g, "")
+    .replace(/["""']/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -419,21 +419,37 @@ const buildFallbackSubline = (headline) => {
 
 const system =
   "You are an expert Facebook/Instagram ad copywriter for small and medium local businesses. " +
-  "CRITICAL RULE: The inputs below are raw business context — they are NOT ad copy. Do NOT summarize, restate, or echo words from the inputs. Use them only to understand what the business does and who it serves, then write fresh copy as a skilled copywriter would. " +
-  "Think: what does the customer want? What problem are they trying to solve? What would make them stop scrolling? Write from THAT angle — specific, direct, human. " +
-  "BAD HEADLINES (generic, weak, echo): 'Efficient HVAC service in San Antonio' — 'High-quality HVAC services, efficient and effective' — 'Professional marketing for businesses' — 'Need fast and affordable AC repair?' " +
-  "GOOD HEADLINES (concrete, specific, action-oriented): 'AC fixed same day.' — 'Mini-splits installed right.' — 'Plumbers who show up.' — 'Roof done before it rains.' — 'More booked jobs, less guesswork.' " +
-  "Headline: 4–6 words maximum — short, punchy, concrete. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. " +
-  "HEADLINE RULES: Never write a question headline ('Need...?', 'Looking for...?', 'Want...?') — questions test poorly for local service ads. Never add location or city. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
-  "For service businesses: the strongest headlines name the specific job, timing, or outcome — 'Same-day AC repair.' / 'Ductless systems installed.' / 'Heat back on today.' — concrete and actionable beats abstract and aspirational every time. " +
-  "Subline: 2–3 sentences, 20–50 words. Say what the business actually does, who it helps, and what makes it worth calling. Use plain, direct language. Vary sentence structure. No drama or exaggeration. " +
-  "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number — e.g. 'Call (713) 555-1234 to schedule.' / 'Reach us at (713) 555-1234.' Never invent or placeholder a phone number. " +
-  "CTA: a clear, specific action tied to what the business actually offers (e.g. 'Book a service call', 'Get a free quote', 'Schedule today', 'Call for availability'). Match the CTA to the business type. " +
-  "Bullets (if any): short, specific facts — not restatements of the headline. No exaggeration. " +
-  "Return strict JSON with keys: headline (4–6 words, no city/location), subline (2–3 sentences, 20–50 words), offer (short if provided, else empty string), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
-  "Hard rules: NO URLs. NO 'our/we/I/my' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
-  "Do NOT write: 'transform', 'game-changer', 'effortlessly', 'no stress', 'next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind', 'fill your pipeline', 'just results that matter', 'take your X to the next level', 'quality service is just a call away', 'service you can trust'. " +
-  "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
+  "You receive a CREATIVE BRIEF describing a specific business and what they want to advertise. " +
+  "Your job: write from the CUSTOMER'S perspective — someone who has this problem and is considering calling this business. " +
+  "The copy must be grounded in the actual service described in the brief. Generic category language is a failure. " +
+  "" +
+  "HOW TO TRANSLATE THE BRIEF INTO AD COPY: " +
+  "Read the brief carefully to understand the specific service, customer problem, and desired outcome. " +
+  "Then write as if you are speaking to a real person who just Googled that problem. " +
+  "TRANSLATE the customer's pain point into an outcome — do not parrot the brief's words back literally. " +
+  "If the brief says 'same-day AC repair', don't write 'Same-day AC repair available' — write 'AC down? Fixed today.' or 'Cool again by tonight.' " +
+  "If the brief says 'furnace installation with financing', don't write 'Furnace installation, financing available' — write 'New furnace, pay over time.' or 'Heat this winter, pay later.' " +
+  "If the brief says 'roof replacement, free estimates', write 'New roof, no guesswork.' or 'Free estimate, real price.' " +
+  "" +
+  "HEADLINE: 4–6 words. Short, concrete, benefit-driven. Name the specific job, outcome, or timing — not the business category. " +
+  "NEVER write a question headline ('Need...?', 'Looking for...?', 'Want...?') — questions test poorly. " +
+  "NEVER add city or location. NEVER use generic phrases ('quality service', 'professional X', 'trusted Y', 'local experts'). " +
+  "Strong examples: 'AC fixed same day.' — 'Leak found, fixed fast.' — 'New roof before winter.' — 'Same-day electrician, real prices.' " +
+  "" +
+  "SUBLINE: 2–3 sentences, 20–50 words. Say what the business does, who it helps, and what makes it worth calling — in plain, direct, human language. No drama, no exaggeration, no padding. " +
+  "PHONE RULE: If Phone is in the brief, end the subline with a natural call phrase using that exact number (e.g. 'Call (713) 555-1234 to schedule.'). Never invent or placeholder a number. " +
+  "" +
+  "CTA: 2–5 words. A verb-forward action that matches what this business actually wants people to do next. " +
+  "By industry: HVAC/cooling/heating → 'Schedule service today' / 'Book your service call' / 'Get a free estimate'. " +
+  "Plumbing → 'Book a plumber' / 'Call for same-day service'. Electrical → 'Book an electrician' / 'Get a free quote'. " +
+  "Roofing → 'Get a free estimate' / 'Book your inspection'. Cleaning → 'Book your cleaning'. " +
+  "Dental → 'Book an appointment'. Legal → 'Book a consultation'. General service → 'Get a free quote' / 'Schedule today'. " +
+  "NEVER return 'Learn more' as the CTA — it is too weak for any service business. " +
+  "" +
+  "Return strict JSON: headline (4–6 words, no city), subline (2–3 sentences, 20–50 words), offer (brief string if promotion exists, else empty string ''), bullets (array up to 3 short facts), disclaimers (optional short string), cta (2–5 words). " +
+  "Hard rules: NO URLs anywhere. NO 'our/we/I/my' language. NO superlatives (best, #1, guaranteed, fastest, revolutionary). " +
+  "NEVER write: 'transform', 'game-changer', 'effortlessly', 'seamless', 'hassle-free', 'cutting-edge', 'quality service is just a call away', 'service you can trust', 'next level', 'designed with you in mind'. " +
+  "OFFER RULE: If no promotion is in the brief, return offer as an empty string ''. Never invent a discount or promotion.";
 
 
     // Phone is now asked for all users (website and no-website alike).
@@ -443,23 +459,40 @@ const system =
 
     const websiteForCopy = String(a.website || a.url || "").trim();
 
+    // Build a structured creative brief so the model gets synthesized intent,
+    // not a list of disconnected raw fields.
+    const locationStr = a.city
+      ? (a.state ? `${a.city}, ${a.state}` : a.city)
+      : (a.location || "");
+    const mainService = String(a.mainBenefit || a.details || "").trim();
+    const offerStr    = String(a.offer || a.saveAmount || "").trim();
+    const audienceStr = String(a.idealCustomer || "").trim();
+    const secondaryStr = String(a.secondary || a.financingLine || "").trim();
+
     const user = [
-      `Industry: ${a.industry || ""}`,
-      `Business: ${a.businessName || ""}`,
-      `Location: ${a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : (a.location || "")}`,
-      ...(websiteForCopy && !isNoWebsiteRun ? [`Website: ${websiteForCopy} (context only — do not include this URL in any copy)`] : []),
-      `Audience: ${a.idealCustomer || ""}`,
-      `Main benefit: ${a.mainBenefit || a.details || ""}`,
-      `Offer: ${a.offer || a.saveAmount || ""}`,
-      `Secondary: ${a.secondary || a.financingLine || ""}`,
-      ...(phoneForCopy ? [`Phone: ${phoneForCopy}`] : []),
-      ...(isNoWebsiteRun ? ["No website: this is a call-only business. Include the phone number naturally in the subline."] : []),
-    ].join("\n");
+      `CREATIVE BRIEF — write ad copy specific to this business:`,
+      ``,
+      `BUSINESS: ${a.businessName || "(unnamed)"}`,
+      `INDUSTRY: ${a.industry || "(not specified)"}`,
+      locationStr ? `LOCATION: ${locationStr}` : null,
+      ``,
+      `SERVICE / WHAT TO ADVERTISE:`,
+      mainService || "(no details provided)",
+      ``,
+      offerStr    ? `PROMOTION: ${offerStr}` : null,
+      secondaryStr ? `ADDITIONAL DETAIL: ${secondaryStr}` : null,
+      audienceStr ? `TARGET CUSTOMER: ${audienceStr}` : null,
+      websiteForCopy && !isNoWebsiteRun
+        ? `WEBSITE (context only — do not print URL in copy): ${websiteForCopy}` : null,
+      phoneForCopy ? `PHONE: ${phoneForCopy}` : null,
+      isNoWebsiteRun
+        ? `NOTE: call-only business. Include the phone number naturally in the subline.` : null,
+    ].filter(Boolean).join("\n");
 
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.65,
-      max_tokens: 320,
+      max_tokens: 420,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -499,25 +532,27 @@ const system =
 
     if (!headline) headline = buildFallbackHeadline();
 
-    // kill “our/we” beginnings if any slipped
+    // strip first-person if any slipped through
     headline = headline.replace(/^\s*(our|we)\b\s*/i, "").trim();
-    subline = subline.replace(/^\s*(our|we)\b\s*/i, "").trim();
+    subline  = subline.replace(/^\s*(our|we)\b\s*/i, "").trim();
 
-    // if headline echoes benefit too closely, regenerate fallback
-    if (mainBenefit && (jaccard(headline, mainBenefit) > 0.82 || norm(headline) === norm(mainBenefit))) {
-      headline = buildFallbackHeadline();
+    // Only reject NEAR-VERBATIM copies — not semantically related good copy.
+    // Previous thresholds (0.72/0.76/0.82) were too aggressive and filtered out
+    // legitimate copy that correctly reflected the user's service description.
+    if (mainBenefit && norm(headline) === norm(mainBenefit)) {
+      headline = buildFallbackHeadline(); // only reject exact matches
     }
 
     if (!subline) subline = buildFallbackSubline(headline);
 
-    // prevent repeats between headline and subline
-    if (jaccard(headline, subline) > 0.65 || norm(subline).startsWith(norm(headline))) {
+    // Prevent the headline from being literally repeated in the subline
+    if (norm(subline).startsWith(norm(headline))) {
       subline = buildFallbackSubline(headline);
     }
 
-    // if still too close to full source, force fallbacks
-    if (jaccard(headline, source) > 0.72) headline = buildFallbackHeadline();
-    if (jaccard(subline, source) > 0.76) subline = buildFallbackSubline(headline);
+    // Only force fallbacks for near-exact verbatim echoes (raised from 0.72/0.76)
+    if (jaccard(headline, source) > 0.92) headline = buildFallbackHeadline();
+    if (jaccard(subline,  source) > 0.92) subline  = buildFallbackSubline(headline);
 
     // bullets fallback
     if (!bullets.length) {
@@ -529,7 +564,22 @@ const system =
     }
 
     cta = cta.replace(/[.]+$/g, "").trim();
-    if (!cta) cta = "Learn more";
+    if (!cta) {
+      // Industry-aware CTA fallback — "Learn more" is never appropriate for service businesses.
+      const _ind = String(a.industry || a.businessType || a.niche || "").toLowerCase();
+      if (/hvac|heating|cooling|air.?cond/.test(_ind)) cta = "Schedule service today";
+      else if (/plumb/.test(_ind))                      cta = "Book a plumber";
+      else if (/electr/.test(_ind))                     cta = "Book an electrician";
+      else if (/roof/.test(_ind))                       cta = "Get a free estimate";
+      else if (/landscap|lawn/.test(_ind))              cta = "Get a free quote";
+      else if (/clean|maid/.test(_ind))                 cta = "Book your cleaning";
+      else if (/dental|dent/.test(_ind))                cta = "Book an appointment";
+      else if (/legal|law/.test(_ind))                  cta = "Book a consultation";
+      else if (/auto|car|vehicle/.test(_ind))           cta = "Schedule service";
+      else if (/pest/.test(_ind))                       cta = "Schedule treatment";
+      else if (/market|advertis|agency/.test(_ind))     cta = "Get started today";
+      else cta = phoneForCopy ? "Call now" : "Get a free quote";
+    }
 
     // Post-process: if phone was provided but the AI didn't include it in the subline, append naturally.
     // Check by comparing raw digit strings to handle any formatting variation.
