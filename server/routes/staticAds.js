@@ -544,14 +544,15 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
   const phone = clean(a.phone || "");
-  const offer = clip(deriveOffer(a, craftedCopy), 70);
-  // No outer wordTrim — deriveHeadline already handles truncation internally.
-  // The previous double-truncation at 28 chars was causing cut-off headlines.
-  const headline = deriveHeadline(a, craftedCopy);
-  const supportLine = deriveSupportLine(a, craftedCopy);
-  const cta = deriveCTA(a, craftedCopy);
+  const rawOffer = clean(craftedCopy.offer || a.offer || a.promo || "");
+  const hasOffer = rawOffer && !["no", "none", "n/a", "na", "-", "no offer", "no promo"].includes(rawOffer.trim().toLowerCase());
+  const offer = hasOffer ? clip(rawOffer, 70) : "";
+  const service = clean(a.mainBenefit || a.details || a.benefit || "");
+  const idealCustomer = clean(a.idealCustomer || "");
+  const location = a.city
+    ? (a.state ? `${clean(a.city)}, ${clean(a.state)}` : clean(a.city))
+    : clean(a.location || "");
 
-  // djb2-style hash — drives scene selection and variation deterministically per token.
   function tokenHash(s) {
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
@@ -561,8 +562,6 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     ? tokenHash(variationToken)
     : Math.floor(Math.random() * 999983);
 
-  // Industry-specific scene (hash-indexed for deterministic variety per token).
-  // Falls back to generic VISUAL_MOODS for unknown industries.
   const moodIdx = (hash >> 3) % VISUAL_MOODS.length;
   const industryScene = getIndustryScene(industry, hash, a);
   const sceneDescription = industryScene || VISUAL_MOODS[moodIdx];
@@ -570,42 +569,41 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     ? "No people in the scene unless the description above explicitly mentions one."
     : null;
 
-  // Contact lines — only what was actually provided
   const hasContact = website || phone;
 
   return [
-    `Create a polished, high-quality Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
+    `Create a polished, photorealistic Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
     ``,
-    `PHOTOGRAPH: ${sceneDescription}`,
+    `SCENE: ${sceneDescription}`,
     noPersonClause,
-    `This photograph must look like it was taken by a professional commercial photographer — authentic natural lighting, real surface textures, genuine depth of field, subtle photographic grain. Not illustration, CGI, or cartoon. A real photo.`,
+    `Photograph this scene as a professional commercial photographer would — authentic natural lighting, real surface textures, genuine depth of field, subtle grain. Not illustration, CGI, or cartoon. A real photo.`,
     ``,
-    `Write exactly this text onto the ad, fully legible:`,
-    `  Headline (largest, boldest): "${headline}"`,
-    supportLine ? `  Supporting line (smaller): "${supportLine}"` : null,
-    `  CTA button: "${cta}"`,
-    website ? `  Website: ${website}` : null,
-    phone ? `  Phone: ${phone}` : null,
-    offer ? `  Promo: "${offer}"` : null,
-    `Every word must be fully visible — no truncation, no clipping. Reduce font size if text is tight; never cut words.`,
+    service ? `SERVICE: ${service}` : null,
+    idealCustomer ? `CUSTOMER: ${idealCustomer}` : null,
+    location ? `LOCATION CONTEXT (background context only — do not use as a decorative label on the image): ${location}` : null,
+    ``,
+    `AD COPY — write the ad copy as part of the image, naturally:`,
+    `  Headline: one complete thought that speaks to what the customer gains. Examples: "Stay comfortable all year round." / "AC fixed same day." / "Roof replaced before the rain." / "Leak fixed fast." Keep it 5–8 words. Conversational, specific — not a brand slogan.`,
+    `  Supporting line: 1–2 short, specific sentences about this service.`,
+    `  CTA button: a strong, action-oriented button appropriate for this business.`,
+    offer ? `  Feature this exact promotion: "${offer}"` : null,
+    `All ad text must be fully legible — every word visible, no clipping, no truncation.`,
     ``,
     hasContact
-      ? `Show only the exact contact details listed above. Never invent or add any URL, domain, or phone number.`
-      : `No phone or website was provided — do not display any URL, domain, or phone number anywhere in the image.`,
-    `Do not add any decorative city label, geographic banner, or location line — location belongs only within the natural copy text, not as a separate design element.`,
+      ? `CONTACT — include exactly these details on the ad, no others:\n${phone ? `  Phone: ${phone}` : ""}${website ? `\n  Website: ${website}` : ""}\nNever invent any URL, domain, or phone number not listed here.`
+      : `CONTACT — no phone or website provided. Do not show any URL, domain, or phone number anywhere in the image.`,
+    `Do not add decorative city labels, geographic banners, or location design elements.`,
     ``,
-    `COMPOSITION: The photograph fills the entire canvas as the background. The headline, support line, and CTA sit naturally over the photo — placed wherever they read best for this specific scene. Use a gradient scrim, vignette, or open sky/wall area for legibility as needed. No split-panel layouts. No white or solid-color side panels. No header or footer bar strips. No icon rows. No decorative frames or borders. The ad should feel like a designer composed it naturally for this business — not like a template was filled in.`,
+    `LAYOUT: Full-bleed photograph as background. Ad copy sits naturally over the photo — placed wherever it reads best for this specific scene. Use a subtle gradient scrim or vignette for legibility. No split-panel layouts. No white sidebar panels. No footer strips. No icon rows. No decorative borders. No badges, seals, or sticker icons. Not a generic stock flyer. Not a Canva template. Clean, premium, naturally composed.`,
     ``,
     logoFound
-      ? `A real business logo will be added after generation. Do not draw any logo, icon, or brand graphic in the image.`
-      : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large brand identity mark or logo-style emblem — if the business name appears, it is small supporting text only, never a prominent graphic treatment.`,
-    !offer ? `Do not invent any promotional offer, discount, or sale.` : null,
+      ? `A real business logo will be composited after generation — do not draw any logo, icon, or brand graphic.`
+      : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large graphic emblem or brand identity mark — if the name appears, it is small supporting text only.`,
+    !offer ? `Do not invent any promotional offer or discount.` : null,
     ``,
-    `PHOTOREALISM FINAL CHECK: The photograph must look captured with a real camera — authentic grain, natural light, believable surfaces. The overall ad should feel naturally generated from the business brief, not template-assembled.`,
+    `QUALITY: Photorealistic, visually strong, and premium. This should look like a real ad a professional creative agency made specifically for this business — not a template, not a flyer, not a generic stock-image ad. A beautiful, natural commercial advertisement.`,
     variationToken ? `Variation: ${variationToken}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
