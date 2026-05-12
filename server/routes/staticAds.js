@@ -569,12 +569,13 @@ ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
 Please create a visually appealing, photorealistic advertisement for this business.
-Make it high quality, polished, simple, and suitable as a real ad creative.
-Keep the advertisement clean and not over the top.
+Make it high quality, polished, simple, clean, and suitable as a real ad creative.
+Keep the advertisement uncluttered and not over the top.
 Do not include any people or humans in the advertisement.
-${/hvac|heating|cooling|air.?cond/i.test(industry) ? `Use simple, realistic HVAC-related visual subjects only, such as an AC unit, a house exterior, a thermostat, a ceiling vent, a furnace, an air handler, or another natural residential HVAC scene.` : `Use simple, realistic visual subjects relevant to a ${industry || "local service"} business.`}
+Use only a small number of simple, realistic visual subjects that are natural for this type of business.
+${/hvac|heating|cooling|air.?cond/i.test(industry) ? `For this HVAC business, use realistic HVAC-related visual subjects such as an AC unit, a house exterior, an AC unit beside a house, a thermostat, a ceiling vent, a furnace, an air handler, or another natural HVAC scene — but do not cram too many HVAC elements into one image. Usually one main subject or one main subject plus one supporting element is enough.` : `Use simple, realistic visual subjects relevant to a ${industry || "local service"} business. Do not cram too many elements into one image.`}
 Avoid weird or random image concepts.
-Make the image look as photorealistic as possible, like a real-life photo, not a cartoon or illustration.
+Make the image look as photorealistic and real-life as possible, not a cartoon or illustration.
 Use the business information above as the basis for the ad.
 Do not invent any contact details beyond what is listed above.
 ${logoFound ? "A real logo will be composited separately — do not draw a logo." : "Do not draw any logo or brand graphic symbol."}
