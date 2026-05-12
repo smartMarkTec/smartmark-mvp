@@ -630,7 +630,11 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
       ? `  Offer: "${offer}"`
       : `  Do not invent any promotional offer, sale, or discount.`,
     ``,
-    `TYPOGRAPHY: the headline is the dominant typographic element — set at the largest size and heaviest weight of the chosen typeface. For headlines of 3 or more words, break across 2 short lines for maximum visual impact: two punchy lines feel dramatically stronger than one long cramped line. The headline must be unmissably large — at least 2× the size of the support copy. Use a bold modern sans-serif or strong commercial display face. Support copy should be clearly lighter and thinner in weight than the headline so the eye instantly separates the two levels. When a phone number or website URL is provided, place it in a dedicated footer zone or contact strip at the bottom of the ad — the phone number displayed prominently in large clean type, the website in smaller text beneath it. Do not let contact info float randomly in the body of the image. All text must be fully legible at social-feed viewing sizes.`,
+    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed in AD COPY TO RENDER above. Never invent, guess, or hallucinate any website URL, domain name, or phone number.`,
+    !website ? `No website was provided — do NOT display any website URL, domain name, or web address anywhere in this image, including in any footer, contact strip, or small print.` : null,
+    !phone ? `No phone number was provided — do NOT display any phone number anywhere in this image.` : null,
+    ``,
+    `TYPOGRAPHY: the headline is the dominant typographic element — set at the largest size and heaviest weight of the chosen typeface. For headlines of 3 or more words, break across 2 short lines for maximum visual impact: two punchy lines feel dramatically stronger than one long cramped line. The headline must be unmissably large — at least 2× the size of the support copy. Use a bold modern sans-serif or strong commercial display face. Support copy should be clearly lighter and thinner in weight than the headline so the eye instantly separates the two levels. ${website || phone ? "Contact info (phone/website listed above) should appear in a dedicated footer zone at the bottom — phone prominently, website smaller below it." : "No contact info was provided — do not add any contact strip or footer with contact details."} All text must be fully legible at social-feed viewing sizes.`,
     ``,
     `DESIGN TREATMENT:`,
     `  CTA: render as a polished, modern button — pill shape or rounded rectangle, with balanced horizontal padding (the label should not crowd the edges), a solid fill color with strong contrast against the label text, and a subtle shadow or slight depth treatment that lifts it off the background. The button should feel intentional and clickable — the kind you'd see in a real premium digital ad — without being oversized, flashy, or decorated. Never render the CTA as loose unstyled text.`,
@@ -644,6 +648,110 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     ``,
     `FINAL PHOTOREALISM CHECK: The photographic scene in this ad must look like it was captured with a real camera — authentic grain, real-world materials, believable natural light, imperfect and true-to-life. If any part of the scene looks illustrated, cartoon-like, CGI-smooth, digitally perfect, or synthetically rendered, it is wrong. The text and button sit on top of a real-looking photograph. The photograph itself must never look designed, stylized, or artificially generated.`,
     variationToken ? `Variation: ${variationToken}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
+
+/* Build a multipart/form-data body from fields and file parts. */
+function buildMultipartForm(fields, files) {
+  const boundary = `----FormBoundary${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+  const parts = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
+    ));
+  }
+  for (const { name, filename, contentType, data } of files) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`
+    ));
+    parts.push(data);
+    parts.push(Buffer.from("\r\n"));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+/* Call the OpenAI image edits endpoint with a user-supplied photo. */
+async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x1024", quality = "high", n = 1 }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY missing");
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+
+  // Ensure the uploaded image is a valid PNG before sending.
+  const pngBuf = await sharp(imageBuffer).resize(1024, 1024, { fit: "cover" }).png().toBuffer();
+
+  const { body, contentType } = buildMultipartForm(
+    { model, prompt, n: String(Math.max(1, Math.min(2, Number(n) || 1))), size, quality, output_format: "png" },
+    [{ name: "image[]", filename: "photo.png", contentType: "image/png", data: pngBuf }]
+  );
+
+  const { status, body: respBuf } = await fetchUpstream(
+    "POST",
+    "https://api.openai.com/v1/images/edits",
+    { Authorization: `Bearer ${key}`, "Content-Type": contentType },
+    body,
+    180000
+  );
+
+  if (status !== 200) {
+    let msg = `OpenAI image edit HTTP ${status}`;
+    try { msg += ` ${respBuf.toString("utf8").slice(0, 1200)}`; } catch {}
+    throw new Error(msg);
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(respBuf.toString("utf8")); } catch { throw new Error("OpenAI image edit: failed to parse JSON"); }
+
+  const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+  if (!arr.length) throw new Error("OpenAI image edit: empty data array");
+
+  const buffers = [];
+  for (const item of arr) {
+    if (item?.b64_json) buffers.push(Buffer.from(item.b64_json, "base64"));
+  }
+  if (!buffers.length) throw new Error("OpenAI image edit: missing b64_json");
+  return buffers;
+}
+
+/* Build a lean prompt for the image-edit path (user uploaded their own photo).
+   We don't need scene-generation guidance — the photo already exists.
+   We only need to describe the ad-text treatment to apply on top of it. */
+function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = false } = {}) {
+  const businessName = clean(a.businessName || a.brand || "Your Brand");
+  const industry = inferIndustry(a);
+  const website = clean(a.website || a.url || "");
+  const phone = clean(a.phone || "");
+  const offer = clip(deriveOffer(a, craftedCopy), 70);
+  const headline = wordTrim(deriveHeadline(a, craftedCopy), 28);
+  const supportLine = deriveSupportLine(a, craftedCopy);
+  const cta = deriveCTA(a, craftedCopy);
+
+  return [
+    `This is a business photo uploaded by the user for "${businessName}", a ${industry} business. Apply a clean, premium Facebook/Instagram ad treatment to this photo — preserve the original photographic scene exactly and only add the ad text and CTA button described below.`,
+    ``,
+    `Keep the photo photorealistic and unchanged. Do not alter, restyle, or redraw any part of the scene. Simply add the ad copy elements in a tasteful, professional way.`,
+    ``,
+    `AD COPY TO ADD:`,
+    `  Headline: "${headline}"`,
+    supportLine ? `  Support text: "${supportLine}"` : null,
+    `  CTA: "${cta}"`,
+    website ? `  Website: ${website}` : null,
+    phone ? `  Phone: ${phone}` : null,
+    `  Brand name: "${businessName}"`,
+    offer ? `  Offer: "${offer}"` : `  Do not invent any offer or discount.`,
+    ``,
+    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed above. Never invent any website URL, domain, or phone number.`,
+    !website ? `No website was provided — do NOT add any website URL, domain, or web address to the image.` : null,
+    !phone ? `No phone number was provided — do NOT add any phone number to the image.` : null,
+    ``,
+    `DESIGN: Headline in large bold type, broken across 2 lines if 3+ words, with a thin brand-accent rule below it. Support copy in a lighter weight. CTA as a clean pill or rectangle button with solid fill. Use a smooth gradient scrim for text contrast only if needed. Keep the layout clean — no photo frames, no inset boxes, no cluttered layers.`,
+    logoFound
+      ? `LOGO: A real logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
+      : `BRANDING: No logo available — do not draw any logo, brand mark, or graphic symbol. Do not write any manufacturer or supplier name other than "${businessName}".`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1076,16 +1184,41 @@ router.post("/generate-static-ad", async (req, res) => {
     const variationToken = String(
       body.regenerateToken || body.variant || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     );
-    const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
 
-    // Single OpenAI call for speed and lower failure risk.
-    let imageBuffers = await generateOpenAIAdImageBuffers({
-      prompt,
-      size: "1024x1024",
-      output_format: "png",
-      quality: "high",
-      n: count,
-    });
+    // Detect a user-uploaded photo — if present, use the image-edit path instead of text-to-image.
+    // The field is sent as a base64 DataURL: "data:image/jpeg;base64,..."
+    const rawUserImage = a.userImage || body.userImage || null;
+    let userImageBuffer = null;
+    if (rawUserImage && typeof rawUserImage === "string") {
+      try {
+        const m = rawUserImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+        if (m) userImageBuffer = Buffer.from(m[2], "base64");
+      } catch { /* ignore malformed data URL */ }
+    }
+
+    let imageBuffers;
+    if (userImageBuffer) {
+      // User-uploaded photo path: edit the existing image to add ad treatment.
+      const editPrompt = buildAdEditPromptFromAnswers(a, craftedCopy, { logoFound: !!logoBuf });
+      console.log("[generate-static-ad] using user-uploaded image via edit endpoint");
+      imageBuffers = await generateOpenAIAdImageEdit({
+        imageBuffer: userImageBuffer,
+        prompt: editPrompt,
+        size: "1024x1024",
+        quality: "high",
+        n: count,
+      });
+    } else {
+      // Standard text-to-image path.
+      const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
+      imageBuffers = await generateOpenAIAdImageBuffers({
+        prompt,
+        size: "1024x1024",
+        output_format: "png",
+        quality: "high",
+        n: count,
+      });
+    }
 
     if (!Array.isArray(imageBuffers) || !imageBuffers.length) {
       throw new Error("No image buffers returned from generator");

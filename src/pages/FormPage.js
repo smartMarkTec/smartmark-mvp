@@ -898,6 +898,10 @@ export default function FormPage() {
   const [activeImage, setActiveImage] = useState(0);
   const [imageUrl, setImageUrl] = useState("");
 
+  // Optional user-uploaded photo — scoped to this session only, never persisted
+  const [userUploadedImage, setUserUploadedImage] = useState(null);
+  const uploadInputRef = useRef(null);
+
   const [regenLimit, setRegenLimit] = useState(IMAGE_GEN_MAX_RUNS_PER_WINDOW);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1995,6 +1999,15 @@ async function generatePosterBPair(runToken) {
   };
 }
 
+  function handleUploadChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setUserUploadedImage(ev.target?.result || null);
+    reader.readAsDataURL(file);
+    e.target.value = ""; // allow re-selecting the same file later
+  }
+
   async function handleRegenerateImage() {
     if (!canRunImageGen()) {
       const msg = quotaMessage();
@@ -2096,6 +2109,8 @@ async function generatePosterBPair(runToken) {
         businessName: safeBiz,
         location: safeLocation,
         offer: a.offer || a.saveAmount || craftedCopy.offer || "",
+        // User-uploaded photo — passed only when present; never persisted to draft
+        ...(userUploadedImage ? { userImage: userUploadedImage } : {}),
       },
     };
 
@@ -2192,7 +2207,7 @@ async function generatePosterBPair(runToken) {
         }}
       />
        <div style={{ width: "100%", maxWidth: 980, padding: "28px 20px 0", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <button
             onClick={() => navigate("/")}
             style={{
@@ -2516,29 +2531,100 @@ async function generatePosterBPair(runToken) {
                 Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
               </span>
 
-              <button
-              style={{
-  background: "#e5e0ff",
-  color: "#5f56eb",
-  border: "none",
-  borderRadius: 12,
-  fontWeight: 700,
-  fontSize: "1.01rem",
-  padding: "6px 20px",
-  cursor: imageLoading ? "not-allowed" : "pointer",
-  marginLeft: 8,
-  boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
-  display: "flex",
-  alignItems: "center",
-  gap: 7,
-}}
-                onClick={handleRegenerateImage}
-                disabled={imageLoading}
-                title="Regenerate Image Ad"
-              >
-                <FaSyncAlt style={{ fontSize: 16 }} />
-                {imageLoading || generating ? <Dotty /> : "Regenerate"}
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {/* Hidden file input — triggered by the upload tile button */}
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                  style={{ display: "none" }}
+                  onChange={handleUploadChange}
+                />
+
+                {userUploadedImage ? (
+                  /* Thumbnail + remove control when a photo is uploaded */
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <img
+                      src={userUploadedImage}
+                      alt="Your photo"
+                      onClick={() => uploadInputRef.current?.click()}
+                      title="Click to replace photo"
+                      style={{
+                        width: 32,
+                        height: 32,
+                        objectFit: "cover",
+                        borderRadius: 6,
+                        border: "2px solid #8f87ff",
+                        cursor: "pointer",
+                      }}
+                    />
+                    <span style={{ fontSize: 11, color: "#7b74c0", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      Custom photo
+                    </span>
+                    <button
+                      onClick={() => setUserUploadedImage(null)}
+                      title="Remove custom photo"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#a09ab8",
+                        fontSize: 14,
+                        padding: 2,
+                        lineHeight: 1,
+                      }}
+                    >
+                      <FaTimes />
+                    </button>
+                  </div>
+                ) : (
+                  /* Upload tile — plus sign, hover reveals label */
+                  <button
+                    onClick={() => uploadInputRef.current?.click()}
+                    title="Add your own photo"
+                    style={{
+                      background: "rgba(255,255,255,0.7)",
+                      border: "1.5px dashed #c0bad8",
+                      borderRadius: 8,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      color: "#8f87b8",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span style={{ fontSize: 15, lineHeight: 1 }}>＋</span>
+                    Add your photo
+                  </button>
+                )}
+
+                <button
+                  style={{
+                    background: "#e5e0ff",
+                    color: "#5f56eb",
+                    border: "none",
+                    borderRadius: 12,
+                    fontWeight: 700,
+                    fontSize: "1.01rem",
+                    padding: "6px 20px",
+                    cursor: imageLoading ? "not-allowed" : "pointer",
+                    boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                  }}
+                  onClick={handleRegenerateImage}
+                  disabled={imageLoading}
+                  title="Regenerate Image Ad"
+                >
+                  <FaSyncAlt style={{ fontSize: 16 }} />
+                  {imageLoading || generating ? <Dotty /> : "Regenerate"}
+                </button>
+              </div>
             </div>
 
             {/* ✅ put this OUTSIDE the button */}

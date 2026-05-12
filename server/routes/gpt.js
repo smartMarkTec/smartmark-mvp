@@ -420,17 +420,19 @@ const buildFallbackSubline = (headline) => {
 const system =
   "You are an expert Facebook/Instagram ad copywriter for small and medium local businesses. " +
   "CRITICAL RULE: The inputs below are raw business context — they are NOT ad copy. Do NOT summarize, restate, or echo words from the inputs. Use them only to understand what the business does and who it serves, then write fresh copy as a skilled copywriter would. " +
-  "Think: what does the customer want? What problem are they trying to solve? What would make them stop scrolling? Write from THAT angle. " +
-  "BAD (echoing input): 'Efficient HVAC service in San Antonio' — 'High-quality HVAC services, efficient and effective' — 'Professional marketing for businesses.' " +
-  "GOOD (writing like a copywriter): 'AC breaks in summer — we fix it today.' — 'Plumbers who answer the phone and show up.' — 'More leads in 30 days, or you know exactly why not.' " +
-  "Headline: 4–6 words maximum — short, punchy, concrete. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. Never add location or city to the headline. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
-  "Subline: 2–3 sentences, 20–50 words. Say what the business actually does, who it helps, and what makes it worth calling. Use plain, direct language a real customer would respond to. Vary sentence structure. No drama or exaggeration. " +
+  "Think: what does the customer want? What problem are they trying to solve? What would make them stop scrolling? Write from THAT angle — specific, direct, human. " +
+  "BAD HEADLINES (generic, weak, echo): 'Efficient HVAC service in San Antonio' — 'High-quality HVAC services, efficient and effective' — 'Professional marketing for businesses' — 'Need fast and affordable AC repair?' " +
+  "GOOD HEADLINES (concrete, specific, action-oriented): 'AC fixed same day.' — 'Mini-splits installed right.' — 'Plumbers who show up.' — 'Roof done before it rains.' — 'More booked jobs, less guesswork.' " +
+  "Headline: 4–6 words maximum — short, punchy, concrete. Pick ONE specific angle: a problem the customer faces, an outcome they want, or something concrete that sets this business apart. " +
+  "HEADLINE RULES: Never write a question headline ('Need...?', 'Looking for...?', 'Want...?') — questions test poorly for local service ads. Never add location or city. No generic phrasing ('quality service', 'professional X', 'trusted Y'). No vague motivational fragments. " +
+  "For service businesses: the strongest headlines name the specific job, timing, or outcome — 'Same-day AC repair.' / 'Ductless systems installed.' / 'Heat back on today.' — concrete and actionable beats abstract and aspirational every time. " +
+  "Subline: 2–3 sentences, 20–50 words. Say what the business actually does, who it helps, and what makes it worth calling. Use plain, direct language. Vary sentence structure. No drama or exaggeration. " +
   "PHONE RULE: If a Phone field is provided, end the subline with a natural call phrase using that exact number — e.g. 'Call (713) 555-1234 to schedule.' / 'Reach us at (713) 555-1234.' Never invent or placeholder a phone number. " +
-  "CTA: a clear, specific action (e.g. 'Get a free quote', 'Book today', 'See how it works'). " +
+  "CTA: a clear, specific action tied to what the business actually offers (e.g. 'Book a service call', 'Get a free quote', 'Schedule today', 'Call for availability'). Match the CTA to the business type. " +
   "Bullets (if any): short, specific facts — not restatements of the headline. No exaggeration. " +
   "Return strict JSON with keys: headline (4–6 words, no city/location), subline (2–3 sentences, 20–50 words), offer (short if provided, else empty string), bullets (array up to 3), disclaimers (short, optional), cta (2–4 words). " +
   "Hard rules: NO URLs. NO 'our/we/I/my' language. NO unverifiable superlatives (best, #1, guaranteed, fastest, revolutionary). " +
-  "Do NOT write: 'transform', 'game-changer', 'effortlessly', 'no stress', 'next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind', 'fill your pipeline', 'just results that matter', 'take your X to the next level'. " +
+  "Do NOT write: 'transform', 'game-changer', 'effortlessly', 'no stress', 'next level', 'cutting-edge', 'seamless', 'hassle-free', 'designed with you in mind', 'fill your pipeline', 'just results that matter', 'take your X to the next level', 'quality service is just a call away', 'service you can trust'. " +
   "OFFER RULE: If the Offer field is blank or empty, return offer as an empty string. Never invent a promotional offer, sale, or discount that was not explicitly provided.";
 
 
@@ -439,10 +441,13 @@ const system =
     const isNoWebsiteRun = String(a.noWebsite || "").trim().toLowerCase() === "yes";
     const phoneForCopy = String(a.phone || "").trim();
 
+    const websiteForCopy = String(a.website || a.url || "").trim();
+
     const user = [
       `Industry: ${a.industry || ""}`,
       `Business: ${a.businessName || ""}`,
       `Location: ${a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : (a.location || "")}`,
+      ...(websiteForCopy && !isNoWebsiteRun ? [`Website: ${websiteForCopy} (context only — do not include this URL in any copy)`] : []),
       `Audience: ${a.idealCustomer || ""}`,
       `Main benefit: ${a.mainBenefit || a.details || ""}`,
       `Offer: ${a.offer || a.saveAmount || ""}`,
@@ -453,7 +458,7 @@ const system =
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.55,
+      temperature: 0.65,
       max_tokens: 320,
       messages: [
         { role: "system", content: system },
