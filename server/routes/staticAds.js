@@ -540,12 +540,14 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 
 
 function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "", { logoFound = false } = {}) {
-  const businessName = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
-  const industry = inferIndustry(a);
+  const businessName = clean(
+    a.businessName || a.brand || a.business || a.company || "Local Business"
+  );
+  const industry = clean(a.industry || a.businessType || a.niche || "business");
   const city = clean(a.city || "");
   const state = clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
-  const service = clean(a.mainBenefit || a.details || a.benefit || "");
+  const mainBenefit = clean(a.mainBenefit || a.details || a.benefit || "");
   const phone = clean(a.phone || "");
   const website = clean(a.website || a.url || "");
 
@@ -555,70 +557,85 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  // Deterministic scene suggestion — different variationTokens get different photorealistic scenes.
-  // Passed as inspiration, not a mandate, so the model can adapt or choose an equally strong alternative.
-  function tokenHash(s) {
-    let h = 5381;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
-    return Math.abs(h);
-  }
-  const hash = variationToken ? tokenHash(variationToken) : Math.floor(Math.random() * 999983);
-  const sceneSuggestion = getIndustryScene(industry, hash, a) || VISUAL_MOODS[(hash >> 3) % VISUAL_MOODS.length];
-
   return `Create a beautiful, photorealistic advertisement for a local ${industry} business.
 
-This should feel like a polished modern ad creative — the kind ChatGPT/OpenAI generates from a natural user request.
-Not a flyer. Not a brochure. Not a Canva template. Not a rigid service-business layout.
+This should be a genuinely AI-generated ad creative, not a filled-in template, not a flyer, and not a brochure.
 
-BUSINESS BRIEF:
+Business details:
 - Business name: ${businessName}
 - Industry: ${industry}
-${locationText ? `- Location: ${locationText}` : ""}
-${service ? `- Main service/benefit: ${service}` : ""}
-${idealCustomer ? `- Ideal customer: ${idealCustomer}` : ""}
-- Offer/promo: ${offer || "none"}
+- Location: ${locationText || "local service area"}
+- Ideal customer: ${idealCustomer || "homeowners looking for reliable service"}
+- Main benefit/service to highlight: ${mainBenefit || "high-quality dependable service"}
+- Offer: ${offer || "none"}
 - Phone: ${phone || "none"}
 - Website: ${website || "none"}
 
-CREATIVE DIRECTION:
-Create a premium, clean, tasteful ad with a strong photorealistic hero image.
-Make the design visually appealing first — not overly informational.
-Use elegant composition, natural spacing, tasteful typography, and a clear visual hierarchy.
-Simple, modern, uncluttered. A real polished advertisement.
+Creative direction:
+Create a polished, premium, modern ad creative.
+Make it visually appealing and photorealistic.
+Let the AI decide the composition, text placement, and creative approach naturally.
+Keep the ad clean, tasteful, and uncluttered.
+Use natural consumer-friendly ad copy.
 
-SCENE SUGGESTION for this variation — use this or an equally strong photorealistic alternative:
-${sceneSuggestion}
-No people unless the scene above explicitly includes them.
+The ad should feel like the kind of image ChatGPT/OpenAI would generate directly from a user request.
 
-AD COPY:
-Write the headline, supporting line, and CTA naturally as part of the image — from the customer's perspective.
-One short compelling headline. One brief supporting line. One clean CTA. Minimal text overall.
-Not "Reliable Residential HVAC Service." Not a stiff category label. Conversational, specific, human.
-All text must be fully legible — every word visible, no clipping, no truncation.
+Visual guidance:
+- strong photorealistic hero image
+- elegant composition
+- tasteful typography
+- premium local-service ad feel
+- minimal clutter
+- natural spacing
+- varied scene and layout from one generation to another
 
-ACCURACY — include exactly:
-- Business name: ${businessName}
-${phone ? `- Phone number: ${phone} (exact — do not alter or invent a different number)` : "- Do not include a phone number"}
-${website && website.toLowerCase() !== "none" ? `- Website: ${website} (exact — do not alter or invent a different URL)` : "- Do not include a website"}
-${offer ? `- Offer: ${offer} (exact — do not alter)` : "- Do not invent any offer, discount, or promotion"}
-- Do not add decorative city/state banners or geographic labels as design elements
+${/hvac|heating|cooling|air.?cond/i.test(industry)
+  ? `For this HVAC business, the AI may use scenes such as:
+- a home exterior with an AC condenser
+- a modern house with HVAC equipment
+- a clean residential comfort scene
+- a thermostat or vent detail
+- HVAC equipment close-up
+- another realistic HVAC-related visual`
+  : `Use a high-quality photorealistic visual that feels natural and relevant for a ${industry} business.`}
 
-LAYOUT:
-Full-bleed photorealistic photo as background. Ad copy naturally placed over the photo.
-No split-panel layouts. No white sidebar panels. No footer strips. No icon rows.
-No badges, seals, or sticker icons. No giant fake logo or oversized business-name block.
-Not a flyer. Not a Canva template. Clean and premium.
+Copy guidance:
+- let the AI write the ad copy naturally
+- one strong consumer-facing headline
+- one brief support line if needed
+- one simple contact area
+- text should be minimal and natural
+- avoid robotic or overly corporate wording
 
-BRANDING:
+Avoid:
+- generic flyer look
+- brochure look
+- Canva template look
+- split-panel corporate service poster
+- giant logo block
+- giant business-name block dominating the ad
+- text-heavy layout
+- stiff category-label headline like "Reliable Residential HVAC Service"
+- excessive icons, badges, seals, stickers, or footer strips
+- cluttered design
+- cartoonish or illustrated style
+
+Accuracy requirements:
+- include the exact business name: ${businessName}
+${phone ? `- include this exact phone number: ${phone}` : "- do not include a phone number"}
+${website && website.toLowerCase() !== "none" ? `- include this exact website: ${website}` : "- do not include a website"}
+${offer ? `- include this exact offer only: ${offer}` : "- do not invent any offer, discount, or promotion"}
+- do not invent a different business name, phone number, or website
+- do not add decorative city/state labels or geographic banners as design elements
+
 ${logoFound
-  ? "A real logo will be composited after generation — do not draw any logo or brand graphic."
+  ? "A real business logo will be composited after generation — do not draw any logo or brand graphic."
   : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large graphic emblem — if the name appears, it is small supporting text only.`}
 
-QUALITY:
-Photorealistic commercial photography. Beautiful composition. Natural, tasteful, premium.
-This should look like a professional creative agency made this ad specifically for this business — not a template, not a flyer.
+The final output should look like an AI-generated ad creative, not a system-assembled template.
 
-Variation: ${variationToken}`;
+Use this variation token to encourage visual variety while preserving the business facts:
+${variationToken}`;
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
