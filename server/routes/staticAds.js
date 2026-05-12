@@ -543,7 +543,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const businessName = clean(
     a.businessName || a.brand || a.business || a.company || "Local Business"
   );
-  const industry = clean(a.industry || a.businessType || a.niche || "business");
+  const industry = clean(a.industry || a.businessType || a.niche || "");
   const city = clean(a.city || "");
   const state = clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
@@ -557,85 +557,24 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Create a beautiful, photorealistic advertisement for a local ${industry} business.
+  return `Create a beautiful advertisement for this business.
 
-This should be a genuinely AI-generated ad creative, not a filled-in template, not a flyer, and not a brochure.
+Business name: ${businessName}
+Industry: ${industry || "local service business"}
+Location: ${locationText || "local area"}
+Ideal customer: ${idealCustomer || "local customers"}
+Main benefit or service: ${mainBenefit || "high-quality service"}
+${offer ? `Offer: ${offer}` : ""}
+${phone ? `Phone: ${phone}` : ""}
+${website ? `Website: ${website}` : ""}
 
-Business details:
-- Business name: ${businessName}
-- Industry: ${industry}
-- Location: ${locationText || "local service area"}
-- Ideal customer: ${idealCustomer || "homeowners looking for reliable service"}
-- Main benefit/service to highlight: ${mainBenefit || "high-quality dependable service"}
-- Offer: ${offer || "none"}
-- Phone: ${phone || "none"}
-- Website: ${website || "none"}
+Please create a visually appealing, photorealistic advertisement for this business.
+Make it high quality, polished, and suitable as a real ad creative.
+Use the business information above as the basis for the ad.
+Do not invent any contact details beyond what is listed above.
+${logoFound ? "A real logo will be composited separately — do not draw a logo." : "Do not draw any logo or brand graphic symbol."}
 
-Creative direction:
-Create a polished, premium, modern ad creative.
-Make it visually appealing and photorealistic.
-Let the AI decide the composition, text placement, and creative approach naturally.
-Keep the ad clean, tasteful, and uncluttered.
-Use natural consumer-friendly ad copy.
-
-The ad should feel like the kind of image ChatGPT/OpenAI would generate directly from a user request.
-
-Visual guidance:
-- strong photorealistic hero image
-- elegant composition
-- tasteful typography
-- premium local-service ad feel
-- minimal clutter
-- natural spacing
-- varied scene and layout from one generation to another
-
-${/hvac|heating|cooling|air.?cond/i.test(industry)
-  ? `For this HVAC business, the AI may use scenes such as:
-- a home exterior with an AC condenser
-- a modern house with HVAC equipment
-- a clean residential comfort scene
-- a thermostat or vent detail
-- HVAC equipment close-up
-- another realistic HVAC-related visual`
-  : `Use a high-quality photorealistic visual that feels natural and relevant for a ${industry} business.`}
-
-Copy guidance:
-- let the AI write the ad copy naturally
-- one strong consumer-facing headline
-- one brief support line if needed
-- one simple contact area
-- text should be minimal and natural
-- avoid robotic or overly corporate wording
-
-Avoid:
-- generic flyer look
-- brochure look
-- Canva template look
-- split-panel corporate service poster
-- giant logo block
-- giant business-name block dominating the ad
-- text-heavy layout
-- stiff category-label headline like "Reliable Residential HVAC Service"
-- excessive icons, badges, seals, stickers, or footer strips
-- cluttered design
-- cartoonish or illustrated style
-
-Accuracy requirements:
-- include the exact business name: ${businessName}
-${phone ? `- include this exact phone number: ${phone}` : "- do not include a phone number"}
-${website && website.toLowerCase() !== "none" ? `- include this exact website: ${website}` : "- do not include a website"}
-${offer ? `- include this exact offer only: ${offer}` : "- do not invent any offer, discount, or promotion"}
-- do not invent a different business name, phone number, or website
-- do not add decorative city/state labels or geographic banners as design elements
-
-${logoFound
-  ? "A real business logo will be composited after generation — do not draw any logo or brand graphic."
-  : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large graphic emblem — if the name appears, it is small supporting text only.`}
-
-The final output should look like an AI-generated ad creative, not a system-assembled template.
-
-Use this variation token to encourage visual variety while preserving the business facts:
-${variationToken}`;
+Variation token: ${variationToken}`;
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
