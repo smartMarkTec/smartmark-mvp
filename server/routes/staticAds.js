@@ -574,37 +574,34 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
   const hasContact = website || phone;
 
   return [
-    `Generate a polished square Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
+    `Create a polished, high-quality Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
     ``,
-    `PHOTOGRAPHIC STYLE — most important: This image must look like a real photograph taken by a professional commercial photographer. Real-world lighting with natural shadows, authentic surface textures, genuine depth of field, and subtle photographic grain. The scene must feel like it actually exists. Not illustration, not CGI, not cartoon, not over-smoothed — a real photo.`,
-    ``,
-    `SCENE: ${sceneDescription}`,
+    `PHOTOGRAPH: ${sceneDescription}`,
     noPersonClause,
+    `This photograph must look like it was taken by a professional commercial photographer — authentic natural lighting, real surface textures, genuine depth of field, subtle photographic grain. Not illustration, CGI, or cartoon. A real photo.`,
     ``,
-    `AD COPY — render exactly as written:`,
-    `  Headline: "${headline}"`,
-    supportLine ? `  Supporting line: "${supportLine}"` : null,
+    `Write exactly this text onto the ad, fully legible:`,
+    `  Headline (largest, boldest): "${headline}"`,
+    supportLine ? `  Supporting line (smaller): "${supportLine}"` : null,
     `  CTA button: "${cta}"`,
     website ? `  Website: ${website}` : null,
     phone ? `  Phone: ${phone}` : null,
-    `  Business name: "${businessName}"`,
-    offer ? `  Offer: "${offer}"` : null,
-    ``,
-    `TEXT RULES — strictly enforced:`,
-    `  Every word of every text element must be completely visible and legible. No truncation, no clipping, no ellipsis. If text is tight, reduce font size — never cut words. Headline is the largest, boldest element. Supporting line is clearly smaller. CTA as a clean styled button. Keep generous space between text elements. All text must stay at least 8% from every image edge.`,
+    offer ? `  Promo: "${offer}"` : null,
+    `Every word must be fully visible — no truncation, no clipping. Reduce font size if text is tight; never cut words.`,
     ``,
     hasContact
-      ? `CONTACT — strictly enforced: Only show the exact contact details listed above. Never invent any website URL, domain name, or phone number.`
-      : `CONTACT — strictly enforced: No website or phone was provided. Do NOT display any URL, domain name, or phone number anywhere in the image.`,
+      ? `Show only the exact contact details listed above. Never invent or add any URL, domain, or phone number.`
+      : `No phone or website was provided — do not display any URL, domain, or phone number anywhere in the image.`,
+    `Do not add any decorative city label, geographic banner, or location line — location belongs only within the natural copy text, not as a separate design element.`,
     ``,
-    `COMPOSITION: Clean, modern social ad. The photo is the hero. Place the headline, support line, and CTA wherever they create the strongest, most legible result for this specific scene — over the image, beside it, or in a minimal supporting zone. Use a scrim, open negative space, or light panel as needed; keep any supporting element unobtrusive. No cluttered footers, no icon rows, no badge stickers, no brochure panels. Minimal, premium, ad-quality.`,
+    `COMPOSITION: The photograph fills the entire canvas as the background. The headline, support line, and CTA sit naturally over the photo — placed wherever they read best for this specific scene. Use a gradient scrim, vignette, or open sky/wall area for legibility as needed. No split-panel layouts. No white or solid-color side panels. No header or footer bar strips. No icon rows. No decorative frames or borders. The ad should feel like a designer composed it naturally for this business — not like a template was filled in.`,
     ``,
     logoFound
-      ? `LOGO: A real business logo will be composited after generation. Do not draw any logo, brand mark, icon, emblem, or graphic symbol.`
-      : `BRANDING: No logo. Do not draw any logo, brand mark, seal, or graphic symbol. Do not write any manufacturer, supplier, or third-party brand name other than "${businessName}".`,
+      ? `A real business logo will be added after generation. Do not draw any logo, icon, or brand graphic in the image.`
+      : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large brand identity mark or logo-style emblem — if the business name appears, it is small supporting text only, never a prominent graphic treatment.`,
     !offer ? `Do not invent any promotional offer, discount, or sale.` : null,
     ``,
-    `PHOTOREALISM FINAL CHECK: The scene must look captured with a real camera — authentic grain, real surfaces, believable natural light. If any part looks illustrated, CGI, or synthetic, it is wrong. The photograph itself must never look generated or stylized.`,
+    `PHOTOREALISM FINAL CHECK: The photograph must look captured with a real camera — authentic grain, natural light, believable surfaces. The overall ad should feel naturally generated from the business brief, not template-assembled.`,
     variationToken ? `Variation: ${variationToken}` : null,
   ]
     .filter(Boolean)
@@ -709,8 +706,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     `  CTA: "${cta}"`,
     website ? `  Website: ${website}` : null,
     phone ? `  Phone: ${phone}` : null,
-    `  Brand name: "${businessName}"`,
-    offer ? `  Offer: "${offer}"` : `  Do not invent any promotional offer or discount.`,
+    offer ? `  Promo: "${offer}"` : `  Do not invent any promotional offer or discount.`,
     ``,
     `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed above. Never invent, guess, or hallucinate any website URL, domain name, or phone number.`,
     !website ? `No website was provided — do NOT display any website URL, domain, or web address anywhere in the image.` : null,
@@ -722,7 +718,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     ``,
     logoFound
       ? `LOGO: A real business logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
-      : `BRANDING: No logo available — do not draw any logo, brand mark, or graphic symbol. Do not write any equipment manufacturer, supplier, or third-party brand name other than "${businessName}".`,
+      : `BRANDING: Do not draw any logo, brand mark, icon, or graphic symbol. Do not render "${businessName}" as a large brand identity mark or logo-style emblem — if the name appears, it is small supporting text only. Do not write any equipment manufacturer or third-party brand name.`,
+    `Do not add any decorative city label, geographic banner, or location line — location belongs only within the natural copy text, not as a separate design element.`,
     ``,
     `FINAL CHECK: The photographic scene must look exactly as uploaded — authentic grain, real-world materials, believable natural light, no stylization. The ad text sits cleanly on top. The final result should look like a real commercial ad creative built from a real business photograph — not like AI-generated art.`,
   ]
