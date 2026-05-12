@@ -572,6 +572,9 @@ Please create a visually appealing, photorealistic advertisement for this busine
 Make it high quality, polished, simple, and suitable as a real ad creative.
 Keep the advertisement clean and not over the top.
 Do not include any people or humans in the advertisement.
+${/hvac|heating|cooling|air.?cond/i.test(industry) ? `Use simple, realistic HVAC-related visual subjects only, such as an AC unit, a house exterior, a thermostat, a ceiling vent, a furnace, an air handler, or another natural residential HVAC scene.` : `Use simple, realistic visual subjects relevant to a ${industry || "local service"} business.`}
+Avoid weird or random image concepts.
+Make the image look as photorealistic as possible, like a real-life photo, not a cartoon or illustration.
 Use the business information above as the basis for the ad.
 Do not invent any contact details beyond what is listed above.
 ${logoFound ? "A real logo will be composited separately — do not draw a logo." : "Do not draw any logo or brand graphic symbol."}
