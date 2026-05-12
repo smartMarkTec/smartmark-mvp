@@ -2527,12 +2527,8 @@ async function generatePosterBPair(runToken) {
                 gap: 12,
               }}
             >
-              <span>
-                Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
-              </span>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {/* Hidden file input — triggered by the upload tile button */}
+              {/* Upload control — left side, replaces "Sponsored" */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -2542,7 +2538,6 @@ async function generatePosterBPair(runToken) {
                 />
 
                 {userUploadedImage ? (
-                  /* Thumbnail + remove control when a photo is uploaded */
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <img
                       src={userUploadedImage}
@@ -2550,8 +2545,8 @@ async function generatePosterBPair(runToken) {
                       onClick={() => uploadInputRef.current?.click()}
                       title="Click to replace photo"
                       style={{
-                        width: 32,
-                        height: 32,
+                        width: 30,
+                        height: 30,
                         objectFit: "cover",
                         borderRadius: 6,
                         border: "2px solid #8f87ff",
@@ -2569,7 +2564,7 @@ async function generatePosterBPair(runToken) {
                         border: "none",
                         cursor: "pointer",
                         color: "#a09ab8",
-                        fontSize: 14,
+                        fontSize: 13,
                         padding: 2,
                         lineHeight: 1,
                       }}
@@ -2578,17 +2573,16 @@ async function generatePosterBPair(runToken) {
                     </button>
                   </div>
                 ) : (
-                  /* Upload tile — plus sign, hover reveals label */
                   <button
                     onClick={() => uploadInputRef.current?.click()}
-                    title="Add your own photo"
+                    title="Add your own photo (optional)"
                     style={{
-                      background: "rgba(255,255,255,0.7)",
-                      border: "1.5px dashed #c0bad8",
-                      borderRadius: 8,
+                      background: "none",
+                      border: "1.5px dashed #c8c2d8",
+                      borderRadius: 7,
                       padding: "4px 10px",
                       fontSize: 12,
-                      color: "#8f87b8",
+                      color: "#9990b8",
                       fontWeight: 600,
                       cursor: "pointer",
                       display: "flex",
@@ -2597,34 +2591,35 @@ async function generatePosterBPair(runToken) {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ fontSize: 15, lineHeight: 1 }}>＋</span>
-                    Add your photo
+                    <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span>
+                    Add photo
                   </button>
                 )}
-
-                <button
-                  style={{
-                    background: "#e5e0ff",
-                    color: "#5f56eb",
-                    border: "none",
-                    borderRadius: 12,
-                    fontWeight: 700,
-                    fontSize: "1.01rem",
-                    padding: "6px 20px",
-                    cursor: imageLoading ? "not-allowed" : "pointer",
-                    boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                  }}
-                  onClick={handleRegenerateImage}
-                  disabled={imageLoading}
-                  title="Regenerate Image Ad"
-                >
-                  <FaSyncAlt style={{ fontSize: 16 }} />
-                  {imageLoading || generating ? <Dotty /> : "Regenerate"}
-                </button>
               </div>
+
+              {/* Regenerate — neutral, clean styling */}
+              <button
+                style={{
+                  background: "none",
+                  color: "#5a5a6e",
+                  border: "1px solid rgba(0,0,0,0.13)",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  fontSize: "0.93rem",
+                  padding: "5px 14px",
+                  cursor: imageLoading ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  opacity: imageLoading ? 0.5 : 1,
+                }}
+                onClick={handleRegenerateImage}
+                disabled={imageLoading}
+                title="Regenerate Image Ad"
+              >
+                <FaSyncAlt style={{ fontSize: 13 }} />
+                {imageLoading || generating ? <Dotty /> : "Regenerate"}
+              </button>
             </div>
 
             {/* ✅ put this OUTSIDE the button */}
@@ -2659,34 +2654,27 @@ async function generatePosterBPair(runToken) {
                 <Dotty />
               </div>
             ) : imageUrls.length > 0 ? (
-              <>
-                <img
-                  src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
-                  alt="Ad Preview"
-                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
-                  onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
-                  onError={() => {
-                    // If the hosted URL died (deploy/restart), try to use cached Data URL.
-                    setImgFail((p) => ({ ...p, [activeImage]: true }));
-                    const ctx = getActiveCtx();
-                    const c = loadImageCache(ctx);
-                    const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
-                    if (cached.length) setImageDataUrls(cached);
-                  }}
-                />
-
-                <Arrow
-                  side="left"
-                  onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)}
-                  disabled={imageUrls.length <= 1}
-                />
-                <Arrow
-                  side="right"
-                  onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)}
-                  disabled={imageUrls.length <= 1}
-                />
-                <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
-              </>
+              <img
+                src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
+                alt="Ad Preview"
+                style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+                onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
+                onError={() => {
+                  setImgFail((p) => ({ ...p, [activeImage]: true }));
+                  const ctx = getActiveCtx();
+                  const c = loadImageCache(ctx);
+                  const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
+                  if (cached.length) setImageDataUrls(cached);
+                }}
+              />
+            ) : userUploadedImage ? (
+              /* Show the user's uploaded photo immediately — before they hit Regenerate */
+              <img
+                src={userUploadedImage}
+                alt="Your uploaded photo"
+                style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+                onClick={() => handleImageClick(userUploadedImage)}
+              />
             ) : (
               <div
                 style={{
@@ -2738,23 +2726,6 @@ async function generatePosterBPair(runToken) {
   </div>
 ) : null}
 
-          </div>
-
-          <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button
-              style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer",
-              }}
-            >
-              {displayCTA}
-            </button>
           </div>
 
           <button
