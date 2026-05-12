@@ -2025,7 +2025,7 @@ async function generatePosterBPair(runToken) {
         body: JSON.stringify({ dataUrl: userUploadedImage }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success || !data.urls?.[0]) {
+      if (!res.ok || !data.ok || !data.urls?.[0]) {
         throw new Error(data.error || "Upload failed — please try again.");
       }
       const serverUrl = toAbsoluteMedia(data.urls[0]);

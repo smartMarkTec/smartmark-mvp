@@ -681,8 +681,13 @@ async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x102
   if (!key) throw new Error("OPENAI_API_KEY missing");
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
 
-  // Ensure the uploaded image is a valid PNG before sending.
-  const pngBuf = await sharp(imageBuffer).resize(1024, 1024, { fit: "cover" }).png().toBuffer();
+  // Scale to fit within 1024×1024 without cropping, letterboxing with white if needed.
+  // Using "cover" was destructive — it cropped portrait/landscape photos and sent a
+  // distorted crop to the edit endpoint, producing poor-quality results.
+  const pngBuf = await sharp(imageBuffer)
+    .resize(1024, 1024, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    .png()
+    .toBuffer();
 
   const { body, contentType } = buildMultipartForm(
     { model, prompt, n: String(Math.max(1, Math.min(2, Number(n) || 1))), size, quality, output_format: "png" },
@@ -717,9 +722,11 @@ async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x102
   return buffers;
 }
 
-/* Build a lean prompt for the image-edit path (user uploaded their own photo).
-   We don't need scene-generation guidance — the photo already exists.
-   We only need to describe the ad-text treatment to apply on top of it. */
+/* Build the prompt for the image-edit path (user uploaded their own photo).
+   The photo already provides the scene — we only need to describe:
+   1. How to preserve its photographic quality (strongly)
+   2. What ad text elements to add on top of it
+   This prompt must produce results at the same quality bar as the main generation path. */
 function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = false } = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
@@ -731,9 +738,12 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const cta = deriveCTA(a, craftedCopy);
 
   return [
-    `This is a business photo uploaded by the user for "${businessName}", a ${industry} business. Apply a clean, premium Facebook/Instagram ad treatment to this photo — preserve the original photographic scene exactly and only add the ad text and CTA button described below.`,
+    `This is a real photograph uploaded by "${businessName}", a ${industry} business. Add a premium, professional Facebook/Instagram ad text treatment to this photo. The result must be a polished, ad-quality creative — clean, modern, and visually strong.`,
     ``,
-    `Keep the photo photorealistic and unchanged. Do not alter, restyle, or redraw any part of the scene. Simply add the ad copy elements in a tasteful, professional way.`,
+    `PRESERVE THE PHOTOGRAPH — THIS IS THE MOST IMPORTANT DIRECTIVE:`,
+    `The photograph must remain completely unchanged in photographic quality, style, lighting, grain, and content. Do NOT alter, restyle, redraw, or transform any part of the scene. You are adding text and a CTA button as an overlay only — not redesigning the image. The photo is the background: keep it looking exactly like a real photograph.`,
+    ``,
+    `DO NOT apply any of these styles to the photo or the overall result: illustration, digital painting, cartoon, anime, watercolor, comic-book look, CGI render, plastic-looking CGI surfaces, fantasy lighting, overly smooth AI-synthesis texture, hand-drawn aesthetics, or any treatment that makes the image look generated, stylized, or non-photographic. The photo must stay a photograph — real, grain-authentic, and untouched.`,
     ``,
     `AD COPY TO ADD:`,
     `  Headline: "${headline}"`,
@@ -742,16 +752,21 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     website ? `  Website: ${website}` : null,
     phone ? `  Phone: ${phone}` : null,
     `  Brand name: "${businessName}"`,
-    offer ? `  Offer: "${offer}"` : `  Do not invent any offer or discount.`,
+    offer ? `  Offer: "${offer}"` : `  Do not invent any promotional offer or discount.`,
     ``,
-    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed above. Never invent any website URL, domain, or phone number.`,
-    !website ? `No website was provided — do NOT add any website URL, domain, or web address to the image.` : null,
-    !phone ? `No phone number was provided — do NOT add any phone number to the image.` : null,
+    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed above. Never invent, guess, or hallucinate any website URL, domain name, or phone number.`,
+    !website ? `No website was provided — do NOT display any website URL, domain, or web address anywhere in the image.` : null,
+    !phone ? `No phone number was provided — do NOT display any phone number anywhere in the image.` : null,
     ``,
-    `DESIGN: Headline in large bold type, broken across 2 lines if 3+ words, with a thin brand-accent rule below it. Support copy in a lighter weight. CTA as a clean pill or rectangle button with solid fill. Use a smooth gradient scrim for text contrast only if needed. Keep the layout clean — no photo frames, no inset boxes, no cluttered layers.`,
+    `TYPOGRAPHY: the headline is the dominant typographic element — set at the largest size and heaviest weight of the chosen typeface. For headlines of 3 or more words, break across 2 short lines for maximum visual impact. Support copy should be clearly lighter in weight. ${website || phone ? "Place contact info (phone/website) in a clean footer zone at the bottom of the ad." : "No contact info was provided — do not add a contact strip."} All text must be fully legible at social-feed viewing sizes.`,
+    ``,
+    `DESIGN TREATMENT: Choose one clean layout that works with the photo — (a) text in the lower portion on a smooth gradient scrim from transparent to dark; (b) a clean text panel on one side with the photo filling the other; (c) text placed in an open area of the photo with natural contrast. CTA as a clean pill or compact rectangle button with solid fill and high-contrast label. One optional thin horizontal accent rule (1–2px) between headline and support copy. No photo frames, no inset boxes, no callout badges, no decorative clutter. Premium-minimal — every element earns its place.`,
+    ``,
     logoFound
-      ? `LOGO: A real logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
-      : `BRANDING: No logo available — do not draw any logo, brand mark, or graphic symbol. Do not write any manufacturer or supplier name other than "${businessName}".`,
+      ? `LOGO: A real business logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
+      : `BRANDING: No logo available — do not draw any logo, brand mark, or graphic symbol. Do not write any equipment manufacturer, supplier, or third-party brand name other than "${businessName}".`,
+    ``,
+    `FINAL CHECK: The photographic scene must look exactly as uploaded — authentic grain, real-world materials, believable natural light, no stylization. The ad text sits cleanly on top. The final result should look like a real commercial ad creative built from a real business photograph — not like AI-generated art.`,
   ]
     .filter(Boolean)
     .join("\n");
