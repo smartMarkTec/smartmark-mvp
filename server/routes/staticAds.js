@@ -569,7 +569,9 @@ ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
 Please create a visually appealing, photorealistic advertisement for this business.
-Make it high quality, polished, and suitable as a real ad creative.
+Make it high quality, polished, simple, and suitable as a real ad creative.
+Keep the advertisement clean and not over the top.
+Do not include any people or humans in the advertisement.
 Use the business information above as the basis for the ad.
 Do not invent any contact details beyond what is listed above.
 ${logoFound ? "A real logo will be composited separately — do not draw a logo." : "Do not draw any logo or brand graphic symbol."}
