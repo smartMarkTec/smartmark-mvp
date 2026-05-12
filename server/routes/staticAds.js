@@ -393,42 +393,6 @@ function getIndustryScene(industry, hash, a = {}) {
   return null; // unknown industry — fall through to VISUAL_MOODS
 }
 
-/* Named layout recipes for controlled composition variety.
-   Principle: the photo is always the hero. Text sits naturally over or beside it with
-   minimal support. No inset photo boxes, no icon grids, no stacked decorative panels.
-   Variety comes from text placement, scrim style, and photo composition — not from structure. */
-const LAYOUT_RECIPES = [
-  // 0 — full-bleed, text lower with gradient scrim
-  "Full-bleed photographic scene fills the entire canvas. Headline and support copy sit in the lower portion with a smooth gradient scrim beneath them — the scrim fades naturally from fully transparent at center to a dark overlay at the bottom, giving text legible contrast without obscuring the photo. CTA as a small pill or compact rectangle with solid fill. No borders, no panels, no frames — just the photo and clean text.",
-
-  // 1 — premium split: light text panel left, photo right
-  "Split composition: the left 40–45% of the canvas is a clean, light panel — white, off-white, or a very light neutral background. The right 55–60% is the photographic scene, meeting the panel with a clean edge. On the left panel: headline in large, heavy, dark type broken across 2 lines for impact — this two-line format is essential for visual weight. Below the headline: a thin brand-accent color horizontal rule (1–2px), then the support copy in a smaller lighter weight. CTA or contact info at the bottom of the panel. The left panel must feel uncluttered — generous spacing, strong typographic hierarchy, nothing decorative beyond the accent rule. No additional footer strips or feature lists below — keep it clean.",
-
-  // 2 — photo left, text right
-  "The photographic scene fills the left 55–60% of the canvas. A clean, lightly colored background on the right holds the headline, support copy, and CTA stacked with clear spacing. No frames around the photo, no fake border at the edge, no extra decorative elements. The photo and text are the only things in the composition.",
-
-  // 3 — photo hero top, simple footer bar
-  "The photographic scene fills the upper 65–70% of the canvas. Below: a clean solid-color footer bar in a deep, grounded tone (dark navy, charcoal, or a strong brand color). The footer contains only: the CTA as a clearly styled button, and — if provided — the phone number or website in clean readable type. No icons, no multi-column service grids, no feature labels. The bar should feel like a clean professional ad footer, not a brochure panel. The photo does the storytelling; the bar provides the single next action.",
-
-  // 4 — minimal, text over open negative space
-  "Minimal full-bleed: the scene is chosen for open negative space — clear sky, open wall, simple floor — where text can sit directly on the photo with natural contrast. Short headline placed cleanly in the open area. A clean CTA button below. No scrim unless the photo genuinely needs contrast help, and if so, only a very light one. Nothing else. The photo sells the ad.",
-
-  // 5 — text-forward, photo background
-  "Text-forward layout: the headline is large and dominant in the upper half of the canvas. The photographic scene fills the full canvas or lower half as a natural background. Support copy and CTA sit below the headline with clear spacing. A simple smooth gradient may darken the upper area slightly for legibility if needed. No hard panels, no poster borders — text and photo coexist naturally.",
-
-  // 6 — photo hero with minimal CTA strip
-  "Strong photographic hero fills the top 70–75% of the canvas. Below: a simple, undecorated strip — solid color, just enough height for the CTA button and one contact line. No icons, no columns, no feature lists. The photo carries the message; the strip handles the single call to action.",
-
-  // 7 — centered text on vignette
-  "Full-scene photography with a smooth, natural vignette — the scene stays fully visible at center while edges darken gently to provide contrast zones for text. Headline centered or slightly upper-center in white or high-contrast text. CTA centered below as a clean styled button. Nothing else — no callout boxes, no additional layers. Scene, headline, CTA.",
-
-  // 8 — headline and offer prominent, photo as atmosphere
-  "The headline and offer text are given clear visual priority — set large and legibly over the photographic scene, which serves as atmosphere rather than the focal point. The photo may be slightly darkened or used as a full-canvas tonal background. A clearly styled CTA button sits below the headline block. No decorative badges, no callout boxes — the type itself is the design.",
-
-  // 9 — scene-first, almost no text
-  "Scene-first editorial layout: the photographic scene carries nearly all the visual weight. One short, confident headline — 4–5 words — placed in the lower third or a corner using natural photo contrast or a very light gradient strip. CTA small and understated below. Nothing else. This works when the scene is strong enough to sell the concept on its own.",
-];
-
 /* Returns true if a string looks like raw user input — first-person company voice,
    explicit claim/promise language, or percentage figures. These should not pass
    directly to the image prompt as ad copy. */
@@ -627,13 +591,13 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
     offer ? `  Offer: "${offer}"` : null,
     ``,
     `TEXT RULES — strictly enforced:`,
-    `  Every word of every text element must be completely visible and legible. No truncation, no clipping, no ellipsis. If text is tight, reduce font size — never cut words. Headline is the largest, boldest element. Supporting line is clearly smaller. CTA is a clean styled button with solid fill. Keep generous space between text elements. All text must stay at least 8% from every image edge.`,
+    `  Every word of every text element must be completely visible and legible. No truncation, no clipping, no ellipsis. If text is tight, reduce font size — never cut words. Headline is the largest, boldest element. Supporting line is clearly smaller. CTA as a clean styled button. Keep generous space between text elements. All text must stay at least 8% from every image edge.`,
     ``,
     hasContact
       ? `CONTACT — strictly enforced: Only show the exact contact details listed above. Never invent any website URL, domain name, or phone number.`
       : `CONTACT — strictly enforced: No website or phone was provided. Do NOT display any URL, domain name, or phone number anywhere in the image.`,
     ``,
-    `COMPOSITION: Clean, modern social ad. The photo is the hero — text sits naturally over or beside the scene with good contrast. A gradient scrim or semi-transparent strip is fine for legibility if needed; keep it subtle. CTA as a pill or rectangle button. No cluttered footers, no icon rows, no badge stickers, no brochure layouts. Minimal, premium, ad-quality.`,
+    `COMPOSITION: Clean, modern social ad. The photo is the hero. Place the headline, support line, and CTA wherever they create the strongest, most legible result for this specific scene — over the image, beside it, or in a minimal supporting zone. Use a scrim, open negative space, or light panel as needed; keep any supporting element unobtrusive. No cluttered footers, no icon rows, no badge stickers, no brochure panels. Minimal, premium, ad-quality.`,
     ``,
     logoFound
       ? `LOGO: A real business logo will be composited after generation. Do not draw any logo, brand mark, icon, emblem, or graphic symbol.`
@@ -752,9 +716,9 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     !website ? `No website was provided — do NOT display any website URL, domain, or web address anywhere in the image.` : null,
     !phone ? `No phone number was provided — do NOT display any phone number anywhere in the image.` : null,
     ``,
-    `TYPOGRAPHY: the headline is the dominant typographic element — set at the largest size and heaviest weight of the chosen typeface. For headlines of 3 or more words, break across 2 short lines for maximum visual impact. Support copy should be clearly lighter in weight. ${website || phone ? "Place contact info (phone/website) in a clean footer zone at the bottom of the ad." : "No contact info was provided — do not add a contact strip."} All text must be fully legible at social-feed viewing sizes.`,
+    `TYPOGRAPHY: The headline is the dominant text element — largest and boldest. Support copy is clearly smaller and lighter in weight. ${website || phone ? "Contact info (phone/website) should appear in a clean, legible location — wherever fits naturally in the layout." : "No contact info was provided — do not add a contact strip."} All text must be fully legible at social-feed viewing sizes and must not be cut off or clipped.`,
     ``,
-    `DESIGN TREATMENT: Choose one clean layout that works with the photo — (a) text in the lower portion on a smooth gradient scrim from transparent to dark; (b) a clean text panel on one side with the photo filling the other; (c) text placed in an open area of the photo with natural contrast. CTA as a clean pill or compact rectangle button with solid fill and high-contrast label. One optional thin horizontal accent rule (1–2px) between headline and support copy. No photo frames, no inset boxes, no callout badges, no decorative clutter. Premium-minimal — every element earns its place.`,
+    `DESIGN TREATMENT: Choose whatever clean layout works best for this specific photo. The composition should feel naturally assembled — text sitting comfortably over or beside the image with good contrast, a clean styled CTA button, and nothing decorative that doesn't earn its place. No photo frames, no inset boxes, no callout badges, no cluttered panels. Premium-minimal — the photo and the words are the entire design.`,
     ``,
     logoFound
       ? `LOGO: A real business logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
