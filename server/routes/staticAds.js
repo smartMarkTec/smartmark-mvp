@@ -540,70 +540,85 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 
 
 function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "", { logoFound = false } = {}) {
-  const businessName = clean(a.businessName || a.brand || "Your Brand");
+  const businessName = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
   const industry = inferIndustry(a);
-  const website = clean(a.website || a.url || "");
-  const phone = clean(a.phone || "");
-  const rawOffer = clean(craftedCopy.offer || a.offer || a.promo || "");
-  const hasOffer = rawOffer && !["no", "none", "n/a", "na", "-", "no offer", "no promo"].includes(rawOffer.trim().toLowerCase());
-  const offer = hasOffer ? clip(rawOffer, 70) : "";
-  const service = clean(a.mainBenefit || a.details || a.benefit || "");
+  const city = clean(a.city || "");
+  const state = clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
-  const location = a.city
-    ? (a.state ? `${clean(a.city)}, ${clean(a.state)}` : clean(a.city))
-    : clean(a.location || "");
+  const service = clean(a.mainBenefit || a.details || a.benefit || "");
+  const phone = clean(a.phone || "");
+  const website = clean(a.website || a.url || "");
 
+  const rawOffer = clean(craftedCopy.offer || a.offer || a.promo || "");
+  const hasOffer = rawOffer && !["no", "none", "n/a", "na", "-", "no offer", "no promo", "nothing"].includes(rawOffer.trim().toLowerCase());
+  const offer = hasOffer ? clip(rawOffer, 70) : "";
+
+  const locationText = [city, state].filter(Boolean).join(", ");
+
+  // Deterministic scene suggestion — different variationTokens get different photorealistic scenes.
+  // Passed as inspiration, not a mandate, so the model can adapt or choose an equally strong alternative.
   function tokenHash(s) {
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
     return Math.abs(h);
   }
-  const hash = variationToken
-    ? tokenHash(variationToken)
-    : Math.floor(Math.random() * 999983);
+  const hash = variationToken ? tokenHash(variationToken) : Math.floor(Math.random() * 999983);
+  const sceneSuggestion = getIndustryScene(industry, hash, a) || VISUAL_MOODS[(hash >> 3) % VISUAL_MOODS.length];
 
-  const moodIdx = (hash >> 3) % VISUAL_MOODS.length;
-  const industryScene = getIndustryScene(industry, hash, a);
-  const sceneDescription = industryScene || VISUAL_MOODS[moodIdx];
-  const noPersonClause = (industryScene || !sceneDescription.toLowerCase().includes("person"))
-    ? "No people in the scene unless the description above explicitly mentions one."
-    : null;
+  return `Create a beautiful, photorealistic advertisement for a local ${industry} business.
 
-  const hasContact = website || phone;
+This should feel like a polished modern ad creative — the kind ChatGPT/OpenAI generates from a natural user request.
+Not a flyer. Not a brochure. Not a Canva template. Not a rigid service-business layout.
 
-  return [
-    `Create a polished, photorealistic Facebook/Instagram ad for "${businessName}", a ${industry} business.`,
-    ``,
-    `SCENE: ${sceneDescription}`,
-    noPersonClause,
-    `Photograph this scene as a professional commercial photographer would — authentic natural lighting, real surface textures, genuine depth of field, subtle grain. Not illustration, CGI, or cartoon. A real photo.`,
-    ``,
-    service ? `SERVICE: ${service}` : null,
-    idealCustomer ? `CUSTOMER: ${idealCustomer}` : null,
-    location ? `LOCATION CONTEXT (background context only — do not use as a decorative label on the image): ${location}` : null,
-    ``,
-    `AD COPY — write the ad copy as part of the image, naturally:`,
-    `  Headline: one complete thought that speaks to what the customer gains. Examples: "Stay comfortable all year round." / "AC fixed same day." / "Roof replaced before the rain." / "Leak fixed fast." Keep it 5–8 words. Conversational, specific — not a brand slogan.`,
-    `  Supporting line: 1–2 short, specific sentences about this service.`,
-    `  CTA button: a strong, action-oriented button appropriate for this business.`,
-    offer ? `  Feature this exact promotion: "${offer}"` : null,
-    `All ad text must be fully legible — every word visible, no clipping, no truncation.`,
-    ``,
-    hasContact
-      ? `CONTACT — include exactly these details on the ad, no others:\n${phone ? `  Phone: ${phone}` : ""}${website ? `\n  Website: ${website}` : ""}\nNever invent any URL, domain, or phone number not listed here.`
-      : `CONTACT — no phone or website provided. Do not show any URL, domain, or phone number anywhere in the image.`,
-    `Do not add decorative city labels, geographic banners, or location design elements.`,
-    ``,
-    `LAYOUT: Full-bleed photograph as background. Ad copy sits naturally over the photo — placed wherever it reads best for this specific scene. Use a subtle gradient scrim or vignette for legibility. No split-panel layouts. No white sidebar panels. No footer strips. No icon rows. No decorative borders. No badges, seals, or sticker icons. Not a generic stock flyer. Not a Canva template. Clean, premium, naturally composed.`,
-    ``,
-    logoFound
-      ? `A real business logo will be composited after generation — do not draw any logo, icon, or brand graphic.`
-      : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large graphic emblem or brand identity mark — if the name appears, it is small supporting text only.`,
-    !offer ? `Do not invent any promotional offer or discount.` : null,
-    ``,
-    `QUALITY: Photorealistic, visually strong, and premium. This should look like a real ad a professional creative agency made specifically for this business — not a template, not a flyer, not a generic stock-image ad. A beautiful, natural commercial advertisement.`,
-    variationToken ? `Variation: ${variationToken}` : null,
-  ].filter(Boolean).join("\n");
+BUSINESS BRIEF:
+- Business name: ${businessName}
+- Industry: ${industry}
+${locationText ? `- Location: ${locationText}` : ""}
+${service ? `- Main service/benefit: ${service}` : ""}
+${idealCustomer ? `- Ideal customer: ${idealCustomer}` : ""}
+- Offer/promo: ${offer || "none"}
+- Phone: ${phone || "none"}
+- Website: ${website || "none"}
+
+CREATIVE DIRECTION:
+Create a premium, clean, tasteful ad with a strong photorealistic hero image.
+Make the design visually appealing first — not overly informational.
+Use elegant composition, natural spacing, tasteful typography, and a clear visual hierarchy.
+Simple, modern, uncluttered. A real polished advertisement.
+
+SCENE SUGGESTION for this variation — use this or an equally strong photorealistic alternative:
+${sceneSuggestion}
+No people unless the scene above explicitly includes them.
+
+AD COPY:
+Write the headline, supporting line, and CTA naturally as part of the image — from the customer's perspective.
+One short compelling headline. One brief supporting line. One clean CTA. Minimal text overall.
+Not "Reliable Residential HVAC Service." Not a stiff category label. Conversational, specific, human.
+All text must be fully legible — every word visible, no clipping, no truncation.
+
+ACCURACY — include exactly:
+- Business name: ${businessName}
+${phone ? `- Phone number: ${phone} (exact — do not alter or invent a different number)` : "- Do not include a phone number"}
+${website && website.toLowerCase() !== "none" ? `- Website: ${website} (exact — do not alter or invent a different URL)` : "- Do not include a website"}
+${offer ? `- Offer: ${offer} (exact — do not alter)` : "- Do not invent any offer, discount, or promotion"}
+- Do not add decorative city/state banners or geographic labels as design elements
+
+LAYOUT:
+Full-bleed photorealistic photo as background. Ad copy naturally placed over the photo.
+No split-panel layouts. No white sidebar panels. No footer strips. No icon rows.
+No badges, seals, or sticker icons. No giant fake logo or oversized business-name block.
+Not a flyer. Not a Canva template. Clean and premium.
+
+BRANDING:
+${logoFound
+  ? "A real logo will be composited after generation — do not draw any logo or brand graphic."
+  : `Do not draw any logo, icon, or brand graphic. Do not render "${businessName}" as a large graphic emblem — if the name appears, it is small supporting text only.`}
+
+QUALITY:
+Photorealistic commercial photography. Beautiful composition. Natural, tasteful, premium.
+This should look like a professional creative agency made this ad specifically for this business — not a template, not a flyer.
+
+Variation: ${variationToken}`;
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
