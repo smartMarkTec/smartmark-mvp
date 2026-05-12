@@ -901,6 +901,9 @@ export default function FormPage() {
   // Optional user-uploaded photo — scoped to this session only, never persisted
   const [userUploadedImage, setUserUploadedImage] = useState(null);
   const uploadInputRef = useRef(null);
+  // "asis" = use the uploaded image directly as the creative
+  // "ai"   = run the uploaded image through the AI design/overlay path
+  const [uploadMode, setUploadMode] = useState("ai");
 
   const [regenLimit, setRegenLimit] = useState(IMAGE_GEN_MAX_RUNS_PER_WINDOW);
   const [imageLoading, setImageLoading] = useState(false);
@@ -2008,6 +2011,45 @@ async function generatePosterBPair(runToken) {
     e.target.value = ""; // allow re-selecting the same file later
   }
 
+  // "Use as-is" path: upload the DataURL straight to the media server, get a
+  // real server URL, and put it into imageUrls just like an AI-generated image.
+  // No AI processing — the user's photo becomes the creative as-is.
+  async function handleUploadAsIs() {
+    if (!userUploadedImage) return;
+    setImageLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/media/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl: userUploadedImage }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !data.urls?.[0]) {
+        throw new Error(data.error || "Upload failed — please try again.");
+      }
+      const serverUrl = toAbsoluteMedia(data.urls[0]);
+      setImageUrls([serverUrl]);
+      setActiveImage(0);
+      setImageUrl(serverUrl);
+      setHasGenerated(true);
+      // Cache as DataURL so the preview survives Render restarts
+      cacheImagesFor24h(getActiveCtx(), [serverUrl]).catch(() => {});
+      // Preserve whatever copy already exists from the conversation
+      const draftId = creativeIdFromUrl(serverUrl);
+      saveImageDraftById(draftId, {
+        headline: (editHeadline || result?.headline || "").slice(0, 55),
+        body: editBody || result?.body || "",
+        overlay: normalizeOverlayCTA(editCTA || answers?.cta || ""),
+      });
+    } catch (err) {
+      const msg = String(err?.message || "Photo upload failed.");
+      setError(msg);
+    } finally {
+      setImageLoading(false);
+    }
+  }
+
   async function handleRegenerateImage() {
     if (!canRunImageGen()) {
       const msg = quotaMessage();
@@ -2538,7 +2580,9 @@ async function generatePosterBPair(runToken) {
                 />
 
                 {userUploadedImage ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  /* Photo is uploaded — show thumbnail, mode toggle, remove */
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {/* Thumbnail */}
                     <img
                       src={userUploadedImage}
                       alt="Your photo"
@@ -2551,13 +2595,49 @@ async function generatePosterBPair(runToken) {
                         borderRadius: 6,
                         border: "2px solid #8f87ff",
                         cursor: "pointer",
+                        flexShrink: 0,
                       }}
                     />
-                    <span style={{ fontSize: 11, color: "#7b74c0", fontWeight: 600, whiteSpace: "nowrap" }}>
-                      Custom photo
-                    </span>
+
+                    {/* Mode toggle — the user's explicit choice */}
+                    <div style={{ display: "flex", borderRadius: 7, overflow: "hidden", border: "1px solid #ddd8ed", flexShrink: 0 }}>
+                      <button
+                        onClick={() => setUploadMode("asis")}
+                        title="Use your photo exactly as-is — no AI changes"
+                        style={{
+                          background: uploadMode === "asis" ? "#6c63d4" : "rgba(255,255,255,0.85)",
+                          color: uploadMode === "asis" ? "#fff" : "#7b74c0",
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Use as-is
+                      </button>
+                      <button
+                        onClick={() => setUploadMode("ai")}
+                        title="Let Smartemark AI design a polished ad from your photo"
+                        style={{
+                          background: uploadMode === "ai" ? "#6c63d4" : "rgba(255,255,255,0.85)",
+                          color: uploadMode === "ai" ? "#fff" : "#7b74c0",
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        AI design
+                      </button>
+                    </div>
+
+                    {/* Remove */}
                     <button
-                      onClick={() => setUserUploadedImage(null)}
+                      onClick={() => { setUserUploadedImage(null); setUploadMode("ai"); }}
                       title="Remove custom photo"
                       style={{
                         background: "none",
@@ -2567,12 +2647,14 @@ async function generatePosterBPair(runToken) {
                         fontSize: 13,
                         padding: 2,
                         lineHeight: 1,
+                        flexShrink: 0,
                       }}
                     >
                       <FaTimes />
                     </button>
                   </div>
                 ) : (
+                  /* No photo — show upload affordance */
                   <button
                     onClick={() => uploadInputRef.current?.click()}
                     title="Add your own photo (optional)"
@@ -2597,7 +2679,7 @@ async function generatePosterBPair(runToken) {
                 )}
               </div>
 
-              {/* Regenerate — neutral, clean styling */}
+              {/* Action button — label and handler depend on upload mode */}
               <button
                 style={{
                   background: "none",
@@ -2612,14 +2694,17 @@ async function generatePosterBPair(runToken) {
                   alignItems: "center",
                   gap: 6,
                   opacity: imageLoading ? 0.5 : 1,
+                  whiteSpace: "nowrap",
                 }}
-                onClick={handleRegenerateImage}
+                onClick={userUploadedImage && uploadMode === "asis" ? handleUploadAsIs : handleRegenerateImage}
                 disabled={imageLoading}
-                title="Regenerate Image Ad"
+                title={userUploadedImage && uploadMode === "asis" ? "Use this photo as your ad creative" : "Regenerate Image Ad"}
               >
                 <FaSyncAlt style={{ fontSize: 13 }} />
-                {imageLoading || generating ? <Dotty /> : "Regenerate"}
-              </button>
+                {imageLoading || generating
+                  ? <Dotty />
+                  : (userUploadedImage && uploadMode === "asis" ? "Use photo" : "Regenerate")
+                }</button>
             </div>
 
             {/* ✅ put this OUTSIDE the button */}
