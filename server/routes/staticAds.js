@@ -568,17 +568,18 @@ ${offer ? `Offer: ${offer}` : ""}
 ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
-Please create a visually appealing, photorealistic advertisement for this business.
+Please create this as a professional commercial photography image — not a stylized graphic, not CGI, not a 3D render, not digitally illustrated. It must look like a real photograph taken with a camera.
+The image must have realistic lighting, realistic materials and textures, realistic shadows, and natural camera depth of field.
 Make it high quality, polished, simple, clean, and suitable as a real ad creative.
 Keep the advertisement uncluttered and not over the top.
 Do not include any people or humans in the advertisement.
 Use only a small number of simple, realistic visual subjects that are natural for this type of business.
 ${/hvac|heating|cooling|air.?cond/i.test(industry) ? `For this HVAC business, use realistic HVAC-related visual subjects such as an AC unit, a house exterior, an AC unit beside a house, a thermostat, a ceiling vent, a furnace, an air handler, or another natural HVAC scene — but do not cram too many HVAC elements into one image. Usually one main subject or one main subject plus one supporting element is enough.` : `Use simple, realistic visual subjects relevant to a ${industry || "local service"} business. Do not cram too many elements into one image.`}
 Avoid weird or random image concepts.
-Make the image look as photorealistic and real-life as possible, not a cartoon or illustration.
+The final image must look like a real photograph — not a digital render, not an illustration, not cartoon-style.
 Use the business information above as the basis for the ad.
 Do not invent any contact details beyond what is listed above.
-${logoFound ? "A real logo will be composited separately — do not draw a logo." : "Do not draw any logo or brand graphic symbol."}
+${logoFound ? "A real business logo will be composited separately — do not draw any logo or brand symbol in the image." : "Do not draw any logo, brand mark, or manufacturer brand symbol. Do not add any equipment manufacturer branding (such as Trane, Carrier, Lennox, Rheem, Goodman, or similar) as a graphic element in the advertisement."}
 
 Variation token: ${variationToken}`;
 }
@@ -714,7 +715,7 @@ async function generateOpenAIAdImageBuffers({
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
 
   const payload = JSON.stringify({
     model,
