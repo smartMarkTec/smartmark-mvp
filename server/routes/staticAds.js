@@ -557,25 +557,27 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Create a high-quality photorealistic marketing image for this business.
+  return `Create a clean, modern, full advertisement for this business.
 
 Business name: ${businessName}
-Industry: ${industry || "local service business"}
+Industry: ${industry || "local business"}
 Location: ${locationText || "local area"}
 Ideal customer: ${idealCustomer || "local customers"}
 Main benefit or service: ${mainBenefit || "high-quality service"}
-${offer ? `Offer context: ${offer}` : ""}
+${offer ? `Offer: ${offer}` : ""}
+${phone ? `Phone: ${phone}` : ""}
+${website ? `Website: ${website}` : ""}
 
-Create the visual background image only.
-Do not create a flyer.
-Do not render any text, words, letters, numbers, phone numbers, website URLs, slogans, headlines, captions, labels, badges, logos, brand marks, manufacturer logos, footer bars, buttons, or typography inside the image.
-
-Make the image look like real-life professional photography — not CGI, not a 3D render, not cartoonish, and not illustrated.
-Use a simple, clean, realistic visual scene that makes sense for this business.
-Do not include any people or humans.
-Keep the image clean and not over the top.
-
-The image should be suitable as the visual background for a marketing ad, where the app will handle the ad copy separately.
+Generate the entire advertisement directly as an AI image.
+Make it look like a polished, professional ad creative that ChatGPT/OpenAI would generate from a user request.
+Use a high-quality, realistic visual scene that makes sense for the business.
+For HVAC, this can include a home exterior, AC unit, thermostat, vent, heating/cooling equipment, or other natural HVAC/home comfort visuals.
+Make it look like a complete service advertisement with strong design, good typography, attractive copy, and a clear call-to-action area.
+Keep the design professional, clean, and not overly cluttered.
+Do not include people or humans.
+Make the image look realistic and high quality, not cartoonish or cheaply rendered.
+Do not use random manufacturer logos like Trane, Carrier, Lennox, Goodman, Rheem, or York unless they are part of the actual business branding.
+Use the business information above as the basis for the ad.
 
 Variation token: ${variationToken}`;
 }

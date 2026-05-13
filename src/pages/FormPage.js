@@ -2119,7 +2119,11 @@ async function generatePosterBPair(runToken) {
 
     const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
     const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
-    const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
+    const safeLocation = (
+      [a.city, a.state].filter(Boolean).join(", ") ||
+      a.location ||
+      "Your City"
+    ).toString().trim().slice(0, 60);
 
     const knobs = {
       size: "1080x1080",
