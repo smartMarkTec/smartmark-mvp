@@ -557,27 +557,15 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Create a clean, modern, full advertisement for this business.
+  return `Generate a simple ${industry || "business"} ad, no people in it.
 
 Business name: ${businessName}
-Industry: ${industry || "local business"}
 Location: ${locationText || "local area"}
 Ideal customer: ${idealCustomer || "local customers"}
 Main benefit or service: ${mainBenefit || "high-quality service"}
 ${offer ? `Offer: ${offer}` : ""}
 ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
-
-Generate the entire advertisement directly as an AI image.
-Make it look like a polished, professional ad creative that ChatGPT/OpenAI would generate from a user request.
-Use a high-quality, realistic visual scene that makes sense for the business.
-For HVAC, this can include a home exterior, AC unit, thermostat, vent, heating/cooling equipment, or other natural HVAC/home comfort visuals.
-Make it look like a complete service advertisement with strong design, good typography, attractive copy, and a clear call-to-action area.
-Keep the design professional, clean, and not overly cluttered.
-Do not include people or humans.
-Make the image look realistic and high quality, not cartoonish or cheaply rendered.
-Do not use random manufacturer logos like Trane, Carrier, Lennox, Goodman, Rheem, or York unless they are part of the actual business branding.
-Use the business information above as the basis for the ad.
 
 Variation token: ${variationToken}`;
 }
