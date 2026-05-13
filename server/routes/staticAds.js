@@ -559,7 +559,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   return `IMPORTANT: Do not include any random manufacturer logo, fake brand mark, or equipment brand badge anywhere in the image. Do not include Trane, Carrier, Lennox, Rheem, Goodman, York, or similar manufacturer branding as a design element. ${logoFound ? "A real business logo will be composited separately — do not draw any logo or brand symbol." : "No real business logo is provided — do not invent one."}
 
-Create a high-end modern marketing ad creative for this specific business.
+Create a clean, modern, full HVAC-style advertisement for this specific business.
 
 Business name: ${businessName}
 Industry: ${industry || "local service business"}
@@ -570,15 +570,16 @@ ${offer ? `Offer: ${offer}` : ""}
 ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
-Please create a polished, visually appealing ad creative based on this business information.
-Make it look premium, modern, clean, and suitable for a real marketing campaign.
-Do not make it look like a generic HVAC contractor flyer.
-Let OpenAI decide the layout, composition, text style, and creative approach naturally.
-Keep the advertisement simple, clean, and not over the top.
-Use imagery that makes sense for the business and feels natural.
-Do not include any people or humans.
-Make the visual look like real-life professional photography — not CGI, not a 3D render, not cartoonish, and not illustrated.
+Generate the entire advertisement directly as an AI image.
+Do not create just a plain photo — create a polished service ad with a strong visual layout, professional typography, attractive marketing copy, and clear visual hierarchy.
+For HVAC ads, use a hyper-realistic residential home scene with an outdoor AC condenser and house exterior; optionally include a smart thermostat or air vent if it fits naturally.
+Use a polished HVAC service-ad look with bold blue/red/white branding, a strong headline, simple service icons, and a clean call-to-action footer area.
+The ad should look like a complete professional HVAC advertisement, similar to a high-quality ChatGPT-generated ad creative.
+Keep it professional and not overly cluttered.
+No people or humans.
+Make the image look hyper-realistic and real-life — not CGI, not a 3D render, not cartoonish, and not illustrated.
 Do not invent any contact details beyond what is listed above.
+Let OpenAI generate the full composition, design, copy, typography, and layout as one image.
 
 Variation token: ${variationToken}`;
 }
