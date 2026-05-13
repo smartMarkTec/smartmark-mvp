@@ -557,7 +557,7 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Create a beautiful advertisement for this business.
+  return `Create a complete, professionally designed advertisement for this business.
 
 Business name: ${businessName}
 Industry: ${industry || "local service business"}
@@ -568,16 +568,13 @@ ${offer ? `Offer: ${offer}` : ""}
 ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
-Please create this as a professional commercial photography image — not a stylized graphic, not CGI, not a 3D render, not digitally illustrated. It must look like a real photograph taken with a camera.
-The image must have realistic lighting, realistic materials and textures, realistic shadows, and natural camera depth of field.
-Make it high quality, polished, simple, clean, and suitable as a real ad creative.
-Keep the advertisement uncluttered and not over the top.
-Do not include any people or humans in the advertisement.
-Use only a small number of simple, realistic visual subjects that are natural for this type of business.
-${/hvac|heating|cooling|air.?cond/i.test(industry) ? `For this HVAC business, use realistic HVAC-related visual subjects such as an AC unit, a house exterior, an AC unit beside a house, a thermostat, a ceiling vent, a furnace, an air handler, or another natural HVAC scene — but do not cram too many HVAC elements into one image. Usually one main subject or one main subject plus one supporting element is enough.` : `Use simple, realistic visual subjects relevant to a ${industry || "local service"} business. Do not cram too many elements into one image.`}
-Avoid weird or random image concepts.
-The final image must look like a real photograph — not a digital render, not an illustration, not cartoon-style.
-Use the business information above as the basis for the ad.
+Please create a full ad creative, not just a plain product photo.
+Make it look like a polished marketing advertisement with strong visual design, attractive ad copy, tasteful typography, and a high-quality photorealistic visual.
+Let OpenAI decide the layout, composition, text style, and creative approach naturally.
+Keep it clean, simple, and not over the top.
+Use imagery that makes sense for the business and feels natural.
+Do not include any people or humans.
+Make the visual look like real-life professional photography — not CGI, not a 3D render, not cartoonish, and not illustrated.
 Do not invent any contact details beyond what is listed above.
 ${logoFound ? "A real business logo will be composited separately — do not draw any logo or brand symbol in the image." : "Do not draw any logo, brand mark, or manufacturer brand symbol. Do not add any equipment manufacturer branding (such as Trane, Carrier, Lennox, Rheem, Goodman, or similar) as a graphic element in the advertisement."}
 
