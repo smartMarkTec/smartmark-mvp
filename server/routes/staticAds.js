@@ -557,7 +557,9 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Create a complete, professionally designed advertisement for this business.
+  return `IMPORTANT: Do not include any random manufacturer logo, fake brand mark, or equipment brand badge anywhere in the image. Do not include Trane, Carrier, Lennox, Rheem, Goodman, York, or similar manufacturer branding as a design element. ${logoFound ? "A real business logo will be composited separately — do not draw any logo or brand symbol." : "No real business logo is provided — do not invent one."}
+
+Create a high-end modern marketing ad creative for this specific business.
 
 Business name: ${businessName}
 Industry: ${industry || "local service business"}
@@ -568,15 +570,15 @@ ${offer ? `Offer: ${offer}` : ""}
 ${phone ? `Phone: ${phone}` : ""}
 ${website ? `Website: ${website}` : ""}
 
-Please create a full ad creative, not just a plain product photo.
-Make it look like a polished marketing advertisement with strong visual design, attractive ad copy, tasteful typography, and a high-quality photorealistic visual.
+Please create a polished, visually appealing ad creative based on this business information.
+Make it look premium, modern, clean, and suitable for a real marketing campaign.
+Do not make it look like a generic HVAC contractor flyer.
 Let OpenAI decide the layout, composition, text style, and creative approach naturally.
-Keep it clean, simple, and not over the top.
+Keep the advertisement simple, clean, and not over the top.
 Use imagery that makes sense for the business and feels natural.
 Do not include any people or humans.
 Make the visual look like real-life professional photography — not CGI, not a 3D render, not cartoonish, and not illustrated.
 Do not invent any contact details beyond what is listed above.
-${logoFound ? "A real business logo will be composited separately — do not draw any logo or brand symbol in the image." : "Do not draw any logo, brand mark, or manufacturer brand symbol. Do not add any equipment manufacturer branding (such as Trane, Carrier, Lennox, Rheem, Goodman, or similar) as a graphic element in the advertisement."}
 
 Variation token: ${variationToken}`;
 }
