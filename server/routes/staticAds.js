@@ -603,20 +603,30 @@ async function expandToImagePrompt(a = {}, offerOverride = "") {
   ].filter(Boolean).join("\n");
 
   const system =
-    "You write detailed image generation prompts for OpenAI's gpt-image-1 model. " +
-    "Given a business brief, write one vivid, specific prompt that will produce a high-quality advertisement image. " +
-    "Describe: the photorealistic scene, lighting, composition, any text/headline/contact info to include in the ad design, color palette, and layout style. " +
-    "The output should look like a professional ad creative — not a flyer. No people in the image. " +
-    "Write as one natural paragraph. Be specific and evocative. Do not use bullet points or headers.";
+    "You write image generation prompts for OpenAI's gpt-image-1 model. " +
+    "Your goal: produce a cinematic, photorealistic advertisement image — the kind that looks like premium brand photography, NOT a contractor flyer or Canva template. " +
+    "" +
+    "Given a business brief, write ONE vivid prompt describing a full-bleed SCENE, not a layout. " +
+    "Think: full-bleed cinematic photograph with minimal clean text overlay. Like a high-end local service brand ad. " +
+    "" +
+    "Your prompt must describe: " +
+    "(1) A compelling, specific outdoor or indoor scene relevant to the business — home exterior at golden hour, rooftop with equipment, cozy lit interior, close-up of quality equipment in a beautiful setting. " +
+    "(2) Cinematic lighting quality — golden hour warmth, soft natural window light, dramatic shadows, atmospheric depth. " +
+    "(3) Aspirational mood — premium, comfortable, modern, trustworthy. " +
+    "(4) Minimal text in the image — at most the business name and a short 4–6 word headline. Clean, modern font, lightly overlaid. " +
+    "(5) Any lifestyle or environmental context suggesting the service benefit — without being generic. " +
+    "" +
+    "Do NOT describe: split panels, white sidebar boxes, service icon bullet lists, footer bars, multi-section layouts, Canva-style design, or heavy text-heavy compositions. " +
+    "No people in the image. Write as one natural paragraph. Be specific, cinematic, and evocative.";
 
   const payload = JSON.stringify({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    model: process.env.OPENAI_MODEL || "gpt-4o",
     messages: [
       { role: "system", content: system },
       { role: "user", content: `Write an image generation prompt for this ad:\n\n${brief}` },
     ],
-    max_tokens: 350,
-    temperature: 0.8,
+    max_tokens: 400,
+    temperature: 0.85,
   });
 
   try {
