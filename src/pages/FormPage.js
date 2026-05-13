@@ -2746,7 +2746,7 @@ async function generatePosterBPair(runToken) {
               <img
                 src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
                 alt="Ad Preview"
-                style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+                style={{ width: "100%", maxHeight: 340, objectFit: "contain", borderRadius: 0, cursor: "pointer", background: "#111" }}
                 onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
                 onError={() => {
                   setImgFail((p) => ({ ...p, [activeImage]: true }));

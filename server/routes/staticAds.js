@@ -570,6 +570,80 @@ ${website ? `Website: ${website}` : ""}
 Variation token: ${variationToken}`;
 }
 
+/* ------------------------ Prompt expansion via GPT-4o-mini ------------------------
+   ChatGPT produces better ad images because it internally expands the user's brief into
+   a detailed visual description before calling gpt-image-1. This function replicates that:
+   it takes the raw business brief and asks GPT-4o-mini to write a vivid image prompt,
+   then that expanded prompt goes to gpt-image-1 instead of the sparse brief.
+   Falls back to null on any failure — caller uses buildAdPromptFromAnswers as the fallback. */
+
+async function expandToImagePrompt(a = {}, offerOverride = "") {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  const businessName = clean(a.businessName || a.brand || "Local Business");
+  const industry     = clean(a.industry || a.businessType || a.niche || "business");
+  const city         = clean(a.city || "");
+  const state        = clean(a.state || "");
+  const mainBenefit  = clean(a.mainBenefit || a.details || a.benefit || "");
+  const phone        = clean(a.phone || "");
+  const website      = clean(a.website || a.url || "");
+  const rawOffer     = clean(offerOverride || a.offer || a.promo || "");
+  const hasOffer     = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
+  const locationText = [city, state].filter(Boolean).join(", ");
+
+  const brief = [
+    `Business: ${businessName}`,
+    `Industry: ${industry}`,
+    locationText              ? `Location: ${locationText}` : null,
+    mainBenefit               ? `Service/benefit: ${mainBenefit}` : null,
+    hasOffer                  ? `Promotion: ${rawOffer}` : null,
+    phone                     ? `Phone: ${phone}` : null,
+    website                   ? `Website: ${website}` : null,
+  ].filter(Boolean).join("\n");
+
+  const system =
+    "You write detailed image generation prompts for OpenAI's gpt-image-1 model. " +
+    "Given a business brief, write one vivid, specific prompt that will produce a high-quality advertisement image. " +
+    "Describe: the photorealistic scene, lighting, composition, any text/headline/contact info to include in the ad design, color palette, and layout style. " +
+    "The output should look like a professional ad creative — not a flyer. No people in the image. " +
+    "Write as one natural paragraph. Be specific and evocative. Do not use bullet points or headers.";
+
+  const payload = JSON.stringify({
+    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: `Write an image generation prompt for this ad:\n\n${brief}` },
+    ],
+    max_tokens: 350,
+    temperature: 0.8,
+  });
+
+  try {
+    const { status, body: respBuf } = await fetchUpstream(
+      "POST",
+      "https://api.openai.com/v1/chat/completions",
+      { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      Buffer.from(payload),
+      12000
+    );
+
+    if (status === 200) {
+      const parsed = JSON.parse(respBuf.toString("utf8"));
+      const expanded = (parsed?.choices?.[0]?.message?.content || "").trim();
+      if (expanded.length > 60) {
+        console.log("[expand-prompt] success:", expanded.length, "chars");
+        return expanded;
+      }
+    } else {
+      console.warn("[expand-prompt] GPT returned status", status);
+    }
+  } catch (err) {
+    console.warn("[expand-prompt] failed:", err?.message || err);
+  }
+  return null;
+}
+
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
 
 /* Build a multipart/form-data body from fields and file parts. */
@@ -1142,7 +1216,13 @@ router.post("/generate-static-ad", async (req, res) => {
       });
     } else {
       // Standard text-to-image path.
-      const prompt = buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
+      // Try to expand the business brief into a vivid image prompt via GPT-4o-mini
+      // (same internal step ChatGPT applies before calling gpt-image-1).
+      // Falls back to the simple direct prompt if expansion fails.
+      const expandedPrompt = await expandToImagePrompt(a, craftedCopy.offer || "");
+      const prompt = expandedPrompt
+        || buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
+      console.log("[generate-static-ad] prompt source:", expandedPrompt ? "expanded" : "fallback");
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
         size: "1024x1024",
