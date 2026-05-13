@@ -578,6 +578,10 @@ Variation token: ${variationToken}`;
    Falls back to null on any failure — caller uses buildAdPromptFromAnswers as the fallback. */
 
 async function expandToImagePrompt(a = {}, offerOverride = "") {
+  // Disabled: expansion was producing flyer-style prompts that gpt-image-1 rendered
+  // as template layouts. Using direct business brief (buildAdPromptFromAnswers) instead.
+  return null;
+
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
 
@@ -1233,6 +1237,7 @@ router.post("/generate-static-ad", async (req, res) => {
       const prompt = expandedPrompt
         || buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
       console.log("[generate-static-ad] prompt source:", expandedPrompt ? "expanded" : "fallback");
+      console.log("[generate-static-ad] final prompt:", prompt.slice(0, 300));
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
         size: "1024x1024",
