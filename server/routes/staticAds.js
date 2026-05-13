@@ -557,19 +557,25 @@ function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "",
 
   const locationText = [city, state].filter(Boolean).join(", ");
 
-  return `Generate an advertisement for this business based on the information below.
+  return `Create a high-quality photorealistic marketing image for this business.
 
 Business name: ${businessName}
-Industry: ${industry || "local business"}
+Industry: ${industry || "local service business"}
 Location: ${locationText || "local area"}
 Ideal customer: ${idealCustomer || "local customers"}
 Main benefit or service: ${mainBenefit || "high-quality service"}
-${offer ? `Offer: ${offer}` : ""}
-${phone ? `Phone: ${phone}` : ""}
-${website ? `Website: ${website}` : ""}
+${offer ? `Offer context: ${offer}` : ""}
 
-Create the ad as a complete AI-generated image.
-Use the business information above as the basis for the advertisement.
+Create the visual background image only.
+Do not create a flyer.
+Do not render any text, words, letters, numbers, phone numbers, website URLs, slogans, headlines, captions, labels, badges, logos, brand marks, manufacturer logos, footer bars, buttons, or typography inside the image.
+
+Make the image look like real-life professional photography — not CGI, not a 3D render, not cartoonish, and not illustrated.
+Use a simple, clean, realistic visual scene that makes sense for this business.
+Do not include any people or humans.
+Keep the image clean and not over the top.
+
+The image should be suitable as the visual background for a marketing ad, where the app will handle the ad copy separately.
 
 Variation token: ${variationToken}`;
 }
