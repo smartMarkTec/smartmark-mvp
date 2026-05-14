@@ -482,53 +482,47 @@ async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x102
 }
 
 /* Build the prompt for the image-edit path (user uploaded their own photo).
-   The photo already provides the scene — we only need to describe:
-   1. How to preserve its photographic quality (strongly)
-   2. What ad text elements to add on top of it
-   This prompt must produce results at the same quality bar as the main generation path. */
+   The uploaded photo is a creative foundation — the model should transform it into
+   a polished ad, not just paste text on top of whatever was uploaded. */
 function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = false } = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = clean(a.website || a.url || "");
   const phone = clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
-  const headline = deriveHeadline(a, craftedCopy); // deriveHeadline handles its own truncation
+  const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
+  const contextLines = [
+    `Business: ${businessName}`,
+    `Industry: ${industry}`,
+    headline    ? `Headline: "${headline}"` : null,
+    supportLine ? `Tagline: "${supportLine}"` : null,
+    `CTA: "${cta}"`,
+    offer   ? `Offer: "${offer}"` : null,
+    website ? `Website: ${website}` : null,
+    phone   ? `Phone: ${phone}` : null,
+  ].filter(Boolean).join("\n");
+
   return [
-    `This is a real photograph uploaded by "${businessName}", a ${industry} business. Add a premium, professional Facebook/Instagram ad text treatment to this photo. The result must be a polished, ad-quality creative — clean, modern, and visually strong.`,
+    `Transform this uploaded business photo into a high-quality, polished advertisement image for "${businessName}", a ${industry} business.`,
     ``,
-    `PRESERVE THE PHOTOGRAPH — THIS IS THE MOST IMPORTANT DIRECTIVE:`,
-    `The photograph must remain completely unchanged in photographic quality, style, lighting, grain, and content. Do NOT alter, restyle, redraw, or transform any part of the scene. You are adding text and a CTA button as an overlay only — not redesigning the image. The photo is the background: keep it looking exactly like a real photograph.`,
+    `Use the uploaded photo as the creative foundation. Keep its essential subject matter, but improve the overall visual presentation to make the result feel like a professionally designed ad creative — lively, attractive, and polished. If the original photo is flat, gloomy, dimly lit, or compositionally weak, enhance it: improve the mood, brighten the scene naturally, and make it feel more vibrant and inviting. The result should feel energetic and appealing, not dull or gloomy.`,
     ``,
-    `DO NOT apply any of these styles to the photo or the overall result: illustration, digital painting, cartoon, anime, watercolor, comic-book look, CGI render, plastic-looking CGI surfaces, fantasy lighting, overly smooth AI-synthesis texture, hand-drawn aesthetics, or any treatment that makes the image look generated, stylized, or non-photographic. The photo must stay a photograph — real, grain-authentic, and untouched.`,
+    `Keep the result photorealistic. Do not turn it into a cartoon, illustration, painting, or any non-photographic style. Keep it clean, simple, and professional. No people in the image. Let the AI decide the best overall ad composition and visual treatment naturally.`,
     ``,
-    `AD COPY TO ADD:`,
-    `  Headline: "${headline}"`,
-    supportLine ? `  Support text: "${supportLine}"` : null,
-    `  CTA: "${cta}"`,
-    website ? `  Website: ${website}` : null,
-    phone ? `  Phone: ${phone}` : null,
-    offer ? `  Promo: "${offer}"` : `  Do not invent any promotional offer or discount.`,
+    `Business context for the ad:`,
+    contextLines,
     ``,
-    `CONTACT IDENTITY — strictly enforced: Only display the exact contact details listed above. Never invent, guess, or hallucinate any website URL, domain name, or phone number.`,
-    !website ? `No website was provided — do NOT display any website URL, domain, or web address anywhere in the image.` : null,
-    !phone ? `No phone number was provided — do NOT display any phone number anywhere in the image.` : null,
-    ``,
-    `TYPOGRAPHY: The headline is the dominant text element — largest and boldest. Support copy is clearly smaller and lighter in weight. ${website || phone ? "Contact info (phone/website) should appear in a clean, legible location — wherever fits naturally in the layout." : "No contact info was provided — do not add a contact strip."} All text must be fully legible at social-feed viewing sizes and must not be cut off or clipped.`,
-    ``,
-    `DESIGN TREATMENT: Choose whatever clean layout works best for this specific photo. The composition should feel naturally assembled — text sitting comfortably over or beside the image with good contrast, a clean styled CTA button, and nothing decorative that doesn't earn its place. No photo frames, no inset boxes, no callout badges, no cluttered panels. Premium-minimal — the photo and the words are the entire design.`,
+    `Only display the exact contact details listed above. Never invent or hallucinate any website URL, phone number, or contact information.`,
+    !website ? `No website was provided — do not display any URL or web address.` : null,
+    !phone   ? `No phone number was provided — do not display any phone number.` : null,
     ``,
     logoFound
-      ? `LOGO: A real business logo will be composited after generation — do not draw any logo, brand mark, icon, or emblem.`
-      : `BRANDING: Do not draw any logo, brand mark, icon, or graphic symbol. Do not render "${businessName}" as a large brand identity mark or logo-style emblem — if the name appears, it is small supporting text only. Do not write any equipment manufacturer or third-party brand name.`,
-    `Do not add any decorative city label, geographic banner, or location line — location belongs only within the natural copy text, not as a separate design element.`,
-    ``,
-    `FINAL CHECK: The photographic scene must look exactly as uploaded — authentic grain, real-world materials, believable natural light, no stylization. The ad text sits cleanly on top. The final result should look like a real commercial ad creative built from a real business photograph — not like AI-generated art.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+      ? `A real business logo will be composited onto the image after generation — do not draw any logo or brand mark.`
+      : `Do not draw any logo, brand mark, icon, or third-party equipment manufacturer name.`,
+  ].filter(Boolean).join("\n");
 }
 
 /* ------------------------ OpenAI Image ------------------------ */
