@@ -432,6 +432,41 @@ router.get("/health", (_req, res) => {
   });
 });
 
+/* ========= checkout-session-info (used by /post-checkout page) =========
+   Returns the customer email + planKey from a completed Stripe checkout session.
+   Does NOT require authentication. Only returns data from paid sessions.
+   The /post-checkout page uses this to pre-fill the email in the account creation form. */
+router.get("/checkout-session-info", async (req, res) => {
+  try {
+    const sessionId = String(req.query?.session_id || "").trim();
+    if (!sessionId) {
+      return res.status(400).json({ ok: false, error: "Missing session_id" });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ ok: false, error: "Payment not completed" });
+    }
+
+    const email = String(
+      session?.customer_details?.email ||
+        session?.customer_email ||
+        session?.metadata?.email ||
+        ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const planKey = String(session?.metadata?.planKey || req.query?.plan || "").trim();
+
+    return res.json({ ok: true, email, planKey, sessionId });
+  } catch (err) {
+    console.error("[stripe] checkout-session-info error:", err);
+    return res.status(500).json({ ok: false, error: err?.message || "Failed to retrieve session" });
+  }
+});
+
 /* ========= public checkout after signup ========= */
 router.post("/create-checkout-session", async (req, res) => {
   try {
@@ -463,7 +498,7 @@ router.post("/create-checkout-session", async (req, res) => {
 
     const clientUrl = getClientUrl(req);
 
-const successUrl = `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`;
+const successUrl = `${clientUrl}/post-checkout?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
 const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
 
     const session = await stripe.checkout.sessions.create({

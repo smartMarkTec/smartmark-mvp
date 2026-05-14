@@ -8,6 +8,7 @@ import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
 import Signup from "./Signup";
 import Confirmation from "./pages/Confirmation";
+import PostCheckout from "./pages/PostCheckout";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -57,6 +58,7 @@ function App() {
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/post-checkout" element={<PostCheckout />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

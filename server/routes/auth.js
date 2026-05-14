@@ -1753,6 +1753,32 @@ router.post('/register', async (req, res) => {
 
     if (existingUser) {
       const existingHash = String(existingUser?.passwordHash || '').trim();
+
+      // Ghost user: created by Stripe webhook before the account was set up
+      // (passwordHash is empty). Let the user complete registration now.
+      if (!existingHash) {
+        existingUser.passwordHash = bcrypt.hashSync(rawPassword, 10);
+        if (rawDisplayName) existingUser.displayName = rawDisplayName;
+        existingUser.updatedAt = new Date().toISOString();
+
+        const sid = ensureSid(req, res);
+        db.data.sessions = (db.data.sessions || []).filter(
+          (s) => String(s?.sid || '').trim() !== String(sid).trim()
+        );
+        db.data.sessions.push({ sid, username: existingUser.username });
+        await db.write();
+        setSessionCookie(res, sid);
+
+        return res.json({
+          success: true,
+          user: {
+            username: existingUser.username,
+            email: existingUser.email,
+            displayName: existingUser.displayName,
+          },
+        });
+      }
+
       const matches = existingHash ? bcrypt.compareSync(rawPassword, existingHash) : false;
 
       if (!matches) {

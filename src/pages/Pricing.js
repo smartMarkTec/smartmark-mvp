@@ -120,11 +120,12 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(10px)",
   };
 
-  const startCheckout = (plan) => {
+  const startCheckout = async (plan) => {
     if (!plan?.planKey) return;
 
+    setLoadingPlan(plan.planKey);
+
     try {
-      setLoadingPlan(plan.planKey);
       localStorage.setItem("sm_selected_plan", plan.planKey);
 
       try {
@@ -135,16 +136,23 @@ const Pricing = () => {
         });
       } catch {}
 
-      navigate("/signup", {
-        state: {
-          selectedPlan: plan.planKey,
-          selectedPlanName: plan.name,
-          fromPricing: true,
-        },
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ plan: plan.planKey }),
       });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json?.ok || !json?.url) {
+        throw new Error(json?.error || "Could not start checkout. Please try again.");
+      }
+
+      window.location.assign(json.url);
     } catch (err) {
-      console.error("Pricing -> signup redirect failed:", err);
-      alert("Something went wrong. Please try again.");
+      console.error("Pricing -> checkout failed:", err);
+      alert(err?.message || "Something went wrong. Please try again.");
       setLoadingPlan("");
     }
   };
