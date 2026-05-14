@@ -47,12 +47,12 @@ export default function PostCheckout() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // phases: "loading" | "form" | "submitting"
   const [phase, setPhase] = useState("loading");
-  // phases: "loading" | "form" | "submitting" | "done" | "invalid"
 
   const [sessionId, setSessionId] = useState("");
   const [planKey, setPlanKey] = useState("");
-  const [checkoutEmail, setCheckoutEmail] = useState("");
+  const [checkoutEmail, setCheckoutEmail] = useState(""); // email from Stripe — source of truth
 
   const [mode, setMode] = useState("register"); // "register" | "login"
 
@@ -62,8 +62,11 @@ export default function PostCheckout() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [err, setErr] = useState("");
+  const [mismatchWarning, setMismatchWarning] = useState(""); // Case C warning
   const [statusMsg, setStatusMsg] = useState("");
 
+  // After register/login: sync the Stripe session to this account, then go to /setup.
+  // Only called when the current browser session belongs to the checkout email account.
   const syncAndRedirect = useCallback(
     async (sid) => {
       try {
@@ -93,7 +96,6 @@ export default function PostCheckout() {
     const plan = (params.get("plan") || "").toLowerCase();
 
     if (!sid) {
-      // No session ID — bad URL, send to pricing
       navigate("/pricing", { replace: true });
       return;
     }
@@ -102,39 +104,71 @@ export default function PostCheckout() {
     setPlanKey(plan);
 
     (async () => {
-      // 1. Check if already logged in
-      try {
-        const whoamiRes = await authFetch("/whoami");
-        const whoamiJson = await whoamiRes.json().catch(() => ({}));
-        if (whoamiRes.ok && whoamiJson?.success) {
-          setStatusMsg("Activating your subscription…");
-          await syncAndRedirect(sid);
-          return;
-        }
-      } catch {}
-
-      // 2. Get checkout email for pre-fill (best-effort)
+      // ── Step 1: ALWAYS fetch the Stripe checkout email first.
+      //    It is the source of truth for which account this payment belongs to.
+      let coEmail = "";
       try {
         const infoRes = await stripeFetch(
           `/checkout-session-info?session_id=${encodeURIComponent(sid)}`
         );
         const infoJson = await infoRes.json().catch(() => ({}));
         if (infoJson?.email) {
-          setCheckoutEmail(infoJson.email);
-          setEmail(infoJson.email);
+          coEmail = infoJson.email.trim().toLowerCase();
+          setCheckoutEmail(coEmail);
+          setEmail(coEmail); // pre-fill form
         }
       } catch {}
 
+      // ── Step 2: Check who is currently logged in (if anyone).
+      let loggedInEmail = "";
+      try {
+        const whoamiRes = await authFetch("/whoami");
+        const whoamiJson = await whoamiRes.json().catch(() => ({}));
+        if (whoamiRes.ok && whoamiJson?.success) {
+          loggedInEmail = String(
+            whoamiJson?.user?.email || whoamiJson?.user?.username || ""
+          )
+            .trim()
+            .toLowerCase();
+        }
+      } catch {}
+
+      // ── Step 3: Routing decision based on email comparison.
+
+      if (loggedInEmail && coEmail && loggedInEmail === coEmail) {
+        // CASE B — logged-in account email matches Stripe checkout email.
+        // Safe to activate automatically.
+        setStatusMsg("Activating your subscription…");
+        await syncAndRedirect(sid);
+        return;
+      }
+
+      if (loggedInEmail && coEmail && loggedInEmail !== coEmail) {
+        // CASE C — a DIFFERENT account is currently logged in.
+        // Do NOT attach this payment to that account.
+        // Show the form with a clear warning; pre-fill the checkout email.
+        setMismatchWarning(
+          `You are logged in as ${loggedInEmail}, but this payment was made with ${coEmail}. ` +
+            `Create or log into the account for ${coEmail} to activate your subscription.`
+        );
+      }
+
+      // CASE A (not logged in), CASE C (wrong account logged in),
+      // CASE D (existing full account for checkout email),
+      // CASE E (ghost user — webhook created record with empty passwordHash):
+      //   → Always show the account creation/login form.
       setPhase("form");
     })();
   }, [syncAndRedirect]);
 
+  // ── Register handler ────────────────────────────────────────────────────
   const handleRegister = async (e) => {
     e.preventDefault();
     setErr("");
 
     const cleanName = fullName.trim();
-    const cleanEmail = email.trim().toLowerCase();
+    // Always use checkoutEmail if known — it is the account that must be created.
+    const cleanEmail = checkoutEmail || email.trim().toLowerCase();
     const cleanPass = password;
     const cleanConfirm = confirmPassword;
 
@@ -173,6 +207,7 @@ export default function PostCheckout() {
 
       if (!registerRes.ok && !registerJson?.success) {
         if (registerJson?.code === "ACCOUNT_EXISTS_PASSWORD_MISMATCH") {
+          // CASE D — full account exists, password didn't match → ask to log in
           setMode("login");
           setErr(
             "An account with this email already exists. Please log in instead."
@@ -183,6 +218,7 @@ export default function PostCheckout() {
         throw new Error(registerJson?.error || "Could not create account.");
       }
 
+      // Register succeeded (new account or ghost user completed)
       try {
         localStorage.setItem("sm_current_user", cleanEmail);
         localStorage.setItem("smartmark_login_username", cleanEmail);
@@ -195,11 +231,13 @@ export default function PostCheckout() {
     }
   };
 
+  // ── Login handler ───────────────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
     setErr("");
 
-    const cleanEmail = email.trim().toLowerCase();
+    // Always use checkoutEmail if known — must log in as the account that paid.
+    const cleanEmail = checkoutEmail || email.trim().toLowerCase();
     const cleanPass = password;
 
     if (!cleanEmail || !cleanPass) {
@@ -219,7 +257,9 @@ export default function PostCheckout() {
       const loginJson = await loginRes.json().catch(() => ({}));
 
       if (!loginRes.ok || !loginJson?.success) {
-        throw new Error(loginJson?.error || "Login failed. Check your email and password.");
+        throw new Error(
+          loginJson?.error || "Login failed. Check your email and password."
+        );
       }
 
       try {
@@ -234,6 +274,7 @@ export default function PostCheckout() {
     }
   };
 
+  // ── Styles ──────────────────────────────────────────────────────────────
   const inputStyle = {
     width: "100%",
     padding: "11px 14px",
@@ -245,6 +286,13 @@ export default function PostCheckout() {
     fontSize: 15,
     outline: "none",
     boxSizing: "border-box",
+  };
+
+  const inputReadOnly = {
+    ...inputStyle,
+    background: "#f0f0f6",
+    color: TEXT_SOFT,
+    cursor: "default",
   };
 
   const labelStyle = {
@@ -271,7 +319,7 @@ export default function PostCheckout() {
     marginTop: 8,
   };
 
-  // ── Loading / redirect-in-progress ──────────────────────────────────────
+  // ── Loading screen ───────────────────────────────────────────────────────
   if (phase === "loading") {
     return (
       <div
@@ -284,14 +332,14 @@ export default function PostCheckout() {
           fontFamily: FONT,
         }}
       >
-        <div style={{ textAlign: "center", color: TEXT }}>
+        <div style={{ textAlign: "center", color: TEXT, fontSize: 15 }}>
           {statusMsg || "Verifying payment…"}
         </div>
       </div>
     );
   }
 
-  // ── Form ────────────────────────────────────────────────────────────────
+  // ── Form ─────────────────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -315,7 +363,7 @@ export default function PostCheckout() {
           boxShadow: "0 18px 46px rgba(83,77,212,0.12)",
         }}
       >
-        {/* Success badge */}
+        {/* Green success badge */}
         <div
           style={{
             width: 52,
@@ -332,32 +380,41 @@ export default function PostCheckout() {
         </div>
 
         <h1
-          style={{
-            fontSize: 22,
-            fontWeight: 800,
-            color: TEXT,
-            margin: "0 0 6px",
-          }}
+          style={{ fontSize: 22, fontWeight: 800, color: TEXT, margin: "0 0 6px" }}
         >
           Payment confirmed!
         </h1>
 
         <p
-          style={{
-            fontSize: 14,
-            color: TEXT_SOFT,
-            margin: "0 0 28px",
-            lineHeight: 1.5,
-          }}
+          style={{ fontSize: 14, color: TEXT_SOFT, margin: "0 0 20px", lineHeight: 1.5 }}
         >
           {planKey
             ? `You're subscribed to the ${PLAN_NAMES[planKey] || planKey} plan. `
             : ""}
           {mode === "register"
-            ? "Create your account to get started."
+            ? "Create your account to finish setup."
             : "Log in to your existing account to continue."}
         </p>
 
+        {/* Case C warning: wrong account is logged in */}
+        {mismatchWarning && (
+          <div
+            style={{
+              background: "#fff8e1",
+              border: "1px solid #ffe082",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              color: "#7a5800",
+              marginBottom: 18,
+              lineHeight: 1.5,
+            }}
+          >
+            {mismatchWarning}
+          </div>
+        )}
+
+        {/* Error message */}
         {err && (
           <div
             style={{
@@ -374,11 +431,10 @@ export default function PostCheckout() {
           </div>
         )}
 
-        {/* Mode toggle */}
+        {/* Mode toggle: Create account / Log in */}
         <div
           style={{
             display: "flex",
-            gap: 0,
             marginBottom: 24,
             borderRadius: 10,
             border: `1.5px solid ${BORDER}`,
@@ -412,6 +468,7 @@ export default function PostCheckout() {
           ))}
         </div>
 
+        {/* ── REGISTER FORM ── */}
         {mode === "register" ? (
           <form onSubmit={handleRegister}>
             <div style={{ marginBottom: 14 }}>
@@ -430,24 +487,20 @@ export default function PostCheckout() {
             <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Email address</label>
               <input
-                style={inputStyle}
+                style={checkoutEmail ? inputReadOnly : inputStyle}
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={checkoutEmail || email}
+                readOnly={!!checkoutEmail}
+                onChange={checkoutEmail ? undefined : (e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
                 disabled={phase === "submitting"}
               />
-              {checkoutEmail && email === checkoutEmail && (
+              {checkoutEmail && (
                 <div
-                  style={{
-                    fontSize: 11,
-                    color: "#1ec885",
-                    marginTop: 4,
-                    fontWeight: 600,
-                  }}
+                  style={{ fontSize: 11, color: "#1ec885", marginTop: 4, fontWeight: 600 }}
                 >
-                  Pre-filled from your checkout
+                  From your Stripe checkout — this is the account that will be created
                 </div>
               )}
             </div>
@@ -483,18 +536,27 @@ export default function PostCheckout() {
             </button>
           </form>
         ) : (
+          /* ── LOGIN FORM ── */
           <form onSubmit={handleLogin}>
             <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Email address</label>
               <input
-                style={inputStyle}
+                style={checkoutEmail ? inputReadOnly : inputStyle}
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={checkoutEmail || email}
+                readOnly={!!checkoutEmail}
+                onChange={checkoutEmail ? undefined : (e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
                 disabled={phase === "submitting"}
               />
+              {checkoutEmail && (
+                <div
+                  style={{ fontSize: 11, color: "#1ec885", marginTop: 4, fontWeight: 600 }}
+                >
+                  Log in as the account that made this payment
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 20 }}>
@@ -517,12 +579,7 @@ export default function PostCheckout() {
         )}
 
         <div
-          style={{
-            marginTop: 18,
-            textAlign: "center",
-            fontSize: 13,
-            color: TEXT_SOFT,
-          }}
+          style={{ marginTop: 18, textAlign: "center", fontSize: 13, color: TEXT_SOFT }}
         >
           <a
             href="/pricing"
