@@ -515,13 +515,13 @@ async function generateOpenAIAdImageBuffers({
   prompt,
   size = "1024x1024",
   output_format = "png",
-  quality = "auto",
+  quality = "high",
   n = 1,
 }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const model = "gpt-image-1";
 
   const payload = JSON.stringify({
     model,
@@ -870,12 +870,9 @@ function _checkAndIncrementDailyCount(identity, planKey, requestedCount) {
 /* ------------------------ /generate-static-ad ------------------------ */
 
 router.post("/generate-static-ad", async (req, res) => {
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
   const hasKey = !!process.env.OPENAI_API_KEY;
-
-  console.log(
-    `[generate-static-ad] request received | model=${model} | hasKey=${hasKey}`
-  );
+  // model is hardcoded in generateOpenAIAdImageBuffers — log it here for visibility
+  console.log(`[generate-static-ad] request received | model=gpt-image-1 (hardcoded) | hasKey=${hasKey}`);
 
   try {
     const body = req.body || {};
@@ -960,7 +957,9 @@ router.post("/generate-static-ad", async (req, res) => {
       // Text-to-image path: build clean business summary → natural prompt → OpenAI.
       // No logo scraping, no post-processing. OpenAI decides composition naturally.
       const prompt = buildAdPrompt(a, craftedCopy);
-      console.log("[generate-static-ad] text-to-image | prompt:", prompt.slice(0, 400));
+      console.log("[generate-static-ad] text-to-image | prompt source: buildAdPrompt");
+      console.log("[generate-static-ad] image-gen params | model=gpt-image-1 | quality=high | size=1024x1024 | output_format=png | n=" + count);
+      console.log("[generate-static-ad] full prompt:", prompt);
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
         size: "1024x1024",
