@@ -207,192 +207,6 @@ function pickOne(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-/* Visual emphasis cues — rotated by variation token so each run explores a different
-   composition without hardcoding scenes or demographics.
-   Each entry specifies a photographic style so the model defaults to real-world photography. */
-const VISUAL_MOODS = [
-  "the key equipment, product, or service vehicle as the hero — commercial product photography, clean studio or natural-light background, no people",
-  "a building exterior, storefront, or job-site setting — architectural exterior photography, natural daylight, realistic materials and surfaces",
-  "a comfortable finished interior relevant to the business — professional interior photography, natural light from windows, no crew or staff visible",
-  "a close-up detail of the product, material, tool, or finished result — macro commercial photography, real-world texture, shallow depth of field",
-  "a clean editorial composition — bold professional typography on a simply photographed or minimally styled background, no people",
-  "an outdoor environment relevant to the business — professional location photography, natural daylight, no workers visible",
-  "a single person in a natural, candid, unposed moment — editorial lifestyle photography, only when people clearly fit the business type",
-  "a bold graphic layout — type-forward commercial design with a supporting photographic element, modern editorial style",
-  "a wide environmental scene showing the business context or setting — professional architectural or location photography, no people present",
-  "the service result or product shown in its real-world context — commercial lifestyle photography, authentic setting and lighting",
-];
-
-/* Industry → specific photographic scene descriptions.
-   HVAC has 16 entries covering distinct service contexts — thermostat is index 4 (1-of-16, ~6%).
-   Other industries have 4–6 entries. All are hash-indexed (not Math.random) so the
-   variationToken deterministically drives scene selection and different tokens get different scenes. */
-const INDUSTRY_SCENES = {
-  hvac: [
-    /* 0 */ "a residential central air split-system condenser unit on a concrete equipment pad beside a well-landscaped home exterior — professional exterior photography, natural daylight, realistic vinyl siding and mature shrubs",
-    /* 1 */ "a clean HVAC service van parked in a suburban residential driveway, modest brick home behind it — no driver visible, commercial vehicle photography, clear blue sky, mid-morning light",
-    /* 2 */ "a bright, comfortable residential living room conveying whole-home comfort — architectural interior photography, natural light streaming through large windows, soft furnishings and hardwood flooring, no people",
-    /* 3 */ "a modern ductless mini-split air handler mounted flush on a white wall in a clean contemporary living room — real interior photography, warm ambient light, realistic wall texture and flooring visible",
-    /* 4 */ "a sleek digital programmable thermostat mounted on a neutral painted wall — close-up commercial product photography, shallow depth of field, warm residential lighting, softly blurred room background",
-    /* 5 */ "a white ceiling supply air vent in a freshly painted residential room — close-up architectural interior photography, clean natural light, minimal and fresh composition",
-    /* 6 */ "HVAC service tools and equipment laid out neatly beside an outdoor condenser unit — still-life commercial photography, natural light, no person visible, realistic metal and rubber textures",
-    /* 7 */ "a brand-new high-efficiency outdoor condenser unit on a clean concrete pad beside a modern home — professional exterior photography, natural morning light, fresh landscaping, no workers visible",
-    /* 8 */ "a residential air handler unit in a finished utility room with a fresh replacement air filter beside it — close-up interior photography, bright shop lighting, realistic metal and fiberglass textures",
-    /* 9 */ "a bright, airy home interior with a visible air purifier on a side table and open windows — lifestyle interior photography, warm natural light, comfortable modern furnishings, clean and healthy atmosphere",
-    /* 10 */ "a cozy residential living room on a cold winter day, warm amber interior light visible, frost on exterior windows — lifestyle exterior/interior photography, dusk light, welcoming and warm feeling, no people",
-    /* 11 */ "a modern suburban home on a sunny summer day, outdoor AC condenser unit visible in a clean landscaped side yard — wide exterior photography, bright blue sky, green grass, natural light",
-    /* 12 */ "a dramatic editorial close-up of a high-efficiency outdoor condenser unit, blurred suburban house in soft background — commercial advertising photography, natural backlit golden light, premium equipment focus",
-    /* 13 */ "a dramatic macro close-up of condenser fin coil and copper refrigerant lines — commercial product photography, natural side light, realistic aluminum and copper textures, shallow depth of field",
-    /* 14 */ "a wide-angle shot of a well-maintained two-story suburban home, outdoor AC unit clearly visible in side yard — professional real estate exterior photography, clear sky, natural midday light",
-    /* 15 */ "a newly installed high-efficiency furnace and air handler in a clean modern mechanical room — commercial interior photography, bright LED lighting, pristine white walls, realistic equipment detail",
-  ],
-  plumbing: [
-    "a clean, modern bathroom with polished chrome fixtures and fresh white subway tile — professional interior photography, bright natural light, realistic porcelain and chrome",
-    "a professional plumbing service van parked on a quiet residential street — no people, commercial vehicle photography, suburban neighborhood, natural daylight",
-    "copper and PEX piping neatly installed under a kitchen sink — close-up commercial photography, warm shop lighting, realistic metal textures and wood cabinet surfaces",
-    "a gleaming modern kitchen with polished chrome faucet and undermount sink — interior photography, natural window light, realistic stone countertop and stainless steel",
-    "a freshly tiled walk-in shower with polished chrome fixtures and frameless glass door — professional interior photography, bright natural light, clean premium materials",
-    "a clean professional pipe fitting with soldered copper joints — macro commercial photography, natural light, realistic metal texture and depth of field",
-  ],
-  electrical: [
-    "a clean residential electrical panel with neat organized wiring in a finished garage — close-up commercial photography, bright shop lighting, realistic metal enclosure",
-    "modern recessed LED lighting in a well-finished living room — professional interior photography, warm ambient light, realistic ceiling and furnishings",
-    "a professional electrician's branded service van on a suburban street — no people, commercial vehicle photography, residential neighborhood background",
-    "a newly installed outdoor electrical panel with weatherproof cover on a stucco house exterior — close-up exterior photography, natural daylight, realistic materials",
-    "a beautifully lit dining room with pendant lights and dimmer switches — editorial interior photography, warm evening ambiance, realistic wood and fabric finishes",
-    "a clean breaker panel being inspected — commercial product photography, bright overhead lighting, realistic metal and plastic components",
-  ],
-  roofing: [
-    "a freshly installed dimensional asphalt shingle roof on a two-story residential home — wide exterior photography, natural daylight, realistic shingles, gutters, and mature trees",
-    "a close-up of premium roofing shingles in a precise overlapping pattern — macro commercial photography, natural light, realistic granule texture and shadow detail",
-    "a wide exterior shot of a large home with a beautiful roof line against a deep blue sky — professional exterior photography, golden-hour light",
-    "a clean rooftop view looking down a freshly shingled slope against a blue sky horizon — editorial exterior photography, natural daylight, sharp architectural lines",
-    "a professional roofing crew truck parked in a residential driveway — no people visible, commercial vehicle photography, suburban home in background",
-  ],
-  landscaping: [
-    "a beautifully manicured front yard with crisp edging, lush green grass, and flowering shrubs — professional exterior photography, bright natural morning light",
-    "a professionally designed backyard patio with planted beds, clean mulch, and stone edging — garden photography, natural afternoon light, vibrant greens",
-    "a freshly mowed lawn with clean diagonal mowing lines and sharp sidewalk edging — exterior photography, bright natural light, healthy green grass",
-    "a colorful landscape planting bed with annuals and fresh dark mulch alongside a home foundation — close-up exterior photography, natural morning light",
-  ],
-  cleaning: [
-    "a spotlessly clean bright kitchen with gleaming countertops and stainless appliances — professional interior photography, natural window light, realistic cabinet and countertop materials",
-    "a pristine living room with fresh vacuum lines in plush carpet — professional interior photography, warm ambient light, realistic furniture and textures",
-    "a gleaming bathroom with polished chrome fixtures and sparkling tile — interior photography, bright natural light, fresh and sanitized atmosphere",
-    "freshly cleaned hardwood floor reflecting soft window light in an open living area — interior photography, natural light, clean and inviting",
-  ],
-  dental: [
-    "a modern welcoming dental office reception area with clean white and warm-wood finishes — professional commercial interior photography, bright natural light",
-    "a confident natural smile in close-up — editorial portrait photography, soft studio lighting, shallow depth of field, authentic-looking teeth, neutral background",
-    "a clean modern dental treatment room with polished equipment and bright operatory light — commercial interior photography, clinical but welcoming",
-    "a close-up of a dental model showing clean well-aligned teeth — product photography, soft studio lighting, white background",
-  ],
-  restaurant: [
-    "a beautifully plated signature dish on a restaurant table with warm ambient lighting — professional editorial food photography, soft natural light, realistic tableware and linen",
-    "a warm inviting restaurant dining room with set tables and low pendant lighting — professional interior photography, atmospheric ambient light, realistic wood and fabric finishes",
-    "fresh ingredients artfully arranged on a cutting board — editorial food photography, natural overhead light, vibrant colors, realistic textures",
-    "a stylish restaurant bar with warm lighting and polished glassware — commercial interior photography, atmospheric evening ambiance",
-  ],
-  auto: [
-    "a clean well-lit auto repair shop with a car on the lift — commercial interior photography, professional overhead lighting, realistic concrete floor and tool equipment",
-    "a gleaming vehicle exterior freshly detailed in an open lot — commercial product photography, natural outdoor light, realistic paint reflections and chrome",
-    "a mechanic's tool chest with organized chrome tools in a clean shop — still-life commercial photography, realistic lighting, authentic metal textures",
-    "a car engine bay being serviced — close-up commercial photography, realistic engine components and professional tools visible",
-  ],
-  pest: [
-    "a bright clean kitchen interior free of clutter — professional interior photography, natural light, spotless counters and appliances",
-    "a professional pest control service truck on a residential street — no people, commercial vehicle photography, suburban neighborhood background",
-    "a clean well-maintained home exterior with a manicured yard — professional exterior photography, clear daylight, fresh and protected feeling",
-  ],
-  realEstate: [
-    "a beautiful home exterior with a manicured lawn, clear sky, and welcoming front entrance — professional real estate exterior photography, natural daylight",
-    "a bright airy open-concept living room with large windows — professional real estate interior photography, natural window light, realistic furnishings",
-    "a stunning kitchen with granite counters, stainless appliances, and warm pendant lighting — real estate interior photography, natural and artificial light blend",
-    "a wide aerial-perspective shot of a suburban neighborhood with well-kept homes — professional architectural photography, golden-hour light",
-  ],
-  fitness: [
-    "a modern gym interior with well-spaced equipment and motivating lighting — commercial interior photography, bright overhead lighting, realistic rubber flooring and equipment",
-    "a clean open personal training studio with natural light — professional interior photography, inviting and energetic atmosphere",
-    "a row of dumbbells on a clean rack in a modern gym — commercial product photography, natural light, realistic metal and rubber textures",
-  ],
-  salon: [
-    "a modern upscale salon interior with styling chairs, mirrors, and soft overhead lighting — professional commercial interior photography, bright and clean, realistic materials",
-    "a beautifully finished haircut or blowout — editorial beauty photography, soft diffused studio lighting, natural-looking result",
-    "a styling station with professional tools neatly arranged — close-up commercial photography, clean and polished",
-  ],
-  insurance: [
-    "a comfortable family home exterior on a sunny day — professional real estate photography style, natural daylight, inviting and secure feeling",
-    "a warm professional insurance office interior — commercial interior photography, natural light, clean and trustworthy aesthetic",
-    "a new car parked in a clean driveway in front of a home — commercial lifestyle photography, natural morning light",
-  ],
-  legal: [
-    "a professional law office interior with bookshelves and a clean conference table — commercial interior photography, warm natural light, polished wood and leather",
-    "a courthouse exterior or professional building facade — architectural exterior photography, natural daylight, serious and trustworthy",
-    "a legal document on a clean desk with a pen — editorial commercial photography, natural window light, clean minimal composition",
-  ],
-  marketing: [
-    "a modern marketing agency open-plan office with computers and whiteboards — commercial interior photography, bright natural light, clean creative environment",
-    "a close-up of a laptop displaying a clean professional digital interface — commercial product photography, shallow depth of field, neutral background",
-    "a clean desk workspace with a notepad, laptop, and coffee — lifestyle commercial photography, natural window light, minimal and professional",
-  ],
-};
-
-/* Context keyword → HVAC scene index subsets.
-   When the user's offer/benefit text signals a specific service type, scene selection
-   narrows to the most relevant scenes. Hash picks deterministically within the subset. */
-const HVAC_CONTEXT_BUCKETS = [
-  { re: /\b(tune.?up|maintenance|annual|seasonal.check|check.?up|inspect|filter.change|filter.replace|service.check)\b/i, indices: [8, 6, 5, 13] },
-  { re: /\b(repair|fix|broken|not.cooling|not.heating|emergency|diagnostic|failure|broke|malfunction)\b/i,               indices: [6, 7, 0, 12] },
-  { re: /\b(install|installation|new.system|new.unit|replace|replacement|upgrade|new.equipment)\b/i,                      indices: [7, 15, 0, 3] },
-  { re: /\b(comfort|indoor.air|air.quality|iaq|clean.air|allergen|purif|fresh.air|healthy.air)\b/i,                       indices: [9, 2, 3, 5] },
-  { re: /\b(heat|heating|furnace|warm|boiler|winter)\b/i,                                                                 indices: [10, 15, 8, 2] },
-  { re: /\b(cool|cooling|ac\b|air.cond|summer|hot)\b/i,                                                                   indices: [11, 0, 3, 12] },
-  { re: /\b(promo|special|offer|discount|financing|deal|save\b|savings|rebate|credit)\b/i,                                indices: [12, 11, 0, 7] },
-  { re: /\b(effici|energy|electric.bill|utility.bill|lower.bill|save.money|high.effici)\b/i,                              indices: [15, 7, 0, 9] },
-];
-
-/* Select a scene from the appropriate industry pool.
-   - hash is the djb2 token hash from buildAdPromptFromAnswers (deterministic per variationToken)
-   - a is the raw form answers object (used for context-keyword nudging on HVAC)
-   Returns null for unknown industries, which falls through to VISUAL_MOODS. */
-function getIndustryScene(industry, hash, a = {}) {
-  const ind = String(industry || "").toLowerCase();
-  const h = Number.isFinite(hash) ? hash : Math.floor(Math.random() * 999983);
-
-  if (/hvac|heating|cooling|air.?cond/.test(ind)) {
-    const pool = INDUSTRY_SCENES.hvac;
-    // Check form context for service-type keywords to narrow scene to relevant bucket
-    const ctx = String([
-      a.mainBenefit || "", a.offer || "", a.description || "",
-      a.details || "", a.offerHeadline || "", a.secondary || "",
-    ].join(" "));
-    for (const bucket of HVAC_CONTEXT_BUCKETS) {
-      if (bucket.re.test(ctx)) {
-        return pool[bucket.indices[h % bucket.indices.length]];
-      }
-    }
-    return pool[h % pool.length];
-  }
-
-  const pick = (arr) => arr[h % arr.length];
-  if (/plumb/.test(ind))                           return pick(INDUSTRY_SCENES.plumbing);
-  if (/electr/.test(ind))                          return pick(INDUSTRY_SCENES.electrical);
-  if (/roof/.test(ind))                            return pick(INDUSTRY_SCENES.roofing);
-  if (/landscap|lawn/.test(ind))                   return pick(INDUSTRY_SCENES.landscaping);
-  if (/clean|maid/.test(ind))                      return pick(INDUSTRY_SCENES.cleaning);
-  if (/dental|dent/.test(ind))                     return pick(INDUSTRY_SCENES.dental);
-  if (/restaurant|food|cater/.test(ind))           return pick(INDUSTRY_SCENES.restaurant);
-  if (/auto|car|vehicle/.test(ind))                return pick(INDUSTRY_SCENES.auto);
-  if (/pest/.test(ind))                            return pick(INDUSTRY_SCENES.pest);
-  if (/real.?estate|realt/.test(ind))              return pick(INDUSTRY_SCENES.realEstate);
-  if (/fitness|gym|personal.?train/.test(ind))     return pick(INDUSTRY_SCENES.fitness);
-  if (/salon|hair|beauty/.test(ind))               return pick(INDUSTRY_SCENES.salon);
-  if (/insur/.test(ind))                           return pick(INDUSTRY_SCENES.insurance);
-  if (/legal|law/.test(ind))                       return pick(INDUSTRY_SCENES.legal);
-  if (/market|advertis|agency/.test(ind))          return pick(INDUSTRY_SCENES.marketing);
-  return null; // unknown industry — fall through to VISUAL_MOODS
-}
-
 /* Returns true if a string looks like raw user input — first-person company voice,
    explicit claim/promise language, or percentage figures. These should not pass
    directly to the image prompt as ad copy. */
@@ -539,123 +353,41 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 }
 
 
-function buildAdPromptFromAnswers(a = {}, craftedCopy = {}, variationToken = "", { logoFound = false } = {}) {
-  const businessName = clean(
-    a.businessName || a.brand || a.business || a.company || "Local Business"
-  );
-  const industry = clean(a.industry || a.businessType || a.niche || "");
-  const city = clean(a.city || "");
-  const state = clean(a.state || "");
+/* ------------------------ Ad prompt builder (text-to-image path) ------------------------
+   Step A: extract business facts from form answers into a structured summary.
+   Step B: wrap that summary in a natural image-generation prompt.
+   No hardcoded design rules, layout templates, or industry-specific scenes.
+   OpenAI decides composition, visual style, and layout naturally. */
+function buildAdPrompt(a = {}, craftedCopy = {}) {
+  const businessName  = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
+  const industry      = clean(a.industry || a.businessType || a.niche || "business");
+  const city          = clean(a.city || "");
+  const state         = clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
-  const mainBenefit = clean(a.mainBenefit || a.details || a.benefit || "");
-  const phone = clean(a.phone || "");
-  const website = clean(a.website || a.url || "");
+  const mainBenefit   = clean(a.mainBenefit || a.details || a.benefit || "");
+  const phone         = clean(a.phone || "");
+  const website       = clean(a.website || a.url || "");
+  const rawOffer      = clean(craftedCopy.offer || a.offer || a.promo || "");
+  const hasOffer      = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
+  const offer         = hasOffer ? clip(rawOffer, 70) : "";
+  const locationText  = [city, state].filter(Boolean).join(", ");
 
-  const rawOffer = clean(craftedCopy.offer || a.offer || a.promo || "");
-  const hasOffer = rawOffer && !["no", "none", "n/a", "na", "-", "no offer", "no promo", "nothing"].includes(rawOffer.trim().toLowerCase());
-  const offer = hasOffer ? clip(rawOffer, 70) : "";
-
-  const locationText = [city, state].filter(Boolean).join(", ");
-
-  return `Generate a simple ${industry || "business"} ad, no people in it.
-
-Business name: ${businessName}
-Location: ${locationText || "local area"}
-Ideal customer: ${idealCustomer || "local customers"}
-Main benefit or service: ${mainBenefit || "high-quality service"}
-${offer ? `Offer: ${offer}` : ""}
-${phone ? `Phone: ${phone}` : ""}
-${website ? `Website: ${website}` : ""}
-
-Variation token: ${variationToken}`;
-}
-
-/* ------------------------ Prompt expansion via GPT-4o-mini ------------------------
-   ChatGPT produces better ad images because it internally expands the user's brief into
-   a detailed visual description before calling gpt-image-1. This function replicates that:
-   it takes the raw business brief and asks GPT-4o-mini to write a vivid image prompt,
-   then that expanded prompt goes to gpt-image-1 instead of the sparse brief.
-   Falls back to null on any failure — caller uses buildAdPromptFromAnswers as the fallback. */
-
-async function expandToImagePrompt(a = {}, offerOverride = "") {
-  // Disabled: expansion was producing flyer-style prompts that gpt-image-1 rendered
-  // as template layouts. Using direct business brief (buildAdPromptFromAnswers) instead.
-  return null;
-
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-
-  const businessName = clean(a.businessName || a.brand || "Local Business");
-  const industry     = clean(a.industry || a.businessType || a.niche || "business");
-  const city         = clean(a.city || "");
-  const state        = clean(a.state || "");
-  const mainBenefit  = clean(a.mainBenefit || a.details || a.benefit || "");
-  const phone        = clean(a.phone || "");
-  const website      = clean(a.website || a.url || "");
-  const rawOffer     = clean(offerOverride || a.offer || a.promo || "");
-  const hasOffer     = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
-  const locationText = [city, state].filter(Boolean).join(", ");
-
-  const brief = [
+  // Step A — structured business summary
+  const summary = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
-    locationText              ? `Location: ${locationText}` : null,
-    mainBenefit               ? `Service/benefit: ${mainBenefit}` : null,
-    hasOffer                  ? `Promotion: ${rawOffer}` : null,
-    phone                     ? `Phone: ${phone}` : null,
-    website                   ? `Website: ${website}` : null,
+    locationText  ? `Location: ${locationText}` : null,
+    idealCustomer ? `Audience: ${idealCustomer}` : null,
+    mainBenefit   ? `Service: ${mainBenefit}` : null,
+    offer         ? `Offer: ${offer}` : null,
+    phone         ? `Phone: ${phone}` : null,
+    website       ? `Website: ${website}` : null,
   ].filter(Boolean).join("\n");
 
-  const system =
-    "You write image generation prompts for OpenAI's gpt-image-1 model. " +
-    "Your goal: produce a cinematic, photorealistic advertisement image — the kind that looks like premium brand photography, NOT a contractor flyer or Canva template. " +
-    "" +
-    "Given a business brief, write ONE vivid prompt describing a full-bleed SCENE, not a layout. " +
-    "Think: full-bleed cinematic photograph with minimal clean text overlay. Like a high-end local service brand ad. " +
-    "" +
-    "Your prompt must describe: " +
-    "(1) A compelling, specific outdoor or indoor scene relevant to the business — home exterior at golden hour, rooftop with equipment, cozy lit interior, close-up of quality equipment in a beautiful setting. " +
-    "(2) Cinematic lighting quality — golden hour warmth, soft natural window light, dramatic shadows, atmospheric depth. " +
-    "(3) Aspirational mood — premium, comfortable, modern, trustworthy. " +
-    "(4) Minimal text in the image — at most the business name and a short 4–6 word headline. Clean, modern font, lightly overlaid. " +
-    "(5) Any lifestyle or environmental context suggesting the service benefit — without being generic. " +
-    "" +
-    "Do NOT describe: split panels, white sidebar boxes, service icon bullet lists, footer bars, multi-section layouts, Canva-style design, or heavy text-heavy compositions. " +
-    "No people in the image. Write as one natural paragraph. Be specific, cinematic, and evocative.";
+  // Step B — natural image-generation prompt
+  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, and polished. No people in the image. Let the AI decide the best composition, design, and visual style naturally. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.
 
-  const payload = JSON.stringify({
-    model: process.env.OPENAI_MODEL || "gpt-4o",
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: `Write an image generation prompt for this ad:\n\n${brief}` },
-    ],
-    max_tokens: 400,
-    temperature: 0.85,
-  });
-
-  try {
-    const { status, body: respBuf } = await fetchUpstream(
-      "POST",
-      "https://api.openai.com/v1/chat/completions",
-      { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      Buffer.from(payload),
-      12000
-    );
-
-    if (status === 200) {
-      const parsed = JSON.parse(respBuf.toString("utf8"));
-      const expanded = (parsed?.choices?.[0]?.message?.content || "").trim();
-      if (expanded.length > 60) {
-        console.log("[expand-prompt] success:", expanded.length, "chars");
-        return expanded;
-      }
-    } else {
-      console.warn("[expand-prompt] GPT returned status", status);
-    }
-  } catch (err) {
-    console.warn("[expand-prompt] failed:", err?.message || err);
-  }
-  return null;
+${summary}`;
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
@@ -1191,22 +923,7 @@ router.post("/generate-static-ad", async (req, res) => {
     const website = clean(a.website || a.url || "");
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");
 
-    // Detect logo BEFORE building the prompt so the branding instructions accurately
-    // reflect whether a real logo will be composited. Wrong logo is worse than no logo —
-    // if detection is not confident, the prompt must explicitly forbid invented brand text.
-    const logoBuf = website
-      ? await Promise.race([
-          detectBrandLogo(website).catch(() => null),
-          new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
-        ])
-      : null;
-
-    const variationToken = String(
-      body.regenerateToken || body.variant || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    );
-
     // Detect a user-uploaded photo — if present, use the image-edit path instead of text-to-image.
-    // The field is sent as a base64 DataURL: "data:image/jpeg;base64,..."
     const rawUserImage = a.userImage || body.userImage || null;
     let userImageBuffer = null;
     if (rawUserImage && typeof rawUserImage === "string") {
@@ -1218,7 +935,13 @@ router.post("/generate-static-ad", async (req, res) => {
 
     let imageBuffers;
     if (userImageBuffer) {
-      // User-uploaded photo path: edit the existing image to add ad treatment.
+      // Uploaded-photo edit path: detect logo then apply ad treatment to the photo.
+      const logoBuf = website
+        ? await Promise.race([
+            detectBrandLogo(website).catch(() => null),
+            new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+          ])
+        : null;
       const editPrompt = buildAdEditPromptFromAnswers(a, craftedCopy, { logoFound: !!logoBuf });
       console.log("[generate-static-ad] using user-uploaded image via edit endpoint");
       imageBuffers = await generateOpenAIAdImageEdit({
@@ -1228,16 +951,16 @@ router.post("/generate-static-ad", async (req, res) => {
         quality: "high",
         n: count,
       });
+      if (logoBuf) {
+        imageBuffers = await Promise.all(
+          imageBuffers.map((buf) => compositeLogoOntoAd(buf, logoBuf).catch(() => buf))
+        );
+      }
     } else {
-      // Standard text-to-image path.
-      // Try to expand the business brief into a vivid image prompt via GPT-4o-mini
-      // (same internal step ChatGPT applies before calling gpt-image-1).
-      // Falls back to the simple direct prompt if expansion fails.
-      const expandedPrompt = await expandToImagePrompt(a, craftedCopy.offer || "");
-      const prompt = expandedPrompt
-        || buildAdPromptFromAnswers(a, craftedCopy, variationToken, { logoFound: !!logoBuf });
-      console.log("[generate-static-ad] prompt source:", expandedPrompt ? "expanded" : "fallback");
-      console.log("[generate-static-ad] final prompt:", prompt.slice(0, 300));
+      // Text-to-image path: build clean business summary → natural prompt → OpenAI.
+      // No logo scraping, no post-processing. OpenAI decides composition naturally.
+      const prompt = buildAdPrompt(a, craftedCopy);
+      console.log("[generate-static-ad] text-to-image | prompt:", prompt.slice(0, 400));
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
         size: "1024x1024",
@@ -1249,14 +972,6 @@ router.post("/generate-static-ad", async (req, res) => {
 
     if (!Array.isArray(imageBuffers) || !imageBuffers.length) {
       throw new Error("No image buffers returned from generator");
-    }
-
-    if (logoBuf) {
-      imageBuffers = await Promise.all(
-        imageBuffers.map((buf) =>
-          compositeLogoOntoAd(buf, logoBuf).catch(() => buf)
-        )
-      );
     }
 
     const base = `${businessName || "static-ad"}-${Date.now()}-${Math.random()
