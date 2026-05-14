@@ -355,9 +355,9 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 
 /* ------------------------ Ad prompt builder (text-to-image path) ------------------------
    Step A: extract business facts from form answers + optional website content.
-   Step B: wrap into a natural image-generation prompt.
-   No hardcoded design rules, layout templates, or industry-specific scenes.
-   OpenAI decides composition, visual style, and layout naturally. */
+             Form answers always win — website content fills gaps only.
+   Step B: wrap into a natural image-generation prompt with an optional
+             industry visual hint (currently: HVAC). No layout templates. */
 function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
   const businessName  = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
   const industry      = clean(a.industry || a.businessType || a.niche || "business");
@@ -372,32 +372,41 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
   const offer         = hasOffer ? clip(rawOffer, 70) : "";
   const locationText  = [city, state].filter(Boolean).join(", ");
 
-  // Step A — structured business summary (form answers are canonical; web content fills gaps)
+  // Step A — structured business summary (form answers are canonical)
   const summaryLines = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
+    // Form location wins; fall back to website-detected city/state only if form gave nothing
     locationText              ? `Location: ${locationText}`
       : (webContent?.cityState ? `Location: ${webContent.cityState}` : null),
     idealCustomer ? `Audience: ${idealCustomer}` : null,
     mainBenefit   ? `Service: ${mainBenefit}` : null,
     offer         ? `Offer: ${offer}` : null,
+    // Form phone wins; fall back to website-detected phone only if form gave nothing
     (phone || webContent?.phone) ? `Phone: ${phone || webContent.phone}` : null,
     website       ? `Website: ${website}` : null,
   ].filter(Boolean);
 
-  // Supplement with website content where it adds context
-  if (webContent?.headline)    summaryLines.push(`Site headline: "${webContent.headline}"`);
-  if (webContent?.description) summaryLines.push(`Site description: "${clip(webContent.description, 180)}"`);
+  // Website context is supporting only — never replaces any form field above
+  if (webContent?.headline)    summaryLines.push(`Context (from website): "${webContent.headline}"`);
+  if (webContent?.description) summaryLines.push(`About (from website): "${clip(webContent.description, 180)}"`);
 
   const summary = summaryLines.join("\n");
 
-  // If website provided, explicitly prevent URL hallucination
+  // Prevent URL hallucination when a real website was provided
   const websiteNote = website
-    ? `\nIf any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
+    ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
+    : "";
+
+  // Brief industry visual hint — currently applied for HVAC only since that is the live niche.
+  // Single sentence, no layout rules. Keeps the prompt clean for all other industries.
+  const ind = industry.toLowerCase();
+  const industryHint = /hvac|heating|cooling|air.?cond/.test(ind)
+    ? " For this HVAC business, use realistic HVAC-related imagery — such as an AC unit, house exterior, thermostat, vent, or home-comfort equipment."
     : "";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, and polished. No people in the image. Let the AI decide the best composition, design, and visual style naturally. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.${websiteNote}
+  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, polished, and photorealistic. No people in the image. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.${industryHint}${websiteNote} Use the business details below as context and let the AI decide the best composition naturally.
 
 ${summary}`;
 }
@@ -533,7 +542,7 @@ async function generateOpenAIAdImageBuffers({
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = "gpt-image-2";
+  const model = "gpt-image-1.5";
 
   const payload = JSON.stringify({
     model,
@@ -948,7 +957,7 @@ function _checkAndIncrementDailyCount(identity, planKey, requestedCount) {
 router.post("/generate-static-ad", async (req, res) => {
   const hasKey = !!process.env.OPENAI_API_KEY;
   // model is hardcoded in generateOpenAIAdImageBuffers — log it here for visibility
-  console.log(`[generate-static-ad] request received | model=gpt-image-2 (hardcoded) | hasKey=${hasKey}`);
+  console.log(`[generate-static-ad] request received | model=gpt-image-1.5 (hardcoded) | hasKey=${hasKey}`);
 
   try {
     const body = req.body || {};
@@ -1047,7 +1056,7 @@ router.post("/generate-static-ad", async (req, res) => {
       ]);
 
       console.log(`[generate-static-ad] website-grounding=${webContent ? "ok" : "none"} | logo-found=${!!logoBuf} | website=${website || "none"}`);
-      console.log("[generate-static-ad] image-gen params | model=gpt-image-2 | quality=high | size=1024x1024 | output_format=png | n=" + count);
+      console.log("[generate-static-ad] image-gen params | model=gpt-image-1.5 | quality=high | size=1024x1024 | output_format=png | n=" + count);
 
       const prompt = buildAdPrompt(a, craftedCopy, webContent);
       console.log("[generate-static-ad] full prompt:", prompt);
