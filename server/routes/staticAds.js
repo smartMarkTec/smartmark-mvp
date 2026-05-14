@@ -437,7 +437,8 @@ function buildMultipartForm(fields, files) {
 async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x1024", quality = "high", n = 1 }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const model = "gpt-image-1.5";
+  console.log(`[image-edit] model=${model} | quality=${quality} | size=${size} | n=${n}`);
 
   // Scale to fit within 1024×1024 without cropping, letterboxing with white if needed.
   // Using "cover" was destructive — it cropped portrait/landscape photos and sent a
@@ -830,35 +831,36 @@ async function compositeLogoOntoAd(adBuf, logoBuf) {
     const adW = adMeta.width || 1024;
     const adH = adMeta.height || 1024;
 
-    const maxLogoW = Math.round(adW * 0.16);
-    const maxLogoH = Math.round(adH * 0.08);
-    const pad = Math.round(adW * 0.03);
+    // 20% width / 10% height gives a readable logo without dominating the ad.
+    const maxLogoW = Math.round(adW * 0.20);
+    const maxLogoH = Math.round(adH * 0.10);
+    const pad = Math.round(adW * 0.035);
 
-    // Ensure any fill/pad area introduced by resize is transparent, not black.
-    // Then guarantee an alpha channel exists before converting to PNG so the
-    // composite always blends correctly rather than painting a solid rectangle.
     const logoMetaRaw = await sharp(logoBuf).metadata();
     const hasAlpha = (logoMetaRaw.channels || 3) >= 4;
 
-    let logoSharp = sharp(logoBuf).resize(maxLogoW, maxLogoH, {
-      fit: "inside",
-      withoutEnlargement: true,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }, // transparent fill, not black
-    });
-
+    // Step 1 — trim background FROM THE ORIGINAL before any resize.
+    // Trimming after resize loses accuracy (scaled-down pixels blur the edge).
+    // threshold:10 tolerates slight gradients/shadows without over-cropping.
+    let workingBuf = logoBuf;
     if (!hasAlpha) {
-      // Source has no alpha (JPEG or opaque PNG). Trim uniform border color so the
-      // logo isn't surrounded by the page background it was captured against.
-      // trim() uses the top-left corner pixel as the reference background color.
       try {
-        logoSharp = logoSharp.trim();
+        workingBuf = await sharp(logoBuf)
+          .trim({ threshold: 10 })
+          .toBuffer();
       } catch {
-        // trim failed — proceed without it
+        // trim failed — continue with original
       }
     }
 
-    const preparedLogo = await logoSharp
-      .ensureAlpha()   // adds alpha=1 for opaque pixels; keeps existing alpha intact
+    // Step 2 — resize to target box, then add alpha channel.
+    const preparedLogo = await sharp(workingBuf)
+      .resize(maxLogoW, maxLogoH, {
+        fit: "inside",
+        withoutEnlargement: true,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .ensureAlpha()
       .png()
       .toBuffer();
 
@@ -866,6 +868,7 @@ async function compositeLogoOntoAd(adBuf, logoBuf) {
     const lW = logoMeta.width || maxLogoW;
     const lH = logoMeta.height || maxLogoH;
 
+    // Place top-right with consistent padding.
     const left = adW - lW - pad;
     const top = pad;
 
