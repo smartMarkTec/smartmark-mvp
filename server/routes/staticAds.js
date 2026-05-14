@@ -354,11 +354,11 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 
 
 /* ------------------------ Ad prompt builder (text-to-image path) ------------------------
-   Step A: extract business facts from form answers into a structured summary.
-   Step B: wrap that summary in a natural image-generation prompt.
+   Step A: extract business facts from form answers + optional website content.
+   Step B: wrap into a natural image-generation prompt.
    No hardcoded design rules, layout templates, or industry-specific scenes.
    OpenAI decides composition, visual style, and layout naturally. */
-function buildAdPrompt(a = {}, craftedCopy = {}) {
+function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
   const businessName  = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
   const industry      = clean(a.industry || a.businessType || a.niche || "business");
   const city          = clean(a.city || "");
@@ -372,20 +372,32 @@ function buildAdPrompt(a = {}, craftedCopy = {}) {
   const offer         = hasOffer ? clip(rawOffer, 70) : "";
   const locationText  = [city, state].filter(Boolean).join(", ");
 
-  // Step A — structured business summary
-  const summary = [
+  // Step A — structured business summary (form answers are canonical; web content fills gaps)
+  const summaryLines = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
-    locationText  ? `Location: ${locationText}` : null,
+    locationText              ? `Location: ${locationText}`
+      : (webContent?.cityState ? `Location: ${webContent.cityState}` : null),
     idealCustomer ? `Audience: ${idealCustomer}` : null,
     mainBenefit   ? `Service: ${mainBenefit}` : null,
     offer         ? `Offer: ${offer}` : null,
-    phone         ? `Phone: ${phone}` : null,
+    (phone || webContent?.phone) ? `Phone: ${phone || webContent.phone}` : null,
     website       ? `Website: ${website}` : null,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean);
+
+  // Supplement with website content where it adds context
+  if (webContent?.headline)    summaryLines.push(`Site headline: "${webContent.headline}"`);
+  if (webContent?.description) summaryLines.push(`Site description: "${clip(webContent.description, 180)}"`);
+
+  const summary = summaryLines.join("\n");
+
+  // If website provided, explicitly prevent URL hallucination
+  const websiteNote = website
+    ? `\nIf any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
+    : "";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, and polished. No people in the image. Let the AI decide the best composition, design, and visual style naturally. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.
+  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, and polished. No people in the image. Let the AI decide the best composition, design, and visual style naturally. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.${websiteNote}
 
 ${summary}`;
 }
@@ -521,7 +533,7 @@ async function generateOpenAIAdImageBuffers({
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  const model = "gpt-image-1.5";
+  const model = "gpt-image-2";
 
   const payload = JSON.stringify({
     model,
@@ -595,6 +607,70 @@ async function generateOpenAIAdImageBuffers({
     return await attempt(180000);
   }
 }
+/* ------------------------ Website content grounding ------------------------
+   Fetches the business homepage and extracts lightweight context signals:
+   page title, og:title, meta description, first H1, phone, and city/state.
+   Used to ground the ad prompt in real business content rather than relying
+   solely on form answers. Falls back to null on any failure — caller handles. */
+
+async function fetchWebsiteContent(websiteUrl) {
+  if (!websiteUrl) return null;
+  try {
+    let url = websiteUrl;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+
+    const { status, body: respBuf } = await fetchUpstream(
+      "GET",
+      url,
+      { "User-Agent": "Mozilla/5.0 (compatible; Smartemark/1.0)", Accept: "text/html,application/xhtml+xml" },
+      null,
+      6000
+    );
+
+    if (status !== 200) {
+      console.warn(`[website-grounding] non-200 from ${url}: HTTP ${status}`);
+      return null;
+    }
+
+    const html = respBuf.toString("utf8").slice(0, 80000);
+    const get = (re) => clean((html.match(re) || [])[1] || "");
+
+    // Title signals — prefer og:title, then <title>, then first H1
+    const ogTitle  = get(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']{1,120})["']/i)
+                  || get(/<meta[^>]+content=["']([^"']{1,120})["'][^>]+property=["']og:title["']/i);
+    const pageTitle = get(/<title[^>]*>([^<]{1,120})<\/title>/i);
+    const h1        = get(/<h1[^>]*>([^<]{1,120})<\/h1>/i);
+
+    // Description signals — prefer og:description, then meta description
+    const ogDesc   = get(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']{1,300})["']/i)
+                  || get(/<meta[^>]+content=["']([^"']{1,300})["'][^>]+property=["']og:description["']/i);
+    const metaDesc = get(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{1,300})["']/i)
+                  || get(/<meta[^>]+content=["']([^"']{1,300})["'][^>]+name=["']description["']/i);
+
+    const headline    = clip(ogTitle || pageTitle || h1, 100);
+    const description = clip(ogDesc || metaDesc, 220);
+
+    // US phone number
+    const phoneMatch = html.match(/\b(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})\b/);
+    const phone = phoneMatch ? phoneMatch[1] : "";
+
+    // City, ST pattern
+    const locMatch = html.match(/\b([A-Z][a-z]+(?:[ -][A-Za-z]+)?),\s*([A-Z]{2})\b/);
+    const cityState = locMatch ? `${locMatch[1]}, ${locMatch[2]}` : "";
+
+    if (!headline && !description) {
+      console.warn(`[website-grounding] no usable content from ${url}`);
+      return null;
+    }
+
+    console.log(`[website-grounding] ok | headline="${headline.slice(0, 60)}" | phone=${phone || "none"} | loc=${cityState || "none"}`);
+    return { headline, description, phone, cityState };
+  } catch (err) {
+    console.warn("[website-grounding] fetch failed:", err?.message || err);
+    return null;
+  }
+}
+
 /* ------------------------ Logo detection ------------------------ */
 
 function looksLikeLogoUrl(url) {
@@ -872,7 +948,7 @@ function _checkAndIncrementDailyCount(identity, planKey, requestedCount) {
 router.post("/generate-static-ad", async (req, res) => {
   const hasKey = !!process.env.OPENAI_API_KEY;
   // model is hardcoded in generateOpenAIAdImageBuffers — log it here for visibility
-  console.log(`[generate-static-ad] request received | model=gpt-image-1.5 (hardcoded) | hasKey=${hasKey}`);
+  console.log(`[generate-static-ad] request received | model=gpt-image-2 (hardcoded) | hasKey=${hasKey}`);
 
   try {
     const body = req.body || {};
@@ -954,12 +1030,28 @@ router.post("/generate-static-ad", async (req, res) => {
         );
       }
     } else {
-      // Text-to-image path: build clean business summary → natural prompt → OpenAI.
-      // No logo scraping, no post-processing. OpenAI decides composition naturally.
-      const prompt = buildAdPrompt(a, craftedCopy);
-      console.log("[generate-static-ad] text-to-image | prompt source: buildAdPrompt");
-      console.log("[generate-static-ad] image-gen params | model=gpt-image-1.5 | quality=high | size=1024x1024 | output_format=png | n=" + count);
+      // Text-to-image path: ground in website content + detect logo concurrently, then generate.
+      const [webContent, logoBuf] = await Promise.all([
+        website
+          ? Promise.race([
+              fetchWebsiteContent(website).catch(() => null),
+              new Promise((resolve) => setTimeout(() => resolve(null), 7000)),
+            ])
+          : Promise.resolve(null),
+        website
+          ? Promise.race([
+              detectBrandLogo(website).catch(() => null),
+              new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+            ])
+          : Promise.resolve(null),
+      ]);
+
+      console.log(`[generate-static-ad] website-grounding=${webContent ? "ok" : "none"} | logo-found=${!!logoBuf} | website=${website || "none"}`);
+      console.log("[generate-static-ad] image-gen params | model=gpt-image-2 | quality=high | size=1024x1024 | output_format=png | n=" + count);
+
+      const prompt = buildAdPrompt(a, craftedCopy, webContent);
       console.log("[generate-static-ad] full prompt:", prompt);
+
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
         size: "1024x1024",
@@ -967,6 +1059,13 @@ router.post("/generate-static-ad", async (req, res) => {
         quality: "high",
         n: count,
       });
+
+      if (logoBuf) {
+        console.log("[generate-static-ad] compositing logo onto generated ad");
+        imageBuffers = await Promise.all(
+          imageBuffers.map((buf) => compositeLogoOntoAd(buf, logoBuf).catch(() => buf))
+        );
+      }
     }
 
     if (!Array.isArray(imageBuffers) || !imageBuffers.length) {
