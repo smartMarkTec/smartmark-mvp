@@ -402,7 +402,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
   // Single sentence, no layout rules. Keeps the prompt clean for all other industries.
   const ind = industry.toLowerCase();
   const industryHint = /hvac|heating|cooling|air.?cond/.test(ind)
-    ? " For this HVAC business, use realistic HVAC-related imagery — such as an AC unit, house exterior, thermostat, vent, or home-comfort equipment."
+    ? " For this HVAC business, choose a realistic home heating or cooling scene — a comfortable home interior, house exterior on a clear day, wall thermostat, ceiling vent, split-system or mini-split unit, residential furnace or air handler, or any natural home-comfort setting. Vary the specific visual naturally; do not always use the same composition or always show a condenser unit."
     : "";
 
   // Step B — natural image-generation prompt
@@ -511,6 +511,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     `Use the uploaded photo as the creative foundation. Keep its essential subject matter, but improve the overall visual presentation to make the result feel like a professionally designed ad creative — lively, attractive, and polished. If the original photo is flat, gloomy, dimly lit, or compositionally weak, enhance it: improve the mood, brighten the scene naturally, and make it feel more vibrant and inviting. The result should feel energetic and appealing, not dull or gloomy.`,
     ``,
     `Keep the result photorealistic. Do not turn it into a cartoon, illustration, painting, or any non-photographic style. Keep it clean, simple, and professional. No people in the image. Let the AI decide the best overall ad composition and visual treatment naturally.`,
+    ``,
+    `Text layout: keep all text clearly within the image frame — no text cut off at edges or bleeding outside the boundaries. Use concise, strong ad copy: a short punchy headline, brief supporting text if needed, and a clear CTA. Avoid large text blocks or dense paragraphs. Keep the composition balanced with visual breathing room between elements. Text must be fully legible at social-feed viewing sizes.`,
     ``,
     `Business context for the ad:`,
     contextLines,
