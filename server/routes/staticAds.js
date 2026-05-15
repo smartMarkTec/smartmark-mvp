@@ -358,7 +358,7 @@ function deriveOffer(a = {}, craftedCopy = {}) {
              Form answers always win — website content fills gaps only.
    Step B: wrap into a natural image-generation prompt with an optional
              industry visual hint (currently: HVAC). No layout templates. */
-function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
+function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = false) {
   const businessName  = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
   const industry      = clean(a.industry || a.businessType || a.niche || "business");
   const city          = clean(a.city || "");
@@ -398,17 +398,37 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null) {
     ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
     : "";
 
-  // Brief industry visual hint — currently applied for HVAC only since that is the live niche.
-  // Single sentence, no layout rules. Keeps the prompt clean for all other industries.
+  // Per-generation visual direction for HVAC — randomly selects ONE specific scene focus
+  // per call so each regeneration explores a meaningfully different concept rather than
+  // always landing on the same visual. Non-HVAC industries: no hint, full AI latitude.
   const ind = industry.toLowerCase();
-  const industryHint = /hvac|heating|cooling|air.?cond/.test(ind)
-    ? " For this HVAC business, choose a realistic home heating or cooling scene — a comfortable home interior, house exterior on a clear day, wall thermostat, ceiling vent, split-system or mini-split unit, residential furnace or air handler, or any natural home-comfort setting. Vary the specific visual naturally; do not always use the same composition or always show a condenser unit."
-    : "";
+  let industryHint = "";
+  if (/hvac|heating|cooling|air.?cond/.test(ind)) {
+    const HVAC_DIRECTIONS = [
+      "Focus this ad on a comfortable residential living room with a wall-mounted mini-split unit visible — warm, inviting atmosphere, modern interior, no people.",
+      "Focus this ad on a clean house exterior on a sunny day with an outdoor AC condenser unit naturally beside the home.",
+      "Focus this ad on a close-up of a smart thermostat mounted on a neutral interior wall — sleek, modern, warm residential background.",
+      "Focus this ad on a bright ceiling air supply vent in a freshly renovated interior — clean, contemporary, open-feeling room.",
+      "Focus this ad on a residential furnace or air handler in a tidy utility room — professional, well-maintained equipment.",
+      "Focus this ad on a ductless mini-split indoor unit mounted on a wall in a contemporary bedroom or open-plan living space.",
+      "Focus this ad on a bright, airy home interior with large windows — fresh, clean, and comfortably conditioned atmosphere.",
+      "Focus this ad on a warm, cozy residential interior suggesting effective home heating — soft lighting, inviting feel, no equipment required.",
+    ];
+    const dir = HVAC_DIRECTIONS[Math.floor(Math.random() * HVAC_DIRECTIONS.length)];
+    industryHint = ` ${dir}`;
+    console.log("[generate-static-ad] hvac-direction:", dir.slice(0, 80));
+  }
+
+  // Logo instruction appended to the end of the prompt (end position = highest model attention).
+  // The model must never invent a logo, corner icon, or brand mark — real logo is composited separately.
+  const logoInstruction = logoFound
+    ? "\nDo not draw any logo, brand mark, icon, symbol, or corner design element — a real logo will be composited onto the image after generation."
+    : "\nDo not draw any logo, brand mark, icon, symbol, or decorative element in any corner or position — no invented branding of any kind.";
 
   // Step B — natural image-generation prompt
   return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, polished, and photorealistic. No people in the image. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.${industryHint}${websiteNote} Use the business details below as context and let the AI decide the best composition naturally.
 
-${summary}`;
+${summary}${logoInstruction}`;
 }
 
 /* ------------------------ OpenAI Image Edit (user-uploaded photo path) ------------------------ */
@@ -522,8 +542,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     !phone   ? `No phone number was provided — do not display any phone number.` : null,
     ``,
     logoFound
-      ? `A real business logo will be composited onto the image after generation — do not draw any logo or brand mark.`
-      : `Do not draw any logo, brand mark, icon, or third-party equipment manufacturer name.`,
+      ? `A real business logo will be composited onto the image after generation — do not draw any logo, brand mark, icon, symbol, or corner design element.`
+      : `Do not draw any logo, brand mark, icon, symbol, or decorative element in any corner or position — no invented branding of any kind.`,
   ].filter(Boolean).join("\n");
 }
 
@@ -1057,7 +1077,7 @@ router.post("/generate-static-ad", async (req, res) => {
       console.log(`[generate-static-ad] website-grounding=${webContent ? "ok" : "none"} | logo-found=${!!logoBuf} | website=${website || "none"}`);
       console.log("[generate-static-ad] image-gen params | model=gpt-image-1.5 | quality=high | size=1024x1024 | output_format=png | n=" + count);
 
-      const prompt = buildAdPrompt(a, craftedCopy, webContent);
+      const prompt = buildAdPrompt(a, craftedCopy, webContent, !!logoBuf);
       console.log("[generate-static-ad] full prompt:", prompt);
 
       imageBuffers = await generateOpenAIAdImageBuffers({
