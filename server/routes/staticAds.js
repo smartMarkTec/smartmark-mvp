@@ -796,32 +796,54 @@ async function detectBrandLogo(websiteUrl) {
           5000
         );
 
-        if (resp.status !== 200) continue;
-        if (!resp.body || resp.body.length < 800) continue;
+        if (resp.status !== 200) {
+          console.log(`[logo-detect] skip ${candidate}: HTTP ${resp.status}`);
+          continue;
+        }
+        if (!resp.body || resp.body.length < 800) {
+          console.log(`[logo-detect] skip ${candidate}: too small (${resp.body?.length ?? 0} bytes)`);
+          continue;
+        }
 
         const contentType = String(resp.headers?.["content-type"] || "").toLowerCase();
         const imageLike =
           /image\/(png|jpeg|jpg|webp|svg\+xml)/.test(contentType) ||
           /\.(png|jpg|jpeg|webp|svg)(\?|$)/i.test(candidate);
 
-        if (!imageLike) continue;
+        if (!imageLike) {
+          console.log(`[logo-detect] skip ${candidate}: not image (${contentType})`);
+          continue;
+        }
 
         if (/svg/.test(contentType) || /\.svg(\?|$)/i.test(candidate)) {
+          console.log(`[logo-detect] skip ${candidate}: SVG not supported`);
           continue;
         }
 
         try {
           const meta = await sharp(resp.body).metadata();
-          if (!meta.width || !meta.height) continue;
+          if (!meta.width || !meta.height) {
+            console.log(`[logo-detect] skip ${candidate}: no dimensions`);
+            continue;
+          }
 
           const aspect = meta.width / meta.height;
-          // Raised minimums: real business logos are at least 120×30 px.
-          // Tightened aspect ratio: 0.8–6.0 excludes favicons, tall banners,
-          // and ultra-wide equipment badges that were slipping through.
-          if (meta.width < 120 || meta.height < 30) continue;
-          if (meta.width > 2000 || meta.height > 1200) continue;
-          if (aspect < 0.8 || aspect > 6.0) continue;
+          const w = meta.width;
+          const h = meta.height;
+
+          // Business logos are landscape (wider than tall) and large enough to read.
+          // Minimum aspect 1.4: rejects square icons, house marks, app icons (~1:1).
+          // Minimum width 150, height 40: rejects favicons and tiny generic placeholders.
+          // Maximum aspect 6.0: rejects ultra-wide banners or decorative strips.
+          if (w < 150) { console.log(`[logo-detect] skip ${candidate}: width ${w} < 150`); continue; }
+          if (h < 40)  { console.log(`[logo-detect] skip ${candidate}: height ${h} < 40`); continue; }
+          if (w > 2000 || h > 1200) { console.log(`[logo-detect] skip ${candidate}: too large ${w}×${h}`); continue; }
+          if (aspect < 1.4) { console.log(`[logo-detect] skip ${candidate}: aspect ${aspect.toFixed(2)} < 1.4 (square/portrait icon)`); continue; }
+          if (aspect > 6.0) { console.log(`[logo-detect] skip ${candidate}: aspect ${aspect.toFixed(2)} > 6.0 (banner strip)`); continue; }
+
+          console.log(`[logo-detect] selected: ${candidate} | ${w}×${h} aspect=${aspect.toFixed(2)}`);
         } catch {
+          console.log(`[logo-detect] skip ${candidate}: sharp metadata error`);
           continue;
         }
 
@@ -846,6 +868,7 @@ async function compositeLogoOntoAd(adBuf, logoBuf) {
     const adMeta = await sharp(adBuf).metadata();
     const adW = adMeta.width || 1024;
     const adH = adMeta.height || 1024;
+    console.log(`[logo-composite] applying logo to ${adW}×${adH} ad`);
 
     // 20% width / 10% height gives a readable logo without dominating the ad.
     const maxLogoW = Math.round(adW * 0.20);
