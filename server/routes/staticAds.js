@@ -402,14 +402,14 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   // Describes ad composition energy and visual approach ONLY — not specific objects or scenes.
   // The business summary below determines subject matter; this seed sets the creative style.
   const AD_DIRECTIONS = [
-    "Make this ad feel bold and striking — strong composition, confident visual presence, modern advertising feel.",
+    "Make this ad feel clean and confident — polished composition, professional visual presence, modern local-business feel.",
     "Make this ad feel clean and premium — polished, high-quality visual treatment, professional brand aesthetic.",
     "Make this ad feel bright and energetic — open, fresh, visually dynamic, inviting atmosphere.",
     "Make this ad feel trustworthy and established — credible, professionally composed, locally rooted visual story.",
     "Make this ad feel sleek and contemporary — clean design, strong visual hierarchy, modern professional look.",
-    "Make this ad feel aspirational — elevated, sophisticated, visually compelling, premium feel with no people.",
+    "Make this ad feel approachable and professional — warm, credible, visually appealing, clean local business presence.",
     "Make this ad feel simple and direct — clear, service-focused, visually strong, clean professional composition.",
-    "Make this ad feel high-impact — striking imagery, bold composition, premium advertising presence.",
+    "Make this ad feel polished and visually strong — well-composed, professional, clean, and visually compelling.",
   ];
   const adDir = AD_DIRECTIONS[Math.floor(Math.random() * AD_DIRECTIONS.length)];
   const industryHint = ` ${adDir}`;
@@ -422,7 +422,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Keep all text, headlines, CTA, and contact info fully inside the image with safe margins — no text should touch or cross any edge of the image. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
+  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Keep the design simple to moderately bold — polished and visually appealing, but not extreme, overly dramatic, overly industrial, or cluttered. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Keep every word, headline, phone number, website, and CTA fully inside the visible image area with comfortable safe margins — do not crop or cut off any text. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
 
 ${summary}${logoInstruction}`;
 }
