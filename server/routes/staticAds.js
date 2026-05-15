@@ -398,26 +398,22 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
     : "";
 
-  // Per-generation visual direction for HVAC — randomly selects ONE creative ad concept
-  // per call so each regeneration produces a meaningfully different visual and composition.
-  // Each direction describes a full ad concept, not just an object to photograph.
-  const ind = industry.toLowerCase();
-  let industryHint = "";
-  if (/hvac|heating|cooling|air.?cond/.test(ind)) {
-    const HVAC_DIRECTIONS = [
-      "Create a polished home-comfort ad concept centered around a wall-mounted mini-split unit — warm modern living room, golden-hour window light, inviting residential atmosphere, creative ad composition.",
-      "Create an aspirational residential HVAC ad — a beautiful house exterior on a clear summer day, blue sky, lush landscaping, outdoor AC unit naturally visible, premium advertising feel.",
-      "Create a clean modern indoor-comfort ad concept centered on a smart thermostat — bright contemporary interior, warm residential lighting, professional ad typography treatment.",
-      "Create a fresh indoor air quality ad concept — a bright airy home with large windows and natural light, the feeling of cool clean conditioned air, polished ad design.",
-      "Create a trustworthy HVAC service ad centered around a residential furnace or air handler in a clean utility room — professional, well-maintained, reliable visual story.",
-      "Create a sleek ductless comfort ad centered around a mini-split indoor unit on a contemporary interior wall — modern lifestyle, aspirational feel, clean premium ad composition.",
-      "Create a whole-home comfort ad concept — a warm inviting residential interior with soft ambient lighting suggesting perfect year-round climate control, polished and premium.",
-      "Create a cozy home-heating ad concept — a warm amber residential interior, soft evening light, the feeling of comfortable warmth on a cold night, photorealistic and atmospheric.",
-    ];
-    const dir = HVAC_DIRECTIONS[Math.floor(Math.random() * HVAC_DIRECTIONS.length)];
-    industryHint = ` ${dir}`;
-    console.log("[generate-static-ad] hvac-direction:", dir.slice(0, 80));
-  }
+  // Per-generation creative style seed — applied to every industry, every call.
+  // Describes ad composition energy and visual approach ONLY — not specific objects or scenes.
+  // The business summary below determines subject matter; this seed sets the creative style.
+  const AD_DIRECTIONS = [
+    "Make this ad feel bold and striking — strong composition, confident visual presence, modern advertising feel.",
+    "Make this ad feel clean and premium — polished, high-quality visual treatment, professional brand aesthetic.",
+    "Make this ad feel bright and energetic — open, fresh, visually dynamic, inviting atmosphere.",
+    "Make this ad feel trustworthy and established — credible, professionally composed, locally rooted visual story.",
+    "Make this ad feel sleek and contemporary — clean design, strong visual hierarchy, modern professional look.",
+    "Make this ad feel aspirational — elevated, sophisticated, visually compelling, premium feel with no people.",
+    "Make this ad feel simple and direct — clear, service-focused, visually strong, clean professional composition.",
+    "Make this ad feel high-impact — striking imagery, bold composition, premium advertising presence.",
+  ];
+  const adDir = AD_DIRECTIONS[Math.floor(Math.random() * AD_DIRECTIONS.length)];
+  const industryHint = ` ${adDir}`;
+  console.log("[generate-static-ad] ad-direction:", adDir.slice(0, 80));
 
   // Anti-fake-logo instruction: specific about what is banned (invented brand marks, house icons,
   // manufacturer badges) without suppressing general creative ad design or graphic composition.
