@@ -426,7 +426,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Use the business details below as context and let the AI decide the best composition, layout, and visual treatment naturally.
+  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Keep all text, headlines, CTA, and contact info fully inside the image with safe margins — no text should touch or cross any edge of the image. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
 
 ${summary}${logoInstruction}`;
 }
@@ -534,7 +534,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     ``,
     `Text layout: keep all text clearly within the image frame — no text cut off at edges or bleeding outside the boundaries. Use concise, strong ad copy: a short punchy headline, brief supporting text if needed, and a clear CTA. Avoid large text blocks or dense paragraphs. Keep the composition balanced with visual breathing room between elements. Text must be fully legible at social-feed viewing sizes.`,
     ``,
-    `Business context for the ad:`,
+    `Business context for the ad — use these as the source for all copy and claims. Do not invent unrelated services, fake offers, or fictional locations:`,
     contextLines,
     ``,
     `Only display the exact contact details listed above. Never invent or hallucinate any website URL, phone number, or contact information.`,
