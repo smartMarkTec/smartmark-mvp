@@ -398,35 +398,35 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
     : "";
 
-  // Per-generation visual direction for HVAC — randomly selects ONE specific scene focus
-  // per call so each regeneration explores a meaningfully different concept rather than
-  // always landing on the same visual. Non-HVAC industries: no hint, full AI latitude.
+  // Per-generation visual direction for HVAC — randomly selects ONE creative ad concept
+  // per call so each regeneration produces a meaningfully different visual and composition.
+  // Each direction describes a full ad concept, not just an object to photograph.
   const ind = industry.toLowerCase();
   let industryHint = "";
   if (/hvac|heating|cooling|air.?cond/.test(ind)) {
     const HVAC_DIRECTIONS = [
-      "Focus this ad on a comfortable residential living room with a wall-mounted mini-split unit visible — warm, inviting atmosphere, modern interior, no people.",
-      "Focus this ad on a clean house exterior on a sunny day with an outdoor AC condenser unit naturally beside the home.",
-      "Focus this ad on a close-up of a smart thermostat mounted on a neutral interior wall — sleek, modern, warm residential background.",
-      "Focus this ad on a bright ceiling air supply vent in a freshly renovated interior — clean, contemporary, open-feeling room.",
-      "Focus this ad on a residential furnace or air handler in a tidy utility room — professional, well-maintained equipment.",
-      "Focus this ad on a ductless mini-split indoor unit mounted on a wall in a contemporary bedroom or open-plan living space.",
-      "Focus this ad on a bright, airy home interior with large windows — fresh, clean, and comfortably conditioned atmosphere.",
-      "Focus this ad on a warm, cozy residential interior suggesting effective home heating — soft lighting, inviting feel, no equipment required.",
+      "Create a polished home-comfort ad concept centered around a wall-mounted mini-split unit — warm modern living room, golden-hour window light, inviting residential atmosphere, creative ad composition.",
+      "Create an aspirational residential HVAC ad — a beautiful house exterior on a clear summer day, blue sky, lush landscaping, outdoor AC unit naturally visible, premium advertising feel.",
+      "Create a clean modern indoor-comfort ad concept centered on a smart thermostat — bright contemporary interior, warm residential lighting, professional ad typography treatment.",
+      "Create a fresh indoor air quality ad concept — a bright airy home with large windows and natural light, the feeling of cool clean conditioned air, polished ad design.",
+      "Create a trustworthy HVAC service ad centered around a residential furnace or air handler in a clean utility room — professional, well-maintained, reliable visual story.",
+      "Create a sleek ductless comfort ad centered around a mini-split indoor unit on a contemporary interior wall — modern lifestyle, aspirational feel, clean premium ad composition.",
+      "Create a whole-home comfort ad concept — a warm inviting residential interior with soft ambient lighting suggesting perfect year-round climate control, polished and premium.",
+      "Create a cozy home-heating ad concept — a warm amber residential interior, soft evening light, the feeling of comfortable warmth on a cold night, photorealistic and atmospheric.",
     ];
     const dir = HVAC_DIRECTIONS[Math.floor(Math.random() * HVAC_DIRECTIONS.length)];
     industryHint = ` ${dir}`;
     console.log("[generate-static-ad] hvac-direction:", dir.slice(0, 80));
   }
 
-  // Logo instruction appended to the end of the prompt (end position = highest model attention).
-  // The model must never invent a logo, corner icon, or brand mark — real logo is composited separately.
+  // Anti-fake-logo instruction: specific about what is banned (invented brand marks, house icons,
+  // manufacturer badges) without suppressing general creative ad design or graphic composition.
   const logoInstruction = logoFound
-    ? "\nDo not draw any logo, brand mark, icon, symbol, or corner design element — a real logo will be composited onto the image after generation."
-    : "\nDo not draw any logo, brand mark, icon, symbol, or decorative element in any corner or position — no invented branding of any kind.";
+    ? "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol — a real logo will be composited after generation."
+    : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality advertisement image for this business. Make it look like a clean, professional ad creative — simple, visually appealing, polished, and photorealistic. No people in the image. Keep it realistic, not cartoonish, not cluttered, and not like a cheap flyer.${industryHint}${websiteNote} Use the business details below as context and let the AI decide the best composition naturally.
+  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Use the business details below as context and let the AI decide the best composition, layout, and visual treatment naturally.
 
 ${summary}${logoInstruction}`;
 }
@@ -542,8 +542,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     !phone   ? `No phone number was provided — do not display any phone number.` : null,
     ``,
     logoFound
-      ? `A real business logo will be composited onto the image after generation — do not draw any logo, brand mark, icon, symbol, or corner design element.`
-      : `Do not draw any logo, brand mark, icon, symbol, or decorative element in any corner or position — no invented branding of any kind.`,
+      ? `A real business logo will be composited onto the image after generation — do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol.`
+      : `Do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.`,
   ].filter(Boolean).join("\n");
 }
 
