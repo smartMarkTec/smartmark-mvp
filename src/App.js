@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import Signup from "./Signup";
 import Confirmation from "./pages/Confirmation";
 import PostCheckout from "./pages/PostCheckout";
+import BookedCall from "./pages/BookedCall";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -59,6 +60,7 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/post-checkout" element={<PostCheckout />} />
+      <Route path="/booked-call" element={<BookedCall />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
