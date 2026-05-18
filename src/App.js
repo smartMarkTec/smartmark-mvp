@@ -61,6 +61,7 @@ function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/post-checkout" element={<PostCheckout />} />
       <Route path="/booked-call" element={<BookedCall />} />
+      <Route path="/videos" element={<BookedCall />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
