@@ -274,6 +274,20 @@ export default function Landing() {
           0%, 100% { transform: translateY(0px); }
           50%       { transform: translateY(-10px); }
         }
+        @keyframes smHeroBlob1 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          35%       { transform: translate(-38px, 24px) scale(1.08); }
+          70%       { transform: translate(28px, -28px) scale(0.95); }
+        }
+        @keyframes smHeroBlob2 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          45%       { transform: translate(44px, -22px) scale(1.06); }
+          72%       { transform: translate(-18px, 32px) scale(0.97); }
+        }
+        @keyframes smHeroBlob3 {
+          0%, 100% { transform: translate(0px, 0px) scale(1); }
+          55%       { transform: translate(-26px, 36px) scale(1.04); }
+        }
       `}</style>
 
       {/* ── Sticky header ───────────────────────────────────────────────────── */}
@@ -373,7 +387,7 @@ export default function Landing() {
             {/* Hero card — slightly tinted so background blobs show through */}
             <div
               style={{
-                background: "linear-gradient(135deg, rgba(255,255,255,0.84), rgba(228,226,255,0.74))",
+                background: "linear-gradient(115deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.82) 42%, rgba(210,205,255,0.68) 100%)",
                 border: "1px solid rgba(123,114,255,0.20)",
                 borderRadius: 32,
                 overflow: "hidden",
@@ -386,20 +400,20 @@ export default function Landing() {
                 <div style={{ position: "absolute", top: "-60%", left: 0, width: "35%", height: "220%", background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)", animation: "smSheen 9s ease-in-out infinite" }} />
               </div>
 
-              {/* Hero inner — 2-col on desktop, 1-col on mobile */}
+              {/* Animated color blobs inside hero frame */}
+              <div style={{ position: "absolute", top: "-15%", right: "-8%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,120,255,0.28) 0%, transparent 62%)", filter: "blur(56px)", animation: "smHeroBlob1 13s ease-in-out infinite", pointerEvents: "none" }} />
+              <div style={{ position: "absolute", bottom: "-20%", right: "4%", width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,100,255,0.24) 0%, transparent 65%)", filter: "blur(62px)", animation: "smHeroBlob2 16s ease-in-out infinite", pointerEvents: "none" }} />
+              <div style={{ position: "absolute", top: "22%", right: "26%", width: 270, height: 270, borderRadius: "50%", background: "radial-gradient(circle, rgba(80,160,255,0.16) 0%, transparent 68%)", filter: "blur(48px)", animation: "smHeroBlob3 11s ease-in-out infinite", pointerEvents: "none" }} />
+
+              {/* Hero content — left-aligned, single column */}
               <div
                 style={{
-                  padding: isMobile ? "48px 26px 52px" : "80px 60px 80px",
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "1.1fr 0.9fr",
-                  gap: isMobile ? 0 : 52,
-                  alignItems: "center",
+                  padding: isMobile ? "52px 28px 56px" : "84px 64px 84px",
                   position: "relative",
                   zIndex: 1,
                 }}
               >
-                {/* Left: text content — left-aligned */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                   <SectionTag>
                     <FaBolt />
                     AI marketing automation
@@ -445,77 +459,6 @@ export default function Landing() {
                   </div>
                 </div>
 
-                {/* Right: mini campaign preview — desktop only */}
-                {!isMobile && (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      alignItems: "center",
-                      animation: "smHeroFloat 7s ease-in-out infinite",
-                    }}
-                  >
-                    <div
-                      style={{
-                        background: "linear-gradient(145deg, rgba(255,255,255,0.97) 0%, rgba(242,241,255,0.98) 100%)",
-                        border: "1px solid rgba(93,89,234,0.16)",
-                        borderRadius: 26,
-                        padding: 22,
-                        boxShadow: "0 20px 56px rgba(83,77,212,0.18)",
-                        width: "100%",
-                        maxWidth: 310,
-                        position: "relative",
-                      }}
-                    >
-                      {/* Mini card header */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                        <div>
-                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 13 }}>Campaign Overview</div>
-                          <div style={{ color: TEXT_SOFT, fontSize: 11, marginTop: 2 }}>Local Service Business</div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(34,197,94,0.09)", borderRadius: 999, padding: "4px 10px" }}>
-                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", animation: "smPulse 2.4s ease-in-out infinite", flexShrink: 0 }} />
-                          <span style={{ color: "#16a34a", fontWeight: 700, fontSize: 11 }}>Live</span>
-                        </div>
-                      </div>
-
-                      {/* 2 mini metrics */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
-                        <div style={{ background: "#f8f9ff", border: "1px solid rgba(93,89,234,0.08)", borderRadius: 14, padding: "12px 13px" }}>
-                          <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 5 }}>Leads</div>
-                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 22, lineHeight: 1 }}>37</div>
-                          <div style={{ color: "#16a34a", fontWeight: 600, fontSize: 11, marginTop: 3 }}>↑ this week</div>
-                        </div>
-                        <div style={{ background: "#f8f9ff", border: "1px solid rgba(93,89,234,0.08)", borderRadius: 14, padding: "12px 13px" }}>
-                          <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 5 }}>Cost / Lead</div>
-                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 22, lineHeight: 1 }}>$14.80</div>
-                        </div>
-                      </div>
-
-                      {/* Mini sparkline */}
-                      <div style={{ background: "linear-gradient(135deg, #f5f6ff, #eef0ff)", borderRadius: 12, padding: "8px 12px 6px", marginBottom: 12 }}>
-                        <div style={{ color: "#7b849f", fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>CTR Trend</div>
-                        <svg width="100%" height="28" viewBox="0 0 200 28" preserveAspectRatio="none" style={{ display: "block" }}>
-                          <defs>
-                            <linearGradient id="smMiniChartFill" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#5d59ea" stopOpacity="0.18" />
-                              <stop offset="100%" stopColor="#5d59ea" stopOpacity="0" />
-                            </linearGradient>
-                          </defs>
-                          <path d="M0,24 C50,20 80,14 110,10 C140,6 170,4 200,2" fill="none" stroke="#5d59ea" strokeWidth="1.8" strokeLinecap="round" />
-                          <path d="M0,24 C50,20 80,14 110,10 C140,6 170,4 200,2 L200,28 L0,28 Z" fill="url(#smMiniChartFill)" />
-                          <circle cx="200" cy="2" r="2.5" fill="#5d59ea" />
-                        </svg>
-                      </div>
-
-                      {/* AI insight */}
-                      <div style={{ background: "rgba(93,89,234,0.06)", borderRadius: 12, padding: "10px 12px", display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <FaBolt style={{ color: PURPLE, fontSize: 11, marginTop: 1, flexShrink: 0 }} />
-                        <span style={{ color: TEXT_SOFT, fontSize: 12, lineHeight: 1.5 }}>Testing a second creative angle to lower cost per lead.</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </section>
