@@ -377,17 +377,17 @@ export default function Landing() {
       <div style={{ position: "relative", overflow: "hidden" }}>
         {/* Static base radials */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 12% 8%, rgba(100,88,255,0.07), transparent 34%), radial-gradient(circle at 88% 18%, rgba(80,90,240,0.06), transparent 32%)" }} />
-        {/* Blobs — more vibrant than before */}
-        <div style={{ position: "absolute", top: "-20%", left: "-12%", width: 760, height: 760, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.22) 0%, transparent 68%)", filter: "blur(60px)", animation: "smDrift1 20s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "-12%", right: "-14%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle, rgba(78,88,240,0.18) 0%, transparent 70%)", filter: "blur(68px)", animation: "smDrift2 27s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "30%", left: "38%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,138,255,0.12) 0%, transparent 70%)", filter: "blur(76px)", animation: "smDrift3 34s ease-in-out infinite", pointerEvents: "none" }} />
+        {/* Ambient page blobs — kept soft so they don't fight the hero */}
+        <div style={{ position: "absolute", top: "-20%", left: "-12%", width: 760, height: 760, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.11) 0%, transparent 68%)", filter: "blur(60px)", animation: "smDrift1 20s ease-in-out infinite", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: "-12%", right: "-14%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle, rgba(78,88,240,0.09) 0%, transparent 70%)", filter: "blur(68px)", animation: "smDrift2 27s ease-in-out infinite", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: "30%", left: "38%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,138,255,0.06) 0%, transparent 70%)", filter: "blur(76px)", animation: "smDrift3 34s ease-in-out infinite", pointerEvents: "none" }} />
 
         <div style={{ maxWidth: 1220, margin: "0 auto", padding: isMobile ? "40px 18px 72px" : "52px 32px 92px", position: "relative", zIndex: 1 }}>
           <section>
             {/* Hero card — slightly tinted so background blobs show through */}
             <div
               style={{
-                background: "linear-gradient(115deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.82) 42%, rgba(210,205,255,0.68) 100%)",
+                background: "linear-gradient(112deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.95) 50%, rgba(234,236,255,0.88) 100%)",
                 border: "1px solid rgba(123,114,255,0.20)",
                 borderRadius: 32,
                 overflow: "hidden",
@@ -400,10 +400,10 @@ export default function Landing() {
                 <div style={{ position: "absolute", top: "-60%", left: 0, width: "35%", height: "220%", background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)", animation: "smSheen 9s ease-in-out infinite" }} />
               </div>
 
-              {/* Animated color blobs inside hero frame */}
-              <div style={{ position: "absolute", top: "-15%", right: "-8%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,120,255,0.28) 0%, transparent 62%)", filter: "blur(56px)", animation: "smHeroBlob1 13s ease-in-out infinite", pointerEvents: "none" }} />
-              <div style={{ position: "absolute", bottom: "-20%", right: "4%", width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,100,255,0.24) 0%, transparent 65%)", filter: "blur(62px)", animation: "smHeroBlob2 16s ease-in-out infinite", pointerEvents: "none" }} />
-              <div style={{ position: "absolute", top: "22%", right: "26%", width: 270, height: 270, borderRadius: "50%", background: "radial-gradient(circle, rgba(80,160,255,0.16) 0%, transparent 68%)", filter: "blur(48px)", animation: "smHeroBlob3 11s ease-in-out infinite", pointerEvents: "none" }} />
+              {/* Soft right-side ambient glow — single, large, very low opacity */}
+              <div style={{ position: "absolute", top: "-15%", right: "-15%", width: 700, height: 700, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,130,255,0.10) 0%, transparent 58%)", filter: "blur(80px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none" }} />
+              {/* Subtle diagonal light wash — no hard edges */}
+              <div style={{ position: "absolute", top: 0, right: 0, width: "55%", height: "100%", background: "linear-gradient(145deg, transparent 20%, rgba(200,208,255,0.06) 60%, transparent 100%)", pointerEvents: "none" }} />
 
               {/* Hero content — left-aligned, single column */}
               <div
