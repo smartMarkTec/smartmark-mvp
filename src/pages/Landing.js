@@ -288,6 +288,10 @@ export default function Landing() {
           0%, 100% { transform: translate(0px, 0px) scale(1); }
           55%       { transform: translate(-26px, 36px) scale(1.04); }
         }
+        @keyframes smRibbonBreathe {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.62; }
+        }
       `}</style>
 
       {/* ── Sticky header ───────────────────────────────────────────────────── */}
@@ -387,7 +391,7 @@ export default function Landing() {
             {/* Hero card — slightly tinted so background blobs show through */}
             <div
               style={{
-                background: "linear-gradient(112deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.95) 50%, rgba(234,236,255,0.88) 100%)",
+                background: "rgba(255,255,255,0.97)",
                 border: "1px solid rgba(123,114,255,0.20)",
                 borderRadius: 32,
                 overflow: "hidden",
@@ -400,10 +404,29 @@ export default function Landing() {
                 <div style={{ position: "absolute", top: "-60%", left: 0, width: "35%", height: "220%", background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)", animation: "smSheen 9s ease-in-out infinite" }} />
               </div>
 
-              {/* Soft right-side ambient glow — single, large, very low opacity */}
-              <div style={{ position: "absolute", top: "-15%", right: "-15%", width: 700, height: 700, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,130,255,0.10) 0%, transparent 58%)", filter: "blur(80px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none" }} />
-              {/* Subtle diagonal light wash — no hard edges */}
-              <div style={{ position: "absolute", top: 0, right: 0, width: "55%", height: "100%", background: "linear-gradient(145deg, transparent 20%, rgba(200,208,255,0.06) 60%, transparent 100%)", pointerEvents: "none" }} />
+              {/* ── Hero right-side visual layer ────────────────────────────────── */}
+
+              {/* 1. Right-half base haze — gives the right side a clear lavender field */}
+              <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "52%", background: "linear-gradient(to left, rgba(210,218,255,0.18) 0%, rgba(215,222,255,0.10) 48%, transparent 100%)", pointerEvents: "none" }} />
+
+              {/* 2. Primary blob — large, top-right, blue-purple anchor */}
+              <div style={{ position: "absolute", top: "-22%", right: "-10%", width: 720, height: 720, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,135,255,0.26) 0%, rgba(150,165,255,0.10) 40%, transparent 65%)", filter: "blur(58px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none" }} />
+
+              {/* 3. Secondary blob — bottom-right, deeper purple */}
+              <div style={{ position: "absolute", bottom: "-18%", right: "4%", width: 460, height: 460, borderRadius: "50%", background: "radial-gradient(circle, rgba(108,85,255,0.20) 0%, transparent 58%)", filter: "blur(70px)", animation: "smHeroBlob2 26s ease-in-out infinite", pointerEvents: "none" }} />
+
+              {/* 4. Accent blob — mid-right, blue-indigo */}
+              <div style={{ position: "absolute", top: "28%", right: "10%", width: 310, height: 310, borderRadius: "50%", background: "radial-gradient(circle, rgba(90,140,255,0.18) 0%, transparent 60%)", filter: "blur(48px)", animation: "smHeroBlob3 18s ease-in-out infinite", pointerEvents: "none" }} />
+
+              {/* 5. Diagonal ribbon + bright streak — desktop only so they stay right of text */}
+              {!isMobile && (
+                <>
+                  {/* Wide ribbon — faint, sets diagonal geometry */}
+                  <div style={{ position: "absolute", top: "-30%", right: "6%", width: 190, height: "165%", background: "linear-gradient(to bottom, transparent 5%, rgba(195,208,255,0.22) 28%, rgba(180,198,255,0.18) 56%, transparent 94%)", transform: "rotate(-26deg)", filter: "blur(16px)", pointerEvents: "none" }} />
+                  {/* Bright streak — thinner, lighter, breathing */}
+                  <div style={{ position: "absolute", top: "-18%", right: "19%", width: 58, height: "148%", background: "linear-gradient(to bottom, transparent 8%, rgba(222,230,255,0.40) 30%, rgba(212,224,255,0.32) 58%, transparent 92%)", transform: "rotate(-26deg)", filter: "blur(8px)", animation: "smRibbonBreathe 14s ease-in-out infinite", pointerEvents: "none" }} />
+                </>
+              )}
 
               {/* Hero content — left-aligned, single column */}
               <div
