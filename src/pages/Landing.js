@@ -6,7 +6,7 @@ import { FaBolt, FaChevronDown } from "react-icons/fa";
 const BOOKING_URL = "https://cal.com/william-knowles-wxottg/30min";
 
 const FONT         = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG           = "linear-gradient(180deg, #edf0ff 0%, #f5f6ff 60%, #fafbff 100%)";
+const BG           = "linear-gradient(160deg, #e8ecff 0%, #f0f2ff 40%, #f7f8ff 72%, #fbfbff 100%)";
 const TEXT         = "#101426";
 const TEXT_SOFT    = "#626b86";
 const PURPLE       = "#5d59ea";
@@ -270,6 +270,10 @@ export default function Landing() {
           0%   { transform: translateX(-120%) skewX(-12deg); }
           100% { transform: translateX(280%) skewX(-12deg); }
         }
+        @keyframes smHeroFloat {
+          0%, 100% { transform: translateY(0px); }
+          50%       { transform: translateY(-10px); }
+        }
       `}</style>
 
       {/* ── Sticky header ───────────────────────────────────────────────────── */}
@@ -278,7 +282,7 @@ export default function Landing() {
           position: "sticky",
           top: 0,
           zIndex: 100,
-          background: scrolled ? "rgba(237,240,255,0.96)" : "rgba(237,240,255,0.82)",
+          background: scrolled ? "rgba(232,236,255,0.97)" : "rgba(232,236,255,0.82)",
           backdropFilter: "blur(14px)",
           WebkitBackdropFilter: "blur(14px)",
           borderBottom: scrolled
@@ -298,12 +302,10 @@ export default function Landing() {
             alignItems: "center",
           }}
         >
-          {/* Wordmark */}
           <a href="/" style={{ fontSize: 20, fontWeight: 700, color: TEXT, letterSpacing: -0.5, textDecoration: "none" }}>
             Smartemark
           </a>
 
-          {/* Nav items */}
           <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
             {!isMobile && (
               <>
@@ -321,7 +323,6 @@ export default function Landing() {
               </>
             )}
 
-            {/* On mobile: show Login link if logged out */}
             {isMobile && !isLoggedIn && (
               <button onClick={() => (window.location.href = "/login")} style={navBtn}>
                 Login
@@ -360,82 +361,161 @@ export default function Landing() {
 
       {/* ── Hero — overflow:hidden for animated blobs ────────────────────────── */}
       <div style={{ position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 12% 8%, rgba(123,114,255,0.05), transparent 32%), radial-gradient(circle at 84% 16%, rgba(93,89,234,0.04), transparent 30%)" }} />
-        <div style={{ position: "absolute", top: "-18%", left: "-14%", width: 700, height: 700, borderRadius: "50%", background: "radial-gradient(circle, rgba(118,108,255,0.17) 0%, transparent 68%)", filter: "blur(56px)", animation: "smDrift1 20s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "-10%", right: "-16%", width: 580, height: 580, borderRadius: "50%", background: "radial-gradient(circle, rgba(78,88,240,0.13) 0%, transparent 70%)", filter: "blur(64px)", animation: "smDrift2 27s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "28%", left: "32%", width: 480, height: 480, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,138,255,0.09) 0%, transparent 70%)", filter: "blur(72px)", animation: "smDrift3 34s ease-in-out infinite", pointerEvents: "none" }} />
+        {/* Static base radials */}
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 12% 8%, rgba(100,88,255,0.07), transparent 34%), radial-gradient(circle at 88% 18%, rgba(80,90,240,0.06), transparent 32%)" }} />
+        {/* Blobs — more vibrant than before */}
+        <div style={{ position: "absolute", top: "-20%", left: "-12%", width: 760, height: 760, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.22) 0%, transparent 68%)", filter: "blur(60px)", animation: "smDrift1 20s ease-in-out infinite", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: "-12%", right: "-14%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle, rgba(78,88,240,0.18) 0%, transparent 70%)", filter: "blur(68px)", animation: "smDrift2 27s ease-in-out infinite", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: "30%", left: "38%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,138,255,0.12) 0%, transparent 70%)", filter: "blur(76px)", animation: "smDrift3 34s ease-in-out infinite", pointerEvents: "none" }} />
 
-        <div style={{ maxWidth: 1220, margin: "0 auto", padding: isMobile ? "40px 18px 72px" : "56px 32px 96px", position: "relative", zIndex: 1 }}>
+        <div style={{ maxWidth: 1220, margin: "0 auto", padding: isMobile ? "40px 18px 72px" : "52px 32px 92px", position: "relative", zIndex: 1 }}>
           <section>
+            {/* Hero card — slightly tinted so background blobs show through */}
             <div
               style={{
-                background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(255,255,255,0.76))",
-                border: "1px solid rgba(123,114,255,0.18)",
+                background: "linear-gradient(135deg, rgba(255,255,255,0.84), rgba(228,226,255,0.74))",
+                border: "1px solid rgba(123,114,255,0.20)",
                 borderRadius: 32,
                 overflow: "hidden",
-                boxShadow: "0 24px 64px rgba(83,77,212,0.13), inset 0 1px 0 rgba(255,255,255,0.95)",
+                boxShadow: "0 28px 72px rgba(83,77,212,0.16), inset 0 1px 0 rgba(255,255,255,0.95)",
                 position: "relative",
               }}
             >
-              <div style={{ position: "absolute", top: 0, left: "6%", right: "6%", height: 1, background: "linear-gradient(90deg, transparent, rgba(123,114,255,0.38), transparent)", pointerEvents: "none" }} />
+              <div style={{ position: "absolute", top: 0, left: "6%", right: "6%", height: 1, background: "linear-gradient(90deg, transparent, rgba(123,114,255,0.42), transparent)", pointerEvents: "none" }} />
               <div style={{ position: "absolute", inset: 0, borderRadius: "inherit", overflow: "hidden", pointerEvents: "none" }}>
                 <div style={{ position: "absolute", top: "-60%", left: 0, width: "35%", height: "220%", background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)", animation: "smSheen 9s ease-in-out infinite" }} />
               </div>
 
+              {/* Hero inner — 2-col on desktop, 1-col on mobile */}
               <div
                 style={{
-                  padding: isMobile ? "52px 28px 52px" : "88px 60px 88px",
-                  display: "flex",
-                  flexDirection: "column",
+                  padding: isMobile ? "48px 26px 52px" : "80px 60px 80px",
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "1.1fr 0.9fr",
+                  gap: isMobile ? 0 : 52,
                   alignItems: "center",
-                  textAlign: "center",
                   position: "relative",
                   zIndex: 1,
                 }}
               >
-                <SectionTag>
-                  <FaBolt />
-                  AI marketing automation
-                </SectionTag>
+                {/* Left: text content — left-aligned */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                  <SectionTag>
+                    <FaBolt />
+                    AI marketing automation
+                  </SectionTag>
 
-                <h1
-                  style={{
-                    margin: "28px 0 22px",
-                    fontSize: isMobile ? 46 : 72,
-                    lineHeight: 1.03,
-                    letterSpacing: "-0.05em",
-                    fontWeight: 500,
-                    color: TEXT,
-                    maxWidth: 720,
-                  }}
-                >
-                  Launch ads
-                  <br />
-                  effortlessly
-                </h1>
+                  <h1
+                    style={{
+                      margin: "26px 0 20px",
+                      fontSize: isMobile ? 44 : 68,
+                      lineHeight: 1.03,
+                      letterSpacing: "-0.05em",
+                      fontWeight: 500,
+                      color: TEXT,
+                      maxWidth: 560,
+                    }}
+                  >
+                    Launch ads
+                    <br />
+                    effortlessly
+                  </h1>
 
-                <p
-                  style={{
-                    color: TEXT_SOFT,
-                    fontSize: isMobile ? 17 : 18,
-                    lineHeight: 1.8,
-                    fontWeight: 400,
-                    maxWidth: 520,
-                    margin: "0 0 36px",
-                  }}
-                >
-                  Smartemark learns your business, generates your creatives, launches campaigns,
-                  and manages campaign performance — without an agency and without ad experience.
-                </p>
+                  <p
+                    style={{
+                      color: TEXT_SOFT,
+                      fontSize: isMobile ? 17 : 18,
+                      lineHeight: 1.8,
+                      fontWeight: 400,
+                      maxWidth: 480,
+                      margin: "0 0 32px",
+                    }}
+                  >
+                    Smartemark learns your business, generates your creatives, launches campaigns,
+                    and manages campaign performance — without an agency and without ad experience.
+                  </p>
 
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
-                  <CTAButton onClick={handleCTA}>
-                    {isLoggedIn ? "Open Dashboard" : "Get Started"}
-                  </CTAButton>
-                  {BOOKING_URL && (
-                    <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
-                  )}
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+                    <CTAButton onClick={handleCTA}>
+                      {isLoggedIn ? "Open Dashboard" : "Get Started"}
+                    </CTAButton>
+                    {BOOKING_URL && (
+                      <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
+                    )}
+                  </div>
                 </div>
+
+                {/* Right: mini campaign preview — desktop only */}
+                {!isMobile && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      animation: "smHeroFloat 7s ease-in-out infinite",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: "linear-gradient(145deg, rgba(255,255,255,0.97) 0%, rgba(242,241,255,0.98) 100%)",
+                        border: "1px solid rgba(93,89,234,0.16)",
+                        borderRadius: 26,
+                        padding: 22,
+                        boxShadow: "0 20px 56px rgba(83,77,212,0.18)",
+                        width: "100%",
+                        maxWidth: 310,
+                        position: "relative",
+                      }}
+                    >
+                      {/* Mini card header */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                        <div>
+                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 13 }}>Campaign Overview</div>
+                          <div style={{ color: TEXT_SOFT, fontSize: 11, marginTop: 2 }}>Local Service Business</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(34,197,94,0.09)", borderRadius: 999, padding: "4px 10px" }}>
+                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", animation: "smPulse 2.4s ease-in-out infinite", flexShrink: 0 }} />
+                          <span style={{ color: "#16a34a", fontWeight: 700, fontSize: 11 }}>Live</span>
+                        </div>
+                      </div>
+
+                      {/* 2 mini metrics */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
+                        <div style={{ background: "#f8f9ff", border: "1px solid rgba(93,89,234,0.08)", borderRadius: 14, padding: "12px 13px" }}>
+                          <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 5 }}>Leads</div>
+                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 22, lineHeight: 1 }}>37</div>
+                          <div style={{ color: "#16a34a", fontWeight: 600, fontSize: 11, marginTop: 3 }}>↑ this week</div>
+                        </div>
+                        <div style={{ background: "#f8f9ff", border: "1px solid rgba(93,89,234,0.08)", borderRadius: 14, padding: "12px 13px" }}>
+                          <div style={{ color: "#7b849f", fontWeight: 500, fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 5 }}>Cost / Lead</div>
+                          <div style={{ color: TEXT, fontWeight: 700, fontSize: 22, lineHeight: 1 }}>$14.80</div>
+                        </div>
+                      </div>
+
+                      {/* Mini sparkline */}
+                      <div style={{ background: "linear-gradient(135deg, #f5f6ff, #eef0ff)", borderRadius: 12, padding: "8px 12px 6px", marginBottom: 12 }}>
+                        <div style={{ color: "#7b849f", fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>CTR Trend</div>
+                        <svg width="100%" height="28" viewBox="0 0 200 28" preserveAspectRatio="none" style={{ display: "block" }}>
+                          <defs>
+                            <linearGradient id="smMiniChartFill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#5d59ea" stopOpacity="0.18" />
+                              <stop offset="100%" stopColor="#5d59ea" stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d="M0,24 C50,20 80,14 110,10 C140,6 170,4 200,2" fill="none" stroke="#5d59ea" strokeWidth="1.8" strokeLinecap="round" />
+                          <path d="M0,24 C50,20 80,14 110,10 C140,6 170,4 200,2 L200,28 L0,28 Z" fill="url(#smMiniChartFill)" />
+                          <circle cx="200" cy="2" r="2.5" fill="#5d59ea" />
+                        </svg>
+                      </div>
+
+                      {/* AI insight */}
+                      <div style={{ background: "rgba(93,89,234,0.06)", borderRadius: 12, padding: "10px 12px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+                        <FaBolt style={{ color: PURPLE, fontSize: 11, marginTop: 1, flexShrink: 0 }} />
+                        <span style={{ color: TEXT_SOFT, fontSize: 12, lineHeight: 1.5 }}>Testing a second creative angle to lower cost per lead.</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -486,11 +566,10 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* AI CAMPAIGN MANAGER */}
+        {/* AI CAMPAIGN MANAGER — "AI Campaign Manager" badge removed per request */}
         <section style={{ marginTop: isMobile ? 72 : 96 }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <SectionTag>AI Campaign Manager</SectionTag>
-            <div style={{ color: TEXT, fontSize: isMobile ? 30 : 40, lineHeight: 1.1, letterSpacing: "-0.04em", fontWeight: 500, marginTop: 18, marginBottom: 14 }}>
+            <div style={{ color: TEXT, fontSize: isMobile ? 30 : 40, lineHeight: 1.1, letterSpacing: "-0.04em", fontWeight: 500, marginBottom: 14 }}>
               Your campaigns, managed automatically
             </div>
             <p style={{ color: TEXT_SOFT, fontSize: isMobile ? 15 : 16, lineHeight: 1.7, maxWidth: 520, margin: "0 auto" }}>
@@ -585,26 +664,75 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* BOOK A CALL */}
+        {/* BOOK A CALL — vibrant purple gradient card */}
         {BOOKING_URL && (
           <section style={{ marginTop: isMobile ? 72 : 96 }}>
             <div
               style={{
-                background: "linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(240,242,255,0.96) 100%)",
-                border: `1px solid ${BORDER}`,
+                background: "linear-gradient(135deg, #3f52cc 0%, #5d59ea 52%, #7565f5 100%)",
                 borderRadius: 32,
-                padding: isMobile ? "44px 28px" : "60px 64px",
+                padding: isMobile ? "52px 28px" : "68px 80px",
                 textAlign: "center",
-                boxShadow: SOFT_SHADOW,
+                position: "relative",
+                overflow: "hidden",
+                boxShadow: "0 24px 64px rgba(63,82,204,0.30)",
               }}
             >
-              <div style={{ color: TEXT, fontSize: isMobile ? 28 : 36, fontWeight: 500, letterSpacing: "-0.04em", lineHeight: 1.15, marginBottom: 14 }}>
-                See how it works for your business
+              {/* Decorative inner glows */}
+              <div style={{ position: "absolute", top: "-35%", right: "-8%", width: 420, height: 420, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,255,255,0.14) 0%, transparent 65%)", pointerEvents: "none" }} />
+              <div style={{ position: "absolute", bottom: "-28%", left: "-6%", width: 320, height: 320, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 65%)", pointerEvents: "none" }} />
+              {/* Top light line */}
+              <div style={{ position: "absolute", top: 0, left: "12%", right: "12%", height: 1, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)", pointerEvents: "none" }} />
+
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div
+                  style={{
+                    color: "#ffffff",
+                    fontSize: isMobile ? 28 : 38,
+                    fontWeight: 600,
+                    letterSpacing: "-0.04em",
+                    lineHeight: 1.12,
+                    marginBottom: 16,
+                    maxWidth: 600,
+                    margin: "0 auto 16px",
+                  }}
+                >
+                  See how Smartemark could work for your business
+                </div>
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.80)",
+                    fontSize: isMobile ? 15 : 17,
+                    lineHeight: 1.75,
+                    maxWidth: 500,
+                    margin: "0 auto 36px",
+                  }}
+                >
+                  Book a quick call and we'll walk through how Smartemark creates ads, launches campaigns, and helps manage performance for local businesses.
+                </p>
+                <a
+                  href={BOOKING_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    background: "rgba(255,255,255,0.97)",
+                    color: "#4c63ff",
+                    borderRadius: 999,
+                    padding: "14px 34px",
+                    fontSize: 16,
+                    fontWeight: 700,
+                    textDecoration: "none",
+                    boxShadow: "0 8px 28px rgba(0,0,0,0.16)",
+                    fontFamily: FONT,
+                    letterSpacing: "-0.01em",
+                    transition: "all 160ms ease",
+                  }}
+                >
+                  Book a Call
+                </a>
               </div>
-              <p style={{ color: TEXT_SOFT, fontSize: isMobile ? 15 : 16, lineHeight: 1.7, maxWidth: 460, margin: "0 auto 32px" }}>
-                Book a free 30-minute call. No commitment, no agency pitch — just a clear look at what Smartemark can do.
-              </p>
-              <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
             </div>
           </section>
         )}
