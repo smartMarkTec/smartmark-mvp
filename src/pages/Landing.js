@@ -6,7 +6,7 @@ import { FaBolt, FaChevronDown } from "react-icons/fa";
 const BOOKING_URL = "https://cal.com/william-knowles-wxottg/30min";
 
 const FONT         = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG           = "linear-gradient(160deg, #e8ecff 0%, #f0f2ff 40%, #f7f8ff 72%, #fbfbff 100%)";
+const BG           = "#ffffff";
 const TEXT         = "#101426";
 const TEXT_SOFT    = "#626b86";
 const PURPLE       = "#5d59ea";
@@ -300,7 +300,7 @@ export default function Landing() {
           position: "sticky",
           top: 0,
           zIndex: 100,
-          background: scrolled ? "rgba(232,236,255,0.97)" : "rgba(232,236,255,0.82)",
+          background: scrolled ? "rgba(255,255,255,0.97)" : "rgba(255,255,255,0.86)",
           backdropFilter: "blur(14px)",
           WebkitBackdropFilter: "blur(14px)",
           borderBottom: scrolled
@@ -377,115 +377,104 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* ── Hero — overflow:hidden for animated blobs ────────────────────────── */}
+      {/* ── Hero ──────────────────────────────────────────────────────────────── */}
       <div style={{ position: "relative", overflow: "hidden" }}>
-        {/* Static base radials */}
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 12% 8%, rgba(100,88,255,0.07), transparent 34%), radial-gradient(circle at 88% 18%, rgba(80,90,240,0.06), transparent 32%)" }} />
-        {/* Ambient page blobs — kept soft so they don't fight the hero */}
-        <div style={{ position: "absolute", top: "-20%", left: "-12%", width: 760, height: 760, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.11) 0%, transparent 68%)", filter: "blur(60px)", animation: "smDrift1 20s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "-12%", right: "-14%", width: 620, height: 620, borderRadius: "50%", background: "radial-gradient(circle, rgba(78,88,240,0.09) 0%, transparent 70%)", filter: "blur(68px)", animation: "smDrift2 27s ease-in-out infinite", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "30%", left: "38%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(148,138,255,0.06) 0%, transparent 70%)", filter: "blur(76px)", animation: "smDrift3 34s ease-in-out infinite", pointerEvents: "none" }} />
 
-        <div style={{ maxWidth: 1220, margin: "0 auto", padding: isMobile ? "40px 18px 72px" : "52px 32px 92px", position: "relative", zIndex: 1 }}>
-          <section>
-            {/* Hero card — slightly tinted so background blobs show through */}
-            <div
+        {/* Left: text content — in normal flow, sets section height */}
+        <div
+          style={{
+            maxWidth: 1220,
+            margin: "0 auto",
+            padding: isMobile ? "64px 20px 72px" : "100px 64px 108px",
+            position: "relative",
+            zIndex: 2,
+          }}
+        >
+          <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <SectionTag>
+              <FaBolt />
+              AI marketing automation
+            </SectionTag>
+
+            <h1
               style={{
-                background: "rgba(255,255,255,0.97)",
-                border: "1px solid rgba(123,114,255,0.20)",
-                borderRadius: 32,
-                overflow: "hidden",
-                boxShadow: "0 28px 72px rgba(83,77,212,0.16), inset 0 1px 0 rgba(255,255,255,0.95)",
-                position: "relative",
+                margin: "26px 0 20px",
+                fontSize: isMobile ? 44 : 68,
+                lineHeight: 1.03,
+                letterSpacing: "-0.05em",
+                fontWeight: 500,
+                color: TEXT,
+                maxWidth: 560,
               }}
             >
-              <div style={{ position: "absolute", top: 0, left: "6%", right: "6%", height: 1, background: "linear-gradient(90deg, transparent, rgba(123,114,255,0.42), transparent)", pointerEvents: "none" }} />
-              <div style={{ position: "absolute", inset: 0, borderRadius: "inherit", overflow: "hidden", pointerEvents: "none" }}>
-                <div style={{ position: "absolute", top: "-60%", left: 0, width: "35%", height: "220%", background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%)", animation: "smSheen 9s ease-in-out infinite" }} />
-              </div>
+              Launch ads
+              <br />
+              effortlessly
+            </h1>
 
-              {/* ── Hero right-side visual layer ────────────────────────────────── */}
+            <p
+              style={{
+                color: TEXT_SOFT,
+                fontSize: isMobile ? 17 : 18,
+                lineHeight: 1.8,
+                fontWeight: 400,
+                maxWidth: 480,
+                margin: "0 0 32px",
+              }}
+            >
+              Smartemark learns your business, generates your creatives, launches campaigns,
+              and manages campaign performance — without an agency and without ad experience.
+            </p>
 
-              {/* 1. Right-half base haze — gives the right side a clear lavender field */}
-              <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: "52%", background: "linear-gradient(to left, rgba(210,218,255,0.18) 0%, rgba(215,222,255,0.10) 48%, transparent 100%)", pointerEvents: "none" }} />
-
-              {/* 2. Primary blob — large, top-right, blue-purple anchor */}
-              <div style={{ position: "absolute", top: "-22%", right: "-10%", width: 720, height: 720, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,135,255,0.26) 0%, rgba(150,165,255,0.10) 40%, transparent 65%)", filter: "blur(58px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none" }} />
-
-              {/* 3. Secondary blob — bottom-right, deeper purple */}
-              <div style={{ position: "absolute", bottom: "-18%", right: "4%", width: 460, height: 460, borderRadius: "50%", background: "radial-gradient(circle, rgba(108,85,255,0.20) 0%, transparent 58%)", filter: "blur(70px)", animation: "smHeroBlob2 26s ease-in-out infinite", pointerEvents: "none" }} />
-
-              {/* 4. Accent blob — mid-right, blue-indigo */}
-              <div style={{ position: "absolute", top: "28%", right: "10%", width: 310, height: 310, borderRadius: "50%", background: "radial-gradient(circle, rgba(90,140,255,0.18) 0%, transparent 60%)", filter: "blur(48px)", animation: "smHeroBlob3 18s ease-in-out infinite", pointerEvents: "none" }} />
-
-              {/* 5. Diagonal ribbon + bright streak — desktop only so they stay right of text */}
-              {!isMobile && (
-                <>
-                  {/* Wide ribbon — faint, sets diagonal geometry */}
-                  <div style={{ position: "absolute", top: "-30%", right: "6%", width: 190, height: "165%", background: "linear-gradient(to bottom, transparent 5%, rgba(195,208,255,0.22) 28%, rgba(180,198,255,0.18) 56%, transparent 94%)", transform: "rotate(-26deg)", filter: "blur(16px)", pointerEvents: "none" }} />
-                  {/* Bright streak — thinner, lighter, breathing */}
-                  <div style={{ position: "absolute", top: "-18%", right: "19%", width: 58, height: "148%", background: "linear-gradient(to bottom, transparent 8%, rgba(222,230,255,0.40) 30%, rgba(212,224,255,0.32) 58%, transparent 92%)", transform: "rotate(-26deg)", filter: "blur(8px)", animation: "smRibbonBreathe 14s ease-in-out infinite", pointerEvents: "none" }} />
-                </>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+              <CTAButton onClick={handleCTA}>
+                {isLoggedIn ? "Open Dashboard" : "Get Started"}
+              </CTAButton>
+              {BOOKING_URL && (
+                <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
               )}
-
-              {/* Hero content — left-aligned, single column */}
-              <div
-                style={{
-                  padding: isMobile ? "52px 28px 56px" : "84px 64px 84px",
-                  position: "relative",
-                  zIndex: 1,
-                }}
-              >
-                <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                  <SectionTag>
-                    <FaBolt />
-                    AI marketing automation
-                  </SectionTag>
-
-                  <h1
-                    style={{
-                      margin: "26px 0 20px",
-                      fontSize: isMobile ? 44 : 68,
-                      lineHeight: 1.03,
-                      letterSpacing: "-0.05em",
-                      fontWeight: 500,
-                      color: TEXT,
-                      maxWidth: 560,
-                    }}
-                  >
-                    Launch ads
-                    <br />
-                    effortlessly
-                  </h1>
-
-                  <p
-                    style={{
-                      color: TEXT_SOFT,
-                      fontSize: isMobile ? 17 : 18,
-                      lineHeight: 1.8,
-                      fontWeight: 400,
-                      maxWidth: 480,
-                      margin: "0 0 32px",
-                    }}
-                  >
-                    Smartemark learns your business, generates your creatives, launches campaigns,
-                    and manages campaign performance — without an agency and without ad experience.
-                  </p>
-
-                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-                    <CTAButton onClick={handleCTA}>
-                      {isLoggedIn ? "Open Dashboard" : "Get Started"}
-                    </CTAButton>
-                    {BOOKING_URL && (
-                      <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
-                    )}
-                  </div>
-                </div>
-
-              </div>
             </div>
-          </section>
+          </div>
         </div>
+
+        {/* Right: abstract art panel — desktop only, contained with overflow hidden */}
+        {!isMobile && (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: "45%",
+              overflow: "hidden",
+              zIndex: 1,
+            }}
+          >
+            {/* Panel base gradient — the colored ground */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(155deg, #eef0ff 0%, #e5eaff 32%, #dde5ff 62%, #d5deff 100%)" }} />
+
+            {/* Left-edge white fade — smooth transition from white text area into panel */}
+            <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: "30%", background: "linear-gradient(to right, #ffffff 0%, transparent 100%)", zIndex: 3 }} />
+
+            {/* Primary glow — top-right */}
+            <div style={{ position: "absolute", top: "-22%", right: "-14%", width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,140,255,0.44) 0%, rgba(140,160,255,0.17) 42%, transparent 68%)", filter: "blur(44px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
+
+            {/* Secondary glow — bottom */}
+            <div style={{ position: "absolute", bottom: "-18%", left: "4%", width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.38) 0%, transparent 60%)", filter: "blur(56px)", animation: "smHeroBlob2 26s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
+
+            {/* Diagonal ribbon 1 — wide, translucent white streak */}
+            <div style={{ position: "absolute", top: "-20%", left: "20%", width: 130, height: "140%", background: "linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.54) 22%, rgba(255,255,255,0.46) 56%, transparent 100%)", transform: "rotate(-20deg)", filter: "blur(10px)", animation: "smHeroBlob2 24s ease-in-out infinite", pointerEvents: "none", zIndex: 2 }} />
+
+            {/* Diagonal ribbon 2 — bright center streak */}
+            <div style={{ position: "absolute", top: "-12%", left: "40%", width: 48, height: "128%", background: "linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.80) 24%, rgba(255,255,255,0.66) 54%, transparent 100%)", transform: "rotate(-20deg)", filter: "blur(4px)", animation: "smRibbonBreathe 14s ease-in-out infinite", pointerEvents: "none", zIndex: 2 }} />
+
+            {/* Diagonal ribbon 3 — outer, faint */}
+            <div style={{ position: "absolute", top: "-25%", right: "10%", width: 80, height: "150%", background: "linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.40) 28%, rgba(255,255,255,0.32) 60%, transparent 100%)", transform: "rotate(-20deg)", filter: "blur(7px)", pointerEvents: "none", zIndex: 2 }} />
+          </div>
+        )}
+
+        {/* Section bottom separator */}
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 1, background: "linear-gradient(to right, transparent 5%, rgba(93,89,234,0.08) 25%, rgba(93,89,234,0.08) 75%, transparent 95%)", pointerEvents: "none" }} />
       </div>
 
       {/* ── Lower sections ───────────────────────────────────────────────────── */}
@@ -536,7 +525,7 @@ export default function Landing() {
         <section style={{ marginTop: isMobile ? 72 : 96 }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
             <div style={{ color: TEXT, fontSize: isMobile ? 30 : 40, lineHeight: 1.1, letterSpacing: "-0.04em", fontWeight: 500, marginBottom: 14 }}>
-              Your campaigns, managed automatically
+              Your campaigns managed automatically
             </div>
             <p style={{ color: TEXT_SOFT, fontSize: isMobile ? 15 : 16, lineHeight: 1.7, maxWidth: 520, margin: "0 auto" }}>
               Smartemark monitors performance, tests new creative angles, and makes optimization decisions — so you never have to watch it yourself.
