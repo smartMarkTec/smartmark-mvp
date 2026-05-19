@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import smartmarkLogo from "../assets/smartemark-logo.png";
 
 // ─── Design tokens ──────────────────────────────────────────────────────────────
@@ -11,17 +11,35 @@ const TEXT_MUTED    = "#5a6080";
 const PURPLE        = "#5d59ea";
 const CARD_BG       = "rgba(255,255,255,0.05)";
 const CARD_BORDER   = "rgba(255,255,255,0.10)";
-const ACTIVE_BORDER = "rgba(93,89,234,0.55)";
 const GLOW          = "0 0 28px rgba(93,89,234,0.15)";
+
+// ─── Slug helpers ────────────────────────────────────────────────────────────────
+function makeSlug(title) {
+  return String(title || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+// Priority: explicit slug → derived from title → fall back to id
+function getVideoSlug(video) {
+  if (video.slug) return video.slug;
+  const fromTitle = makeSlug(video.title);
+  if (fromTitle) return fromTitle;
+  return video.id;
+}
 
 // ─── Video defaults ──────────────────────────────────────────────────────────────
 const DEFAULT_VIDEOS = [
-  { id: "video-1", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
-  { id: "video-2", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
-  { id: "video-3", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
-  { id: "video-4", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
-  { id: "video-5", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
-  { id: "video-6", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-1", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-2", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-3", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-4", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-5", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
+  { id: "video-6", slug: "", title: "", description: "", youtubeUrl: "", thumbnail: "", duration: "" },
 ];
 
 // ─── localStorage helpers ────────────────────────────────────────────────────────
@@ -32,7 +50,10 @@ function loadVideos() {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Back-fill slug field for older saved entries
+        return parsed.map((v) => ({ slug: "", ...v }));
+      }
     }
   } catch {}
   return DEFAULT_VIDEOS.map((v) => ({ ...v }));
@@ -78,8 +99,56 @@ function useIsMobile() {
   return is;
 }
 
-// ─── VideoCard (public view, with optional admin overlay button) ──────────────────
-function VideoCard({ video, isOpen, onToggle, adminMode, onAdminEdit }) {
+// ─── CopyLinkButton ───────────────────────────────────────────────────────────────
+function CopyLinkButton({ video }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    const slug = getVideoSlug(video);
+    const url = `${window.location.origin}/booked-call?video=${encodeURIComponent(slug)}`;
+
+    navigator.clipboard.writeText(url).catch(() => {
+      try {
+        const el = document.createElement("textarea");
+        el.value = url;
+        el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      } catch {}
+    });
+
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy direct link to this video"
+      style={{
+        background: "transparent",
+        border: "none",
+        color: copied ? "#1ec885" : TEXT_MUTED,
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        padding: "2px 0",
+        fontFamily: FONT,
+        transition: "color 200ms ease",
+        flexShrink: 0,
+      }}
+    >
+      {copied ? "✓ Copied" : "Copy link"}
+    </button>
+  );
+}
+
+// ─── VideoCard (public view) ──────────────────────────────────────────────────────
+// Cards no longer expand inline — clicking opens the VideoModal instead.
+function VideoCard({ video, onOpen, adminMode, onAdminEdit }) {
   const embedUrl    = getEmbedUrl(video.youtubeUrl);
   const thumbUrl    = getThumbnailUrl(video.youtubeUrl, video.thumbnail);
   const hasVideo    = !!embedUrl;
@@ -92,30 +161,21 @@ function VideoCard({ video, isOpen, onToggle, adminMode, onAdminEdit }) {
     <div
       style={{
         position: "relative",
-        background: isOpen ? "rgba(93,89,234,0.09)" : hover ? "rgba(255,255,255,0.07)" : CARD_BG,
-        border: `1px solid ${isOpen ? ACTIVE_BORDER : CARD_BORDER}`,
+        background: hover && hasVideo && !adminMode ? "rgba(255,255,255,0.07)" : CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
         borderRadius: 16,
         overflow: "hidden",
         transition: "all 150ms ease",
-        boxShadow: isOpen ? GLOW : "none",
+        boxShadow: hover && hasVideo && !adminMode ? GLOW : "none",
         cursor: adminMode ? "default" : hasVideo ? "pointer" : "default",
       }}
-      onClick={!adminMode && hasVideo ? onToggle : undefined}
+      onClick={!adminMode && hasVideo ? () => onOpen(video.id) : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      {/* Thumbnail / player */}
+      {/* Thumbnail */}
       <div style={{ position: "relative", paddingTop: "56.25%", background: "#0a0c18" }}>
-        {isOpen && embedUrl ? (
-          <iframe
-            src={`${embedUrl}&autoplay=1`}
-            title={title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            loading="lazy"
-            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
-          />
-        ) : thumbUrl ? (
+        {thumbUrl ? (
           <>
             <img
               src={thumbUrl}
@@ -140,7 +200,7 @@ function VideoCard({ video, isOpen, onToggle, adminMode, onAdminEdit }) {
           </div>
         )}
 
-        {video.duration && !isOpen && (
+        {video.duration && (
           <div style={{ position: "absolute", bottom: 7, right: 9, background: "rgba(0,0,0,0.72)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, fontFamily: FONT }}>
             {video.duration}
           </div>
@@ -149,20 +209,21 @@ function VideoCard({ video, isOpen, onToggle, adminMode, onAdminEdit }) {
 
       {/* Text */}
       <div style={{ padding: "14px 16px 16px" }}>
-        <p style={{ margin: "0 0 5px", fontSize: 14, fontWeight: 600, color: isOpen ? "#e0e0ff" : TEXT, fontFamily: FONT, lineHeight: 1.35 }}>
+        <p style={{ margin: "0 0 5px", fontSize: 14, fontWeight: 600, color: TEXT, fontFamily: FONT, lineHeight: 1.35 }}>
           {title}
         </p>
         <p style={{ margin: 0, fontSize: 13, color: TEXT_MUTED, fontFamily: FONT, lineHeight: 1.5 }}>
           {description}
         </p>
         {hasVideo && !adminMode && (
-          <p style={{ margin: "10px 0 0", fontSize: 12, color: PURPLE, fontFamily: FONT, fontWeight: 600 }}>
-            {isOpen ? "▲ Close" : "▶ Watch"}
-          </p>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, color: PURPLE, fontFamily: FONT, fontWeight: 600 }}>▶ Watch</span>
+            <CopyLinkButton video={video} />
+          </div>
         )}
       </div>
 
-      {/* Admin edit button — only visible in admin mode */}
+      {/* Admin edit button */}
       {adminMode && (
         <button
           onClick={(e) => { e.stopPropagation(); onAdminEdit(); }}
@@ -191,12 +252,134 @@ function VideoCard({ video, isOpen, onToggle, adminMode, onAdminEdit }) {
   );
 }
 
+// ─── VideoModal — full-screen video player modal ──────────────────────────────────
+function VideoModal({ video, onClose }) {
+  const embedUrl = getEmbedUrl(video.youtubeUrl);
+  const title    = video.title || "Smartemark Video";
+
+  // Esc key closes modal
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  return (
+    <>
+      {/* Dark overlay — click to close */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.88)",
+          zIndex: 3000,
+        }}
+      />
+
+      {/* Modal container — centered, responsive */}
+      <div
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          zIndex: 3001,
+          width: "min(900px, calc(100vw - 24px))",
+          maxHeight: "calc(100vh - 40px)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Header row: title + close */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 10,
+            padding: "0 2px",
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#ffffff", fontFamily: FONT, lineHeight: 1.3, minWidth: 0 }}>
+            {title}
+          </p>
+          <button
+            onClick={onClose}
+            aria-label="Close video"
+            style={{
+              background: "rgba(255,255,255,0.12)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              color: "#ffffff",
+              fontSize: 20,
+              cursor: "pointer",
+              borderRadius: 8,
+              width: 36,
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: FONT,
+              flexShrink: 0,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* 16:9 player */}
+        <div
+          style={{
+            position: "relative",
+            paddingTop: "56.25%",
+            background: "#000",
+            borderRadius: 12,
+            overflow: "hidden",
+            boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
+          }}
+        >
+          {embedUrl ? (
+            <iframe
+              src={`${embedUrl}&autoplay=1`}
+              title={title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+            />
+          ) : (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ color: "rgba(255,255,255,0.4)", fontFamily: FONT, fontSize: 14 }}>Video unavailable</span>
+            </div>
+          )}
+        </div>
+
+        {/* Description (if present) */}
+        {video.description && (
+          <p style={{ margin: "12px 2px 0", fontSize: 14, color: "rgba(255,255,255,0.60)", fontFamily: FONT, lineHeight: 1.65 }}>
+            {video.description}
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ─── AdminModal — edit form for a single video card ───────────────────────────────
 function AdminModal({ video, index, onSave, onCancel }) {
-  const [local, setLocal] = useState({ ...video });
+  const [local, setLocal] = useState({ slug: "", ...video });
 
-  const ytId = getYouTubeId(local.youtubeUrl);
-  const isPopulated = !!(local.youtubeUrl || local.title || local.description || local.duration);
+  const ytId         = getYouTubeId(local.youtubeUrl);
+  const isPopulated  = !!(local.youtubeUrl || local.title || local.description || local.duration);
+  const previewSlug  = local.slug || makeSlug(local.title);
 
   const inputBase = {
     width: "100%",
@@ -223,9 +406,15 @@ function AdminModal({ video, index, onSave, onCancel }) {
 
   const set = (field, value) => setLocal((p) => ({ ...p, [field]: value }));
 
+  // Sanitize slug input to lowercase-hyphenated only
+  const setSlug = (raw) => {
+    const clean = raw.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
+    set("slug", clean);
+  };
+
   const clearVideo = () => {
     if (!window.confirm("Clear all data for this video slot?")) return;
-    setLocal({ ...video, youtubeUrl: "", title: "", description: "", duration: "", thumbnail: "" });
+    setLocal({ id: video.id, slug: "", title: "", description: "", youtubeUrl: "", duration: "", thumbnail: "" });
   };
 
   return (
@@ -233,12 +422,7 @@ function AdminModal({ video, index, onSave, onCancel }) {
       {/* Backdrop */}
       <div
         onClick={onCancel}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.72)",
-          zIndex: 2000,
-        }}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 2000 }}
       />
 
       {/* Modal panel */}
@@ -337,6 +521,23 @@ function AdminModal({ video, index, onSave, onCancel }) {
               style={{ ...inputBase, width: "auto", minWidth: 160 }}
             />
           </div>
+
+          {/* Slug / direct link */}
+          <div>
+            <label style={labelStyle}>Link Slug (optional — auto-generated from title if blank)</label>
+            <input
+              type="text"
+              value={local.slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder={makeSlug(local.title) || "e.g. smartemark-intro"}
+              style={inputBase}
+            />
+            {previewSlug && (
+              <p style={{ margin: "5px 0 0", fontSize: 11, color: TEXT_MUTED, fontFamily: FONT }}>
+                Direct link: /booked-call?video=<strong style={{ color: TEXT_SOFT }}>{previewSlug}</strong>
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Action buttons */}
@@ -403,17 +604,30 @@ export default function BookedCall() {
   const isMobile = useIsMobile();
 
   // Public state
-  const [videos, setVideos] = useState(loadVideos);
-  const [openId, setOpenId] = useState(null);
+  const [videos, setVideos]         = useState(loadVideos);
+  const [modalVideoId, setModalVideoId] = useState(null); // which video is open in the large player
 
   // Admin state
   const [adminMode, setAdminMode]   = useState(false);
-  const [editingId, setEditingId]   = useState(null); // id of the card whose modal is open
+  const [editingId, setEditingId]   = useState(null);
+
+  // ── On mount: check ?video=slug URL param and auto-open the matching video
+  useEffect(() => {
+    const params     = new URLSearchParams(window.location.search);
+    const videoParam = params.get("video");
+    if (!videoParam) return;
+
+    const allVideos = loadVideos(); // read fresh to avoid stale closure
+    const found = allVideos.find((v) => getVideoSlug(v) === videoParam);
+    if (found && getEmbedUrl(found.youtubeUrl)) {
+      setModalVideoId(found.id);
+    }
+  }, []);
 
   const enterAdmin = () => {
     setAdminMode(true);
     setEditingId(null);
-    setOpenId(null);
+    setModalVideoId(null);
   };
 
   const exitAdmin = () => {
@@ -422,6 +636,10 @@ export default function BookedCall() {
   };
 
   const handleAdminSave = (id, updatedData) => {
+    // Auto-generate slug from title if the admin left it blank
+    if (!updatedData.slug && updatedData.title) {
+      updatedData = { ...updatedData, slug: makeSlug(updatedData.title) };
+    }
     const updated = videos.map((v) => (v.id === id ? { ...v, ...updatedData } : v));
     setVideos(updated);
     saveVideos(updated);
@@ -436,11 +654,13 @@ export default function BookedCall() {
     setEditingId(null);
   };
 
-  const toggle = (id) => setOpenId((prev) => (prev === id ? null : id));
+  const openModal  = (id) => { if (!adminMode) setModalVideoId(id); };
+  const closeModal = ()   => setModalVideoId(null);
 
-  // Find the video being edited
-  const editingVideo = editingId ? videos.find((v) => v.id === editingId) : null;
-  const editingIndex = editingId ? videos.findIndex((v) => v.id === editingId) : -1;
+  // Find the video currently open in the large player
+  const modalVideo   = modalVideoId ? videos.find((v) => v.id === modalVideoId) : null;
+  const editingVideo = editingId    ? videos.find((v) => v.id === editingId)    : null;
+  const editingIndex = editingId    ? videos.findIndex((v) => v.id === editingId) : -1;
 
   return (
     <div style={{ minHeight: "100vh", background: PAGE_BG, fontFamily: FONT, color: TEXT }}>
@@ -485,7 +705,7 @@ export default function BookedCall() {
         </p>
       </div>
 
-      {/* ── Section 2: Admin mode banner (only shown when active) ───────────── */}
+      {/* ── Section 2: Admin mode banner ────────────────────────────────────── */}
       {adminMode && (
         <div
           style={{
@@ -572,8 +792,7 @@ export default function BookedCall() {
             <VideoCard
               key={v.id}
               video={v}
-              isOpen={!adminMode && openId === v.id}
-              onToggle={() => toggle(v.id)}
+              onOpen={openModal}
               adminMode={adminMode}
               onAdminEdit={() => setEditingId(v.id)}
             />
@@ -618,7 +837,12 @@ export default function BookedCall() {
         )}
       </div>
 
-      {/* ── Admin modal — renders on top when a card's Edit button is clicked ── */}
+      {/* ── Large video player modal ─────────────────────────────────────────── */}
+      {modalVideo && (
+        <VideoModal video={modalVideo} onClose={closeModal} />
+      )}
+
+      {/* ── Admin edit modal ─────────────────────────────────────────────────── */}
       {adminMode && editingVideo && (
         <AdminModal
           video={editingVideo}
