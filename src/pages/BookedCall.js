@@ -129,7 +129,7 @@ function CopyLinkButton({ video }) {
   const handleCopy = (e) => {
     e.stopPropagation();
     const slug = getVideoSlug(video);
-    const url  = `${window.location.origin}/booked-call?video=${encodeURIComponent(slug)}`;
+    const url  = `${window.location.origin}/v/${slug}`;
 
     navigator.clipboard.writeText(url).catch(() => {
       try {
