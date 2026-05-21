@@ -442,6 +442,18 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server started on http://0.0.0.0:${PORT} (heap<=${MAX_HEAP_MB}MB)`);
   console.log('[build check] code change test active');
+
+  // AI Operator Auto-Runner (enable via OPTIMIZER_AUTORUN_ENABLED=1)
+  try {
+    const { startOptimizerAutoRunner } = require('./optimizerAutoRunner');
+    if (typeof authRoutes.runInternalScheduledPass === 'function') {
+      startOptimizerAutoRunner({ runScheduledPass: authRoutes.runInternalScheduledPass });
+    } else {
+      console.warn('[optimizer autorun] runInternalScheduledPass not found on authRoutes — autorun skipped');
+    }
+  } catch (autoRunErr) {
+    console.error('[optimizer autorun] failed to start:', autoRunErr?.message || autoRunErr);
+  }
 });
 
 module.exports = app;

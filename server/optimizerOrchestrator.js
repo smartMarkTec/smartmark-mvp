@@ -68,6 +68,10 @@ async function runFullOptimizerCycle({
   const normalizedAccountId = String(accountId).replace(/^act_/, '').trim();
   const normalizedOwnerKey = String(ownerKey || '').trim();
 
+  // Dry-run mode: diagnose and decide but skip all Facebook API actions.
+  // Enable via env: SMARTEMARK_AI_OPERATOR_DRY_RUN=1
+  const DRY_RUN = String(process.env.SMARTEMARK_AI_OPERATOR_DRY_RUN || '').trim() === '1';
+
   const cycle = {
     campaignId: normalizedCampaignId,
     accountId: normalizedAccountId,
@@ -81,7 +85,8 @@ async function runFullOptimizerCycle({
     decisionAfterMonitoring: null,
     secondAction: null,
     finishedAt: null,
-    mode: 'full_cycle_v3_ai_diagnosis',
+    mode: DRY_RUN ? 'full_cycle_v3_ai_diagnosis_dry_run' : 'full_cycle_v3_ai_diagnosis',
+    dryRun: DRY_RUN,
   };
 
   const syncResult = await syncCampaignMetricsToOptimizerState({
@@ -117,10 +122,16 @@ async function runFullOptimizerCycle({
 
   state = await safeReloadState(normalizedCampaignId, 'after first decision');
 
-  const action = await executeAction({
-    optimizerState: state,
-    userToken,
-  });
+  const action = DRY_RUN
+    ? {
+        actionType: 'dry_run_skipped',
+        skipped: true,
+        dryRun: true,
+        plannedActionType: decisionBeforeAction?.actionType || 'unknown',
+        reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
+        generatedAt: new Date().toISOString(),
+      }
+    : await executeAction({ optimizerState: state, userToken });
   await persistAction(normalizedCampaignId, action);
   cycle.action = action;
 
@@ -150,10 +161,16 @@ async function runFullOptimizerCycle({
     secondActionType !== firstActionType;
 
   if (shouldRunSecondAction) {
-    const secondAction = await executeAction({
-      optimizerState: state,
-      userToken,
-    });
+    const secondAction = DRY_RUN
+      ? {
+          actionType: 'dry_run_skipped',
+          skipped: true,
+          dryRun: true,
+          plannedActionType: decisionAfterMonitoring?.actionType || 'unknown',
+          reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
+          generatedAt: new Date().toISOString(),
+        }
+      : await executeAction({ optimizerState: state, userToken });
 
     await persistAction(normalizedCampaignId, secondAction);
     cycle.secondAction = secondAction;

@@ -110,6 +110,9 @@ Tone rules for the "reason" field:
     latestAction: optimizerState?.latestAction || null,
     latestDecision: optimizerState?.latestDecision || null,
     latestMonitoringDecision: optimizerState?.latestMonitoringDecision || null,
+    // Original campaign brief — grounded in what the user actually entered at launch.
+    // Ensures diagnosis is aware of business type, offer, and messaging intent.
+    businessBrief: optimizerState?.businessBrief || null,
     creativeContext: creativesRecord
       ? {
           mediaSelection: String(creativesRecord?.mediaSelection || '').trim(),
@@ -228,6 +231,7 @@ Rules:
     latestMonitoringDecision: optimizerState?.latestMonitoringDecision || null,
     latestAction: optimizerState?.latestAction || null,
     manualOverride: !!optimizerState?.manualOverride,
+    businessBrief: optimizerState?.businessBrief || null,
     allowedDecisions,
     allowedActionTypes,
   };

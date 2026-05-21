@@ -6371,4 +6371,66 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// ── AI Operator: simulation endpoint ─────────────────────────────────────────
+// Runs diagnosis + decision against a mock campaign state for testing.
+// Does NOT touch any real state or call any Facebook API.
+router.post('/facebook/optimizer/simulate', async (req, res) => {
+  try {
+    const usingDebugKey = hasValidDebugKey(req);
+    if (!usingDebugKey) {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+    }
+
+    const scenario = req.body?.scenario || {};
+
+    const mockState = {
+      campaignId: String(scenario.campaignId || 'sim-test').trim(),
+      campaignName: String(scenario.campaignName || 'Simulation Campaign').trim(),
+      niche: String(scenario.niche || '').trim(),
+      currentStatus: String(scenario.currentStatus || 'ACTIVE').trim(),
+      billingBlocked: !!scenario.billingBlocked,
+      manualOverride: false,
+      metricsSnapshot: scenario.metricsSnapshot || {},
+      latestAction: scenario.latestAction || null,
+      latestDecision: null,
+      latestMonitoringDecision: null,
+      businessBrief: scenario.businessBrief || null,
+    };
+
+    const { runOptimizerBrainDiagnosis, runOptimizerBrainDecision } = require('../optimizerBrain');
+
+    const diagnosis = await runOptimizerBrainDiagnosis({
+      optimizerState: mockState,
+      creativesRecord: scenario.creativesRecord || null,
+    });
+
+    const mockStateWithDiagnosis = { ...mockState, latestDiagnosis: diagnosis };
+
+    const decision = await runOptimizerBrainDecision({
+      optimizerState: mockStateWithDiagnosis,
+    });
+
+    return res.json({
+      ok: true,
+      simulation: true,
+      scenario,
+      diagnosis,
+      decision,
+      note: 'Simulation only — no state was modified and no Facebook API was called.',
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Simulation failed.',
+    });
+  }
+});
+
+// Expose internal scheduled pass for the background auto-runner started in server.js.
+// The auto-runner calls router.runInternalScheduledPass({ minHoursBetweenRuns, limit }).
+router.runInternalScheduledPass = runInternalScheduledPass;
+
 module.exports = router;
