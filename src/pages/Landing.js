@@ -341,8 +341,14 @@ export default function Landing() {
               </>
             )}
 
+            {isMobile && (
+              <button onClick={() => (window.location.href = "/pricing")} style={navBtnSm}>
+                Pricing
+              </button>
+            )}
+
             {isMobile && !isLoggedIn && (
-              <button onClick={() => (window.location.href = "/login")} style={navBtn}>
+              <button onClick={() => (window.location.href = "/login")} style={navBtnSm}>
                 Login
               </button>
             )}
@@ -729,4 +735,15 @@ const navBtn = {
   cursor: "pointer",
   fontFamily: FONT,
   padding: "10px 14px",
+};
+
+const navBtnSm = {
+  background: "transparent",
+  border: "none",
+  color: TEXT_SOFT,
+  fontWeight: 500,
+  fontSize: 13,
+  cursor: "pointer",
+  fontFamily: FONT,
+  padding: "8px 9px",
 };
