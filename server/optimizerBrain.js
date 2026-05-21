@@ -85,10 +85,11 @@ Rules:
 - Prefer "continue_monitoring" when signal is too weak.
 - If campaign is blocked, paused, or has zero delivery, diagnose delivery first.
 - If CTR is weak after meaningful impressions, prefer low_ctr.
-- If clicks exist but conversions are absent after meaningful click volume, consider post_click_conversion_gap.
+- If clicks exist but conversions are absent after meaningful click volume AND conversionTrackingConfirmed is true, consider post_click_conversion_gap. If conversionTrackingConfirmed is false, do NOT use post_click_conversion_gap.
 - If frequency is elevated and performance is softening, consider creative_fatigue_risk.
 - Confidence must be a number from 0 to 1.
 - Output JSON only. No markdown.
+- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, conversions are UNAVAILABLE — treat them as UNKNOWN, not zero. Never say "zero conversions", "no conversions recorded", "conversion rate is poor", or make any judgment based on conversion counts. Instead say something like: "Conversion tracking is not yet connected, so performance is being evaluated using clicks, CTR, CPC, and spend." Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.
 
 Tone rules for the "reason" field:
 - Write like a calm, professional marketing advisor — not a judge.
@@ -110,6 +111,8 @@ Tone rules for the "reason" field:
     latestAction: optimizerState?.latestAction || null,
     latestDecision: optimizerState?.latestDecision || null,
     latestMonitoringDecision: optimizerState?.latestMonitoringDecision || null,
+    conversionTrackingConfirmed: !!optimizerState?.conversionTrackingConfirmed ||
+      String(process.env.OPTIMIZER_CONVERSION_TRACKING_ENABLED || '').trim() === '1',
     // Original campaign brief — grounded in what the user actually entered at launch.
     // Ensures diagnosis is aware of business type, offer, and messaging intent.
     businessBrief: optimizerState?.businessBrief || null,
@@ -219,6 +222,7 @@ Rules:
 - Action type must be from the allowed list.
 - Confidence must be from 0 to 1.
 - Output JSON only. No markdown.
+- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do not make conversion-based decisions. Do not recommend test_offer_or_audience_angle or test_new_audience_or_creative based solely on missing conversions. Focus on click quality, CTR, CPC, and spend efficiency instead.
 `.trim();
 
   const input = {
@@ -232,6 +236,8 @@ Rules:
     latestAction: optimizerState?.latestAction || null,
     manualOverride: !!optimizerState?.manualOverride,
     businessBrief: optimizerState?.businessBrief || null,
+    conversionTrackingConfirmed: !!optimizerState?.conversionTrackingConfirmed ||
+      String(process.env.OPTIMIZER_CONVERSION_TRACKING_ENABLED || '').trim() === '1',
     allowedDecisions,
     allowedActionTypes,
   };

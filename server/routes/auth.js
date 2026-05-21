@@ -4726,15 +4726,23 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
     const response = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`, {
       params: {
         access_token: userToken,
-        fields: 'id,name,status,effective_status,start_time',
+        fields: 'id,name,status,effective_status,start_time,stop_time',
         limit: 50,
       },
     });
 
     const list = Array.isArray(response.data?.data) ? response.data.data : [];
 
+    // Enrich each campaign with its Smartemark archive flag from our DB
+    await db.read();
+    const _dbCampaigns = db.data?.campaign_creatives || [];
+    const enriched = list.map((c) => {
+      const dbRec = _dbCampaigns.find((r) => String(r.campaignId || '') === String(c.id || ''));
+      return dbRec?.smArchived ? { ...c, smArchived: true } : c;
+    });
+
     return res.json({
-      data: list,
+      data: enriched,
       source: 'facebook',
     });
   } catch (err) {
@@ -4762,6 +4770,8 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
           status: r.status || 'ACTIVE',
           effective_status: r.status || 'ACTIVE',
           start_time: r.createdAt || r.updatedAt || null,
+          stop_time: r.endDate || null,
+          smArchived: !!r.smArchived,
         }))
 
       if (cached.length > 0) {
@@ -4789,6 +4799,92 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
       error: err.response?.data?.error?.message || 'Failed to fetch campaigns.',
       detail: err.response?.data || err.message,
     });
+  }
+});
+
+router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/archive', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { campaignId } = req.params;
+  const id = String(campaignId || '').trim();
+  if (!id) return res.status(400).json({ error: 'campaignId is required' });
+
+  try {
+    await db.read();
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+    const idx = db.data.campaign_creatives.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (idx !== -1) {
+      db.data.campaign_creatives[idx] = {
+        ...db.data.campaign_creatives[idx],
+        smArchived: true,
+        archivedAt: new Date().toISOString(),
+      };
+    }
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const optIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (optIdx !== -1) {
+      db.data.optimizer_campaign_state[optIdx] = {
+        ...db.data.optimizer_campaign_state[optIdx],
+        smArchived: true,
+        archivedAt: new Date().toISOString(),
+        optimizationEnabled: false,
+      };
+    }
+
+    await db.write();
+    return res.json({ ok: true, campaignId: id, smArchived: true });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Archive failed' });
+  }
+});
+
+router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/unarchive', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { campaignId } = req.params;
+  const id = String(campaignId || '').trim();
+  if (!id) return res.status(400).json({ error: 'campaignId is required' });
+
+  try {
+    await db.read();
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+    const idx = db.data.campaign_creatives.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (idx !== -1) {
+      db.data.campaign_creatives[idx] = {
+        ...db.data.campaign_creatives[idx],
+        smArchived: false,
+        archivedAt: null,
+      };
+    }
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const optIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (optIdx !== -1) {
+      db.data.optimizer_campaign_state[optIdx] = {
+        ...db.data.optimizer_campaign_state[optIdx],
+        smArchived: false,
+        archivedAt: null,
+        optimizationEnabled: true,
+      };
+    }
+
+    await db.write();
+    return res.json({ ok: true, campaignId: id, smArchived: false });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Unarchive failed' });
   }
 });
 

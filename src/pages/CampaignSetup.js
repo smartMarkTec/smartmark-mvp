@@ -1635,6 +1635,21 @@ function timeAgoShort(ts) {
   if (hrs < 24) return `${hrs}h ago`;
   return `${days}d ago`;
 }
+function getCampaignDisplayStatus(campaign) {
+  if (campaign?.smArchived) return "Archived";
+  const fb = String(campaign?.effective_status || campaign?.status || "").toUpperCase();
+  if (fb === "ARCHIVED") return "Archived";
+  if (fb === "DELETED") return "Deleted";
+  if (fb === "COMPLETED") return "Finished";
+  const stopTime = campaign?.stop_time;
+  if (stopTime) {
+    const stopMs = new Date(stopTime).getTime();
+    if (Number.isFinite(stopMs) && stopMs < Date.now()) return "Finished";
+  }
+  if (fb === "PAUSED") return "Paused";
+  return "Active";
+}
+
 function summarizeOptimizerEntry(kind, payload) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -1671,16 +1686,19 @@ function summarizeOptimizerEntry(kind, payload) {
 
   if (kind === "action") {
     const actionType = String(payload.actionType || "").trim();
+    const isDryRun = !!payload.dryRun;
+    const plannedActionType = String(payload.plannedActionType || "").trim();
+    const displayType = isDryRun && plannedActionType ? plannedActionType : actionType;
     return {
       kind: "Action",
-      title: actionType
-        ? actionType.replace(/_/g, " ")
-        : "Updated campaign state",
+      title: displayType ? displayType.replace(/_/g, " ") : "Updated campaign state",
       detail:
         String(payload.summary || "").trim() ||
         String(payload.reason || "").trim() ||
         String(payload.status || "").trim() ||
         "",
+      dryRun: isDryRun,
+      skipped: !!payload.skipped,
       generatedAt,
     };
   }
@@ -1724,6 +1742,7 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
   const safeSummary = summary || getFallbackPublicSummary();
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
+  const [showHistory, setShowHistory] = useState(false);
 
   const pending = optimizerState?.pendingCreativeTest || null;
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
@@ -1883,8 +1902,120 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
               return ts ? `Analyzed ${timeAgoShort(ts)}` : "Monitoring campaign";
             })()}
           </div>
+          {history.length > 0 && (
+            <button
+              onClick={() => setShowHistory(true)}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "#6366f1",
+                fontWeight: 600,
+                fontSize: 12,
+                padding: "4px 0",
+                fontFamily: "inherit",
+              }}
+            >
+              View AI history →
+            </button>
+          )}
         </div>
       </div>
+
+      {showHistory && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setShowHistory(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 20,
+              padding: "24px 24px 20px",
+              maxWidth: 500,
+              width: "100%",
+              maxHeight: "calc(100vh - 80px)",
+              overflowY: "auto",
+              boxShadow: "0 24px 72px rgba(0,0,0,0.20)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#111827" }}>AI Activity Log</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>Latest optimizer cycle activity</div>
+              </div>
+              <button
+                onClick={() => setShowHistory(false)}
+                style={{ background: "rgba(0,0,0,0.06)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#6b7280", fontFamily: "inherit", flexShrink: 0 }}
+              >×</button>
+            </div>
+
+            {history.length === 0 ? (
+              <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0", textAlign: "center" }}>
+                No AI activity logged yet. Activity will appear after the first optimizer cycle runs.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {history.map((item) => {
+                  const kindColors = {
+                    Diagnosis:  { bg: "#f5f3ff", border: "#e9d5ff", badge: "#7c3aed" },
+                    Decision:   { bg: "#eff6ff", border: "#bfdbfe", badge: "#1d4ed8" },
+                    Action:     item.dryRun
+                      ? { bg: "#fffbeb", border: "#fde68a", badge: "#b45309" }
+                      : { bg: "#f0fdf4", border: "#bbf7d0", badge: "#15803d" },
+                    Monitoring: { bg: "#f8fafc", border: "#e2e8f0", badge: "#475569" },
+                  };
+                  const c = kindColors[item.kind] || kindColors.Monitoring;
+                  return (
+                    <div key={item.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 14, padding: "14px 16px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: item.detail ? 8 : 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ background: c.badge, color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "3px 9px", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+                            {item.kind}
+                          </span>
+                          {item.dryRun && (
+                            <span style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 999, fontSize: 10, fontWeight: 600, padding: "3px 9px" }}>
+                              Dry run
+                            </span>
+                          )}
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#1f2937", textTransform: "capitalize" }}>
+                            {item.title}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>
+                          {item.timeLabel}
+                        </span>
+                      </div>
+                      {item.detail ? (
+                        <div style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.6 }}>{item.detail}</div>
+                      ) : null}
+                      {item.dryRun && (
+                        <div style={{ fontSize: 11, color: "#92400e", fontWeight: 500, marginTop: 6, fontStyle: "italic" }}>
+                          Dry run — no live campaign change made
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, fontSize: 11, color: "#d1d5db", textAlign: "center" }}>
+              Activity reflects the most recent optimizer cycle. Full history is stored server-side.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2691,6 +2822,7 @@ useEffect(() => {
   const [modalImg, setModalImg] = useState("");
 
   const [showCampaignMenu, setShowCampaignMenu] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -3506,6 +3638,7 @@ useEffect(() => {
       setCampaigns(list);
 
       const activeCount = fullList.filter((c) =>
+        !c.smArchived &&
         ["ACTIVE", "PAUSED"].includes(
           String(c.status || c.effective_status || "").toUpperCase()
         )
@@ -4019,6 +4152,53 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
     }
   } catch {
     alert("Could not update campaign status.");
+  }
+  setLoading(false);
+};
+
+const handleArchiveCampaign = async (campaignId) => {
+  if (!campaignId || campaignId === "__DRAFT__" || !selectedAccount) return;
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  setLoading(true);
+  try {
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive`, {
+      method: "PATCH",
+    });
+    if (!r.ok) throw new Error("Archive failed");
+    setCampaigns((prev) =>
+      Array.isArray(prev)
+        ? prev.map((c) => (c?.id === campaignId ? { ...c, smArchived: true } : c))
+        : prev
+    );
+    setShowCampaignMenu(false);
+    if (selectedCampaignId === campaignId) {
+      const nextActive = (campaigns || []).find((c) => c.id !== campaignId && !c.smArchived);
+      setSelectedCampaignId(nextActive?.id || "");
+      setExpandedId(nextActive?.id || null);
+    }
+  } catch {
+    alert("Could not archive campaign.");
+  }
+  setLoading(false);
+};
+
+const handleUnarchiveCampaign = async (campaignId) => {
+  if (!campaignId || campaignId === "__DRAFT__" || !selectedAccount) return;
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  setLoading(true);
+  try {
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/unarchive`, {
+      method: "PATCH",
+    });
+    if (!r.ok) throw new Error("Unarchive failed");
+    setCampaigns((prev) =>
+      Array.isArray(prev)
+        ? prev.map((c) => (c?.id === campaignId ? { ...c, smArchived: false } : c))
+        : prev
+    );
+    setShowCampaignMenu(false);
+  } catch {
+    alert("Could not unarchive campaign.");
   }
   setLoading(false);
 };
@@ -5894,17 +6074,51 @@ const selectedCampaignCreatives =
       }}
     >
       <option value="">Select a campaign</option>
-      {hasDraft && (
+      {!showArchived && hasDraft && (
         <option value="__DRAFT__">
           {(form.campaignName || "Untitled")} (Draft)
         </option>
       )}
-      {campaigns.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.name || "Campaign"}
-        </option>
-      ))}
+      {(showArchived
+        ? campaigns.filter((c) => c.smArchived)
+        : campaigns.filter((c) => !c.smArchived)
+      ).map((c) => {
+        const ds = getCampaignDisplayStatus(c);
+        return (
+          <option key={c.id} value={c.id}>
+            {c.name || "Campaign"}{ds !== "Active" ? ` (${ds})` : ""}
+          </option>
+        );
+      })}
     </select>
+
+    {campaigns.some((c) => c.smArchived) && (
+      <div style={{ textAlign: "right", marginTop: 6 }}>
+        <button
+          type="button"
+          onClick={() => {
+            setShowArchived((v) => !v);
+            setSelectedCampaignId("");
+            setExpandedId(null);
+            setShowCampaignMenu(false);
+          }}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#6366f1",
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: "pointer",
+            padding: "2px 0",
+            fontFamily: "inherit",
+          }}
+        >
+          {showArchived
+            ? "← Back to active campaigns"
+            : `View archived (${campaigns.filter((c) => c.smArchived).length})`}
+        </button>
+      </div>
+    )}
 
     {selectedLiveCampaign && (
       <button
@@ -6027,6 +6241,44 @@ const selectedCampaignCreatives =
         >
           Edit budget + duration
         </button>
+
+        {selectedLiveCampaign.smArchived ? (
+          <button
+            type="button"
+            onClick={() => handleUnarchiveCampaign(selectedLiveCampaign.id)}
+            style={{
+              background: "#ffffff",
+              color: "#374151",
+              border: "none",
+              textAlign: "left",
+              padding: "10px 12px",
+              borderRadius: 10,
+              fontWeight: 800,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Unarchive campaign
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleArchiveCampaign(selectedLiveCampaign.id)}
+            style={{
+              background: "#ffffff",
+              color: "#374151",
+              border: "none",
+              textAlign: "left",
+              padding: "10px 12px",
+              borderRadius: 10,
+              fontWeight: 800,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Archive campaign
+          </button>
+        )}
 
         <button
           type="button"

@@ -119,6 +119,11 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
   const hasMeaningfulDelivery = impressions >= 250 || spend >= 5;
   const hasSomeClickSignal = clicks > 0 || linkClicks > 0;
   const hasMeaningfulClickSignal = linkClicks >= 3 || clicks >= 3;
+  // Conversion tracking: default false until explicitly enabled.
+  // When false, treat conversions as UNKNOWN — never diagnose based on zero conversions.
+  const conversionTrackingConfirmed =
+    !!optimizerState?.conversionTrackingConfirmed ||
+    String(process.env.OPTIMIZER_CONVERSION_TRACKING_ENABLED || '').trim() === '1';
   const looksPaused =
     currentStatus === 'PAUSED' ||
     currentStatus === 'ARCHIVED' ||
@@ -180,7 +185,7 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     reason =
       'Delivery is active and generating some click response. CTR is on the lower side — the system is watching closely and will flag when a messaging refresh could meaningfully improve performance.';
     confidence = 0.87;
-  } else if (linkClicks >= 12 && conversions === 0) {
+  } else if (linkClicks >= 12 && conversions === 0 && conversionTrackingConfirmed) {
     diagnosis = 'post_click_conversion_gap';
     likelyProblem = 'Users are clicking, but the offer, landing page, or audience fit is not converting.';
     recommendedAction = 'test_offer_or_audience_angle';
@@ -209,7 +214,7 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     confidence = 0.75;
   } else if (
     hasMeaningfulDelivery &&
-    ((ctr >= 1.0 && hasMeaningfulClickSignal) || conversions > 0)
+    ((ctr >= 1.0 && hasMeaningfulClickSignal) || (conversionTrackingConfirmed && conversions > 0))
   ) {
     diagnosis = 'healthy_early_signal';
     likelyProblem = 'No major performance problem is visible yet.';
