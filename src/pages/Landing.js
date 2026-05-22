@@ -716,10 +716,24 @@ export default function Landing() {
         </section>
 
         {/* Footer */}
-        <div style={{ textAlign: "center", padding: "32px 0 8px", color: "#c4c9d4", fontSize: 12, fontWeight: 500 }}>
-          <a href="mailto:support@smartemark.com" style={{ color: "#c4c9d4", textDecoration: "none" }}>
-            support@smartemark.com
-          </a>
+        <div style={{ textAlign: "center", padding: "32px 0 16px", color: "#c4c9d4", fontSize: 12, fontWeight: 500, lineHeight: 2.2 }}>
+          <div style={{ fontWeight: 600, color: TEXT_SOFT, marginBottom: 2 }}>Smartemark</div>
+          <div>Spring, TX</div>
+          <div>
+            <a href="tel:+18324386456" style={{ color: "#c4c9d4", textDecoration: "none" }}>
+              (832) 438-6456
+            </a>
+          </div>
+          <div>
+            <a href="mailto:support@smartemark.com" style={{ color: "#c4c9d4", textDecoration: "none" }}>
+              support@smartemark.com
+            </a>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <a href="/privacy-policy" style={{ color: "#c4c9d4", textDecoration: "none" }}>Privacy Policy</a>
+            {" · "}
+            <a href="/terms-of-service" style={{ color: "#c4c9d4", textDecoration: "none" }}>Terms of Service</a>
+          </div>
         </div>
       </div>
     </div>

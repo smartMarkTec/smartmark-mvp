@@ -6092,34 +6092,6 @@ const selectedCampaignCreatives =
       })}
     </select>
 
-    {campaigns.some((c) => c.smArchived) && (
-      <div style={{ textAlign: "right", marginTop: 6 }}>
-        <button
-          type="button"
-          onClick={() => {
-            setShowArchived((v) => !v);
-            setSelectedCampaignId("");
-            setExpandedId(null);
-            setShowCampaignMenu(false);
-          }}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "#6366f1",
-            fontWeight: 600,
-            fontSize: 12,
-            cursor: "pointer",
-            padding: "2px 0",
-            fontFamily: "inherit",
-          }}
-        >
-          {showArchived
-            ? "← Back to active campaigns"
-            : `View archived (${campaigns.filter((c) => c.smArchived).length})`}
-        </button>
-      </div>
-    )}
-
     {selectedLiveCampaign && (
       <button
         type="button"
@@ -6243,41 +6215,53 @@ const selectedCampaignCreatives =
         </button>
 
         {selectedLiveCampaign.smArchived ? (
-          <button
-            type="button"
-            onClick={() => handleUnarchiveCampaign(selectedLiveCampaign.id)}
-            style={{
-              background: "#ffffff",
-              color: "#374151",
-              border: "none",
-              textAlign: "left",
-              padding: "10px 12px",
-              borderRadius: 10,
-              fontWeight: 800,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Unarchive campaign
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => handleUnarchiveCampaign(selectedLiveCampaign.id)}
+              style={{ background: "#ffffff", color: "#374151", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Unarchive campaign
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const firstActive = campaigns.find((c) => !c.smArchived);
+                setShowArchived(false);
+                setSelectedCampaignId(firstActive?.id || "");
+                setExpandedId(firstActive?.id || null);
+                setShowCampaignMenu(false);
+              }}
+              style={{ background: "#ffffff", color: "#6366f1", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              ← Back to active campaigns
+            </button>
+          </>
         ) : (
-          <button
-            type="button"
-            onClick={() => handleArchiveCampaign(selectedLiveCampaign.id)}
-            style={{
-              background: "#ffffff",
-              color: "#374151",
-              border: "none",
-              textAlign: "left",
-              padding: "10px 12px",
-              borderRadius: 10,
-              fontWeight: 800,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Archive campaign
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => handleArchiveCampaign(selectedLiveCampaign.id)}
+              style={{ background: "#ffffff", color: "#374151", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Archive campaign
+            </button>
+            {campaigns.some((c) => c.smArchived) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const firstArchived = campaigns.find((c) => c.smArchived);
+                  setShowArchived(true);
+                  setSelectedCampaignId(firstArchived?.id || "");
+                  setExpandedId(firstArchived?.id || null);
+                  setShowCampaignMenu(false);
+                }}
+                style={{ background: "#ffffff", color: "#6366f1", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+              >
+                View archived campaigns
+              </button>
+            )}
+          </>
         )}
 
         <button

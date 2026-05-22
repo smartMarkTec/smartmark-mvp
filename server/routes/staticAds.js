@@ -393,10 +393,14 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
 
   const summary = summaryLines.join("\n");
 
-  // Prevent URL hallucination when a real website was provided
+  // Prevent URL hallucination; explicitly block invented URLs when no website was provided
   const websiteNote = website
     ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
-    : "";
+    : " Do not display any website URL or web address — none was provided.";
+  // Prevent phone hallucination when no phone number is available from the form or website grounding
+  const phoneNote = (phone || webContent?.phone)
+    ? ""
+    : " Do not display any phone number — none was provided.";
 
   // Per-generation creative style seed — applied to every industry, every call.
   // Describes ad composition energy and visual approach ONLY — not specific objects or scenes.
@@ -422,7 +426,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote} Keep the design simple to moderately bold — polished and visually appealing, but not extreme, overly dramatic, overly industrial, or cluttered. Use one clear primary visual focus; only include additional elements when they fit naturally and keep the composition clean. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Keep every text element fully inside the visible image area with generous safe margins on all sides — do not place any text near the top, bottom, left, or right edge. Do not crop, cut off, or partially hide any word, letter, headline, business name, phone number, website, or CTA. Use slightly smaller text if needed so everything fits comfortably inside the frame. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
+  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote}${phoneNote} Keep the design simple to moderately bold — polished and visually appealing, but not extreme, overly dramatic, overly industrial, or cluttered. Use one clear primary visual focus; only include additional elements when they fit naturally and keep the composition clean. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Keep every text element fully inside the visible image area with generous safe margins on all sides — do not place any text near the top, bottom, left, or right edge. Do not crop, cut off, or partially hide any word, letter, headline, business name, phone number, website, or CTA. Use slightly smaller text if needed so everything fits comfortably inside the frame. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
 
 ${summary}${logoInstruction}`;
 }

@@ -11,8 +11,10 @@ import Confirmation from "./pages/Confirmation";
 import PostCheckout from "./pages/PostCheckout";
 import BookedCall from "./pages/BookedCall";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import GoHighLevelChatWidget from "./components/GoHighLevelChatWidget";
 
 function NotFound() {
   return (
@@ -48,7 +50,9 @@ function App() {
   }, [location]);
 
   return (
-    <Routes>
+    <>
+      <GoHighLevelChatWidget />
+      <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/form" element={<FormPage />} />
@@ -57,6 +61,8 @@ function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/confirmation" element={<Confirmation />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/terms-of-service" element={<TermsOfService />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/post-checkout" element={<PostCheckout />} />
@@ -64,6 +70,7 @@ function App() {
       <Route path="/videos" element={<BookedCall />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
+    </>
   );
 }
 
