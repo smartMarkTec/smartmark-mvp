@@ -14,7 +14,6 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
-import GoHighLevelChatWidget from "./components/GoHighLevelChatWidget";
 
 function NotFound() {
   return (
@@ -50,9 +49,7 @@ function App() {
   }, [location]);
 
   return (
-    <>
-      <GoHighLevelChatWidget />
-      <Routes>
+    <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/form" element={<FormPage />} />
@@ -70,7 +67,6 @@ function App() {
       <Route path="/videos" element={<BookedCall />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
-    </>
   );
 }
 
