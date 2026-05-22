@@ -21,6 +21,7 @@ const {
   findOptimizerCampaignStateByCampaignId,
   findOptimizerCampaignStatesByAccountId,
   updateOptimizerCampaignState,
+  appendAiHistoryEntry,
 } = require('../optimizerCampaignState');
 
 const {
@@ -1607,28 +1608,45 @@ async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 })
       );
     },
 persistDiagnosis: async (campaignIdArg, diagnosis) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestDiagnosis: diagnosis,
-    },
+    patch: { latestDiagnosis: diagnosis },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'diagnosis',
+    timestamp: diagnosis?.generatedAt || new Date().toISOString(),
+    title: String(diagnosis?.diagnosis || 'campaign reviewed').replace(/_/g, ' '),
+    summary: diagnosis?.likelyProblem || '',
+    reason: diagnosis?.reason || '',
+    actionType: diagnosis?.recommendedAction || '',
+    dryRun: false,
+    source: diagnosis?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestDecision: decision,
-    },
+    patch: { latestDecision: decision },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'decision',
+    timestamp: decision?.generatedAt || new Date().toISOString(),
+    title: String(decision?.actionType || decision?.decision || 'decision made').replace(/_/g, ' '),
+    summary: String(decision?.decision || '').replace(/_/g, ' '),
+    reason: decision?.reason || '',
+    actionType: decision?.actionType || '',
+    dryRun: false,
+    source: decision?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistAction: async (campaignIdArg, action) => {
   const nextStatus =
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
-
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
       latestAction: action,
@@ -1636,14 +1654,39 @@ persistAction: async (campaignIdArg, action) => {
       ...buildGeneratedCreativePatchFromAction(action),
     },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'action',
+    timestamp: action?.generatedAt || new Date().toISOString(),
+    title: String(
+      action?.dryRun && action?.plannedActionType
+        ? action.plannedActionType
+        : action?.actionType || 'action'
+    ).replace(/_/g, ' '),
+    summary: action?.status || '',
+    reason: action?.reason || '',
+    actionType: action?.actionType || '',
+    dryRun: !!action?.dryRun,
+    skipped: !!action?.skipped,
+    source: action?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistMonitoring: async (campaignIdArg, monitoring) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestMonitoringDecision: monitoring,
-    },
+    patch: { latestMonitoringDecision: monitoring },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'monitoring',
+    timestamp: monitoring?.generatedAt || new Date().toISOString(),
+    title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
+    summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
+    reason: monitoring?.reason || '',
+    actionType: monitoring?.nextRecommendedStep || '',
+    dryRun: false,
+    source: monitoring?.mode || '',
+  }).catch(() => {});
+  return result;
 },
     minHoursBetweenRuns,
     limit,
@@ -4458,28 +4501,45 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle'
         );
       },
 persistDiagnosis: async (campaignIdArg, diagnosis) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestDiagnosis: diagnosis,
-    },
+    patch: { latestDiagnosis: diagnosis },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'diagnosis',
+    timestamp: diagnosis?.generatedAt || new Date().toISOString(),
+    title: String(diagnosis?.diagnosis || 'campaign reviewed').replace(/_/g, ' '),
+    summary: diagnosis?.likelyProblem || '',
+    reason: diagnosis?.reason || '',
+    actionType: diagnosis?.recommendedAction || '',
+    dryRun: false,
+    source: diagnosis?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestDecision: decision,
-    },
+    patch: { latestDecision: decision },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'decision',
+    timestamp: decision?.generatedAt || new Date().toISOString(),
+    title: String(decision?.actionType || decision?.decision || 'decision made').replace(/_/g, ' '),
+    summary: String(decision?.decision || '').replace(/_/g, ' '),
+    reason: decision?.reason || '',
+    actionType: decision?.actionType || '',
+    dryRun: false,
+    source: decision?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistAction: async (campaignIdArg, action) => {
   const nextStatus =
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
-
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
       latestAction: action,
@@ -4487,14 +4547,39 @@ persistAction: async (campaignIdArg, action) => {
       ...buildGeneratedCreativePatchFromAction(action),
     },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'action',
+    timestamp: action?.generatedAt || new Date().toISOString(),
+    title: String(
+      action?.dryRun && action?.plannedActionType
+        ? action.plannedActionType
+        : action?.actionType || 'action'
+    ).replace(/_/g, ' '),
+    summary: action?.status || '',
+    reason: action?.reason || '',
+    actionType: action?.actionType || '',
+    dryRun: !!action?.dryRun,
+    skipped: !!action?.skipped,
+    source: action?.mode || '',
+  }).catch(() => {});
+  return result;
 },
 persistMonitoring: async (campaignIdArg, monitoring) => {
-  return await updateBestKnownOptimizerCampaignState({
+  const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: {
-      latestMonitoringDecision: monitoring,
-    },
+    patch: { latestMonitoringDecision: monitoring },
   });
+  appendAiHistoryEntry(campaignIdArg, {
+    type: 'monitoring',
+    timestamp: monitoring?.generatedAt || new Date().toISOString(),
+    title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
+    summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
+    reason: monitoring?.reason || '',
+    actionType: monitoring?.nextRecommendedStep || '',
+    dryRun: false,
+    source: monitoring?.mode || '',
+  }).catch(() => {});
+  return result;
 },
     });
 

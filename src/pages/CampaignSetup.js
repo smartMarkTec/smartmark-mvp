@@ -1740,7 +1740,31 @@ function buildOptimizerHistoryItems(optimizerState) {
 
 function MarketerActionsCard({ summary, optimizerState, metrics }) {
   const safeSummary = summary || getFallbackPublicSummary();
-  const history = buildOptimizerHistoryItems(optimizerState);
+  const _aiHistoryRaw = Array.isArray(optimizerState?.aiHistory) ? optimizerState.aiHistory : [];
+  const history = _aiHistoryRaw.length > 0
+    ? _aiHistoryRaw
+        .slice()
+        .sort((a, b) =>
+          (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
+          (a.timestamp ? new Date(a.timestamp).getTime() : 0)
+        )
+        .slice(0, 50)
+        .map((entry, idx) => ({
+          id: entry.id || `${entry.type || 'entry'}-${idx}`,
+          kind:
+            entry.type === 'diagnosis' ? 'Diagnosis'
+            : entry.type === 'decision' ? 'Decision'
+            : entry.type === 'action' ? 'Action'
+            : 'Monitoring',
+          title: entry.title || String(entry.actionType || entry.type || 'Update').replace(/_/g, ' '),
+          detail: entry.reason || entry.summary || '',
+          dryRun: !!entry.dryRun,
+          skipped: !!entry.skipped,
+          generatedAt: entry.timestamp || '',
+          ts: entry.timestamp ? new Date(entry.timestamp).getTime() : 0,
+          timeLabel: entry.timestamp ? timeAgoShort(entry.timestamp) : 'recent',
+        }))
+    : buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
   const [showHistory, setShowHistory] = useState(false);
 
@@ -2011,7 +2035,9 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
             )}
 
             <div style={{ marginTop: 16, fontSize: 11, color: "#d1d5db", textAlign: "center" }}>
-              Activity reflects the most recent optimizer cycle. Full history is stored server-side.
+              {_aiHistoryRaw.length > 0
+                ? `Showing ${history.length} of ${_aiHistoryRaw.length} logged entries.`
+                : "Activity reflects the most recent optimizer cycle. History builds as the campaign runs."}
             </div>
           </div>
         </div>
@@ -6092,7 +6118,7 @@ const selectedCampaignCreatives =
       })}
     </select>
 
-    {selectedLiveCampaign && (
+    {selectedLiveCampaign && ["Active", "Paused"].includes(getCampaignDisplayStatus(selectedLiveCampaign)) && (
       <button
         type="button"
         onClick={() => {
@@ -6134,36 +6160,34 @@ const selectedCampaignCreatives =
       </button>
     )}
 
-    {selectedLiveCampaign && (
-      <button
-        type="button"
-        onClick={() => setShowCampaignMenu((v) => !v)}
-        title="Campaign actions"
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: 10,
-          border: "1px solid #dbe4ff",
-          background: "#ffffff",
-          color: "#111827",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          flex: "0 0 auto",
-        }}
-      >
-        <FaEllipsisV />
-      </button>
-    )}
+    <button
+      type="button"
+      onClick={() => setShowCampaignMenu((v) => !v)}
+      title="Campaign actions"
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        border: "1px solid #dbe4ff",
+        background: "#ffffff",
+        color: "#111827",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        flex: "0 0 auto",
+      }}
+    >
+      <FaEllipsisV />
+    </button>
 
-    {showCampaignMenu && selectedLiveCampaign && (
+    {showCampaignMenu && (
       <div
         style={{
           position: "absolute",
           top: 46,
           right: 0,
-          minWidth: 170,
+          minWidth: 190,
           background: "#ffffff",
           border: "1px solid #e5e7eb",
           borderRadius: 14,
@@ -6175,46 +6199,26 @@ const selectedCampaignCreatives =
           gap: 6,
         }}
       >
-        <button
-          type="button"
-          onClick={() => {
-            setShowCampaignMenu(false);
-            setShowCampaignDetails((v) => !v);
-          }}
-          style={{
-            background: "#ffffff",
-            color: "#111827",
-            border: "none",
-            textAlign: "left",
-            padding: "10px 12px",
-            borderRadius: 10,
-            fontWeight: 800,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          Campaign details
-        </button>
+        {selectedLiveCampaign && (
+          <>
+            <button
+              type="button"
+              onClick={() => { setShowCampaignMenu(false); setShowCampaignDetails((v) => !v); }}
+              style={{ background: "#ffffff", color: "#111827", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Campaign details
+            </button>
+            <button
+              type="button"
+              onClick={openEditCurrentCampaign}
+              style={{ background: "#ffffff", color: "#111827", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Edit budget + duration
+            </button>
+          </>
+        )}
 
-        <button
-          type="button"
-          onClick={openEditCurrentCampaign}
-          style={{
-            background: "#ffffff",
-            color: "#111827",
-            border: "none",
-            textAlign: "left",
-            padding: "10px 12px",
-            borderRadius: 10,
-            fontWeight: 800,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          Edit budget + duration
-        </button>
-
-        {selectedLiveCampaign.smArchived ? (
+        {selectedLiveCampaign?.smArchived ? (
           <>
             <button
               type="button"
@@ -6237,7 +6241,7 @@ const selectedCampaignCreatives =
               ← Back to active campaigns
             </button>
           </>
-        ) : (
+        ) : selectedLiveCampaign ? (
           <>
             <button
               type="button"
@@ -6262,28 +6266,33 @@ const selectedCampaignCreatives =
               </button>
             )}
           </>
+        ) : campaigns.some((c) => c.smArchived) ? (
+          <button
+            type="button"
+            onClick={() => {
+              const firstArchived = campaigns.find((c) => c.smArchived);
+              setShowArchived(true);
+              setSelectedCampaignId(firstArchived?.id || "");
+              setExpandedId(firstArchived?.id || null);
+              setShowCampaignMenu(false);
+            }}
+            style={{ background: "#ffffff", color: "#6366f1", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+          >
+            View archived campaigns
+          </button>
+        ) : (
+          <div style={{ padding: "10px 12px", color: "#9ca3af", fontSize: 13 }}>No campaign selected</div>
         )}
 
-        <button
-          type="button"
-          onClick={() => {
-            setShowCampaignMenu(false);
-            handleDeleteCampaign(selectedLiveCampaign.id);
-          }}
-          style={{
-            background: "#ffffff",
-            color: "#b42318",
-            border: "none",
-            textAlign: "left",
-            padding: "10px 12px",
-            borderRadius: 10,
-            fontWeight: 800,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          Delete campaign
-        </button>
+        {selectedLiveCampaign && (
+          <button
+            type="button"
+            onClick={() => { setShowCampaignMenu(false); handleDeleteCampaign(selectedLiveCampaign.id); }}
+            style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+          >
+            Delete campaign
+          </button>
+        )}
       </div>
     )}
   </div>

@@ -89,7 +89,7 @@ Rules:
 - If frequency is elevated and performance is softening, consider creative_fatigue_risk.
 - Confidence must be a number from 0 to 1.
 - Output JSON only. No markdown.
-- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, conversions are UNAVAILABLE — treat them as UNKNOWN, not zero. Never say "zero conversions", "no conversions recorded", "conversion rate is poor", or make any judgment based on conversion counts. Instead say something like: "Conversion tracking is not yet connected, so performance is being evaluated using clicks, CTR, CPC, and spend." Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.
+- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do NOT reference conversions, conversion tracking, or conversion data in the reason field at all. Do not say "conversion tracking is not connected", "conversion data is unavailable", "ensure conversion tracking is set up", or anything similar. Write the reason purely using available metrics — CTR, CPC, clicks, impressions, spend — as a calm, operator-like observation about what the campaign data shows and what the next monitoring step is. Write as if conversion data simply does not exist. Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.
 
 Tone rules for the "reason" field:
 - Write like a calm, professional marketing advisor — not a judge.

@@ -267,6 +267,53 @@ async function findOptimizerCampaignStatesByAccountId(accountId) {
   );
 }
 
+// Append a single AI activity entry to the campaign's aiHistory array.
+// Keeps only the most recent 100 entries. Never overwrites latestDiagnosis/Decision/Action.
+// Failures are silent — callers should .catch(() => {}) so history never breaks the main flow.
+async function appendAiHistoryEntry(campaignId, entry) {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const id = normalizeId(campaignId);
+  if (!id) return null;
+
+  await ensureOptimizerCampaignStateShape();
+  const list = db.data.optimizer_campaign_state;
+  const index = list.findIndex(
+    (row) =>
+      normalizeId(row?.campaignId) === id ||
+      normalizeId(row?.metaCampaignId) === id
+  );
+
+  if (index === -1) return null;
+
+  const existing = list[index];
+  const history = Array.isArray(existing.aiHistory) ? existing.aiHistory.slice() : [];
+
+  history.push({
+    id: `${String(entry.type || 'entry').slice(0, 12)}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type: String(entry.type || 'entry').trim(),
+    timestamp: String(entry.timestamp || new Date().toISOString()).trim(),
+    title: String(entry.title || '').trim(),
+    summary: String(entry.summary || '').trim(),
+    reason: String(entry.reason || '').trim(),
+    actionType: String(entry.actionType || '').trim(),
+    dryRun: !!entry.dryRun,
+    skipped: !!entry.skipped,
+    source: String(entry.source || '').trim(),
+  });
+
+  const trimmed = history.length > 100 ? history.slice(history.length - 100) : history;
+
+  list[index] = {
+    ...existing,
+    aiHistory: trimmed,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await db.write();
+  return list[index];
+}
+
 module.exports = {
   ensureOptimizerCampaignStateShape,
   getAllOptimizerCampaignStates,
@@ -275,4 +322,5 @@ module.exports = {
   findOptimizerCampaignStatesByAccountId,
   upsertOptimizerCampaignState,
   updateOptimizerCampaignState,
+  appendAiHistoryEntry,
 };
