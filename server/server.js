@@ -386,6 +386,10 @@ app.use("/api", gptRoutes);
 const stripeRoutes = require("./routes/stripe");
 app.use("/api/stripe", stripeRoutes);
 
+/* ✅ Internal: Sales Assistant AI analysis */
+const salesAssistantRoutes = require("./routes/salesAssistant");
+app.use("/api", salesAssistantRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);
