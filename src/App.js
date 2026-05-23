@@ -14,6 +14,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import SalesAssistant from "./pages/SalesAssistant";
 
 function NotFound() {
   return (
@@ -65,6 +66,7 @@ function App() {
       <Route path="/post-checkout" element={<PostCheckout />} />
       <Route path="/booked-call" element={<BookedCall />} />
       <Route path="/videos" element={<BookedCall />} />
+      <Route path="/sales-assistant" element={<SalesAssistant />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
