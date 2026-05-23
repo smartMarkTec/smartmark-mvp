@@ -9,6 +9,7 @@ const AI_DEBOUNCE_MS = 1600;
 const AI_MIN_CHARS = 12;
 const RECENT_CHARS = 160;  // chars sent as recentTranscript
 const CONTEXT_CHARS = 600; // chars sent as fullRecentContext
+const CHUNK_DURATION_MS = 4000; // HQ mode: ms of audio per transcription chunk
 
 /* ─── Default Script ───────────────────────────────────────────────────────── */
 const DEFAULT_SCRIPT = {
@@ -375,9 +376,25 @@ function ObjectionCard({ obj, aiResult, source, onMarkUsed }) {
 
 /* ─── Live Call Tab ────────────────────────────────────────────────────────── */
 function LiveCallTab({ objections, callLogs, onSaveCall }) {
+  // Detect HQ capability once (stable — no state needed)
+  const hqSupported = !!(
+    typeof navigator !== "undefined" &&
+    navigator.mediaDevices?.getUserMedia &&
+    typeof window !== "undefined" &&
+    window.MediaRecorder
+  );
+  const brSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  // ─ Core state
+  const [transcribeMode, setTranscribeMode] = useState(hqSupported ? "hq" : "browser");
   const [transcript, setTranscript] = useState("");
   const [listening, setListening] = useState(false);
-  const [supported, setSupported] = useState(true);
+  const [supported, setSupported] = useState(true); // browser SR available
+
+  // HQ mode state
+  const [micStatus, setMicStatus] = useState("idle"); // idle | active | error
+  const [micLevel, setMicLevel] = useState(0); // 0–100
+  const [transcribing, setTranscribing] = useState(false);
 
   // AI state
   const [aiResult, setAiResult] = useState(null);
@@ -395,13 +412,139 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
   // Quick log form (bottom bar)
   const [logForm, setLogForm] = useState({ company: "", contact: "", phone: "", notes: "" });
 
+  // Browser SR refs
   const recogRef = useRef(null);
   const transcriptRef = useRef("");
   const requestIdRef = useRef(0);
   const debounceRef = useRef(null);
-  // Refs so the one-time speech recognition handler always calls latest callback versions
   const callAIRef = useRef(null);
   const runKwRef = useRef(null);
+
+  // HQ mode refs
+  const streamRef = useRef(null);
+  const recorderRef = useRef(null);
+  const hqActiveRef = useRef(false);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const levelIntervalRef = useRef(null);
+  const lastTranscribedRef = useRef("");
+
+  // Shared helper — appends text to transcript and triggers AI + keyword detection
+  const appendTranscript = useCallback((text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const next = transcriptRef.current ? transcriptRef.current + " " + trimmed : trimmed;
+    transcriptRef.current = next;
+    setTranscript(next);
+    runKwRef.current?.(next);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => callAIRef.current?.(next), AI_DEBOUNCE_MS);
+  }, []);
+
+  const blobToBase64 = (blob) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+  const startMicMeter = useCallback((stream) => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      levelIntervalRef.current = setInterval(() => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        setMicLevel(Math.min(100, Math.round(avg * 1.5)));
+      }, 80);
+    } catch {}
+  }, []);
+
+  const stopMicMeter = useCallback(() => {
+    clearInterval(levelIntervalRef.current);
+    setMicLevel(0);
+    try { audioCtxRef.current?.close(); } catch {}
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  }, []);
+
+  const sendChunk = useCallback(async (blob) => {
+    if (!blob || blob.size < 1500) return;
+    setTranscribing(true);
+    try {
+      const b64 = await blobToBase64(blob);
+      const mimeType = blob.type || "audio/webm";
+      const context = lastTranscribedRef.current.split(" ").slice(-25).join(" ");
+      const res = await fetch("/api/sales-assistant/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: b64, mimeType, context }),
+      });
+      const data = await res.json();
+      if (data.ok && data.text) {
+        lastTranscribedRef.current = (lastTranscribedRef.current + " " + data.text).trim().slice(-400);
+        appendTranscript(data.text);
+      }
+    } catch (err) {
+      console.warn("[HQ transcribe] chunk error:", err?.message);
+    } finally {
+      setTranscribing(false);
+    }
+  }, [appendTranscript]);
+
+  const recordChunk = useCallback((stream) => {
+    if (!hqActiveRef.current) return;
+    let mimeType = "audio/webm;codecs=opus";
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "audio/webm";
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = "";
+    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+    recorderRef.current = rec;
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data); };
+    rec.onstop = () => {
+      if (chunks.length) sendChunk(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+      if (hqActiveRef.current) recordChunk(stream);
+    };
+    rec.start();
+    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, CHUNK_DURATION_MS);
+  }, [sendChunk]);
+
+  const startHQ = useCallback(async () => {
+    if (!hqSupported) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      streamRef.current = stream;
+      hqActiveRef.current = true;
+      setMicStatus("active");
+      setListening(true);
+      startMicMeter(stream);
+      recordChunk(stream);
+    } catch (err) {
+      console.error("[startHQ] mic error:", err?.message);
+      setMicStatus("error");
+      setListening(false);
+    }
+  }, [hqSupported, startMicMeter, recordChunk]);
+
+  const stopHQ = useCallback(() => {
+    hqActiveRef.current = false;
+    try { recorderRef.current?.stop(); } catch {}
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
+    streamRef.current = null;
+    recorderRef.current = null;
+    stopMicMeter();
+    setMicStatus("idle");
+    setListening(false);
+    setTranscribing(false);
+  }, [stopMicMeter]);
 
   // Defined before useEffect to avoid TDZ; stored in refs so handler stays current
   const callAI = useCallback(async (text) => {
@@ -462,11 +605,7 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
         if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
       }
       if (!final) return;
-      transcriptRef.current = final;
-      setTranscript(final);
-      runKwRef.current?.(final);
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => callAIRef.current?.(final), AI_DEBOUNCE_MS);
+      appendTranscript(final);
     };
     rec.onerror = () => setListening(false);
     rec.onend = () => setListening(false);
@@ -480,13 +619,30 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
     callAI(text);
   };
 
-  const startListening = () => { recogRef.current?.start(); setListening(true); };
-  const stopListening = () => { recogRef.current?.stop(); setListening(false); };
+  const handleModeChange = (mode) => {
+    if (listening) {
+      if (transcribeMode === "hq") stopHQ();
+      else { recogRef.current?.stop(); setListening(false); }
+    }
+    setTranscribeMode(mode);
+  };
+
+  const startListening = () => {
+    if (transcribeMode === "hq") startHQ();
+    else { recogRef.current?.start(); setListening(true); }
+  };
+
+  const stopListening = () => {
+    if (transcribeMode === "hq") stopHQ();
+    else { recogRef.current?.stop(); setListening(false); }
+  };
+
   const clearAll = () => {
-    recogRef.current?.stop();
-    setListening(false);
+    if (transcribeMode === "hq") stopHQ();
+    else { recogRef.current?.stop(); setListening(false); }
     setTranscript("");
     transcriptRef.current = "";
+    lastTranscribedRef.current = "";
     setAiResult(null);
     setAiStatus("idle");
     setKwMatches([]);
@@ -529,10 +685,38 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
 
   return (
     <div>
-      {/* Listener controls */}
+      {/* Mode selector + listener controls */}
       <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, padding: "14px 20px", marginBottom: 16 }}>
+        {/* Mode toggle */}
+        {(hqSupported || brSupported) && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+            <span style={{ color: S.muted, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Mode:</span>
+            {hqSupported && (
+              <button
+                onClick={() => handleModeChange("hq")}
+                style={{ background: transcribeMode === "hq" ? S.green : "transparent", color: transcribeMode === "hq" ? "#fff" : S.muted, border: `1px solid ${transcribeMode === "hq" ? S.green : S.border}`, borderRadius: 7, padding: "4px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                High Accuracy (Whisper)
+              </button>
+            )}
+            {brSupported && (
+              <button
+                onClick={() => handleModeChange("browser")}
+                style={{ background: transcribeMode === "browser" ? S.blue : "transparent", color: transcribeMode === "browser" ? "#fff" : S.muted, border: `1px solid ${transcribeMode === "browser" ? S.blue : S.border}`, borderRadius: 7, padding: "4px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                Browser (Built-in)
+              </button>
+            )}
+            {transcribeMode === "hq" && (
+              <span style={{ color: "#3a3e58", fontSize: 11, marginLeft: 8 }}>
+                Uses OpenAI Whisper — better accuracy on phone speakers &amp; accents
+              </span>
+            )}
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          {!supported ? (
+          {!supported && transcribeMode === "browser" ? (
             <span style={{ color: S.orange, fontSize: 13 }}>
               Live transcription not supported. Use Chrome or paste notes below.
             </span>
@@ -543,14 +727,34 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
               </Btn>
               <Btn onClick={stopListening} disabled={!listening} color={S.red} variant="outline">Stop</Btn>
               <Btn onClick={clearAll} color={S.muted} variant="outline">Clear</Btn>
-              {listening && (
+
+              {listening && transcribeMode === "hq" && micStatus === "active" && (
+                <span style={{ color: S.green, fontSize: 12 }}>● Recording</span>
+              )}
+              {listening && transcribeMode === "browser" && (
                 <span style={{ color: S.green, fontSize: 12, animation: "pulse 1.5s infinite" }}>Recording active</span>
+              )}
+              {transcribing && (
+                <span style={{ color: S.teal, fontSize: 12 }}>Transcribing…</span>
               )}
               {aiStatus === "analyzing" && (
                 <span style={{ color: S.blue, fontSize: 12 }}>AI analyzing…</span>
               )}
               {aiStatus === "error" && (
                 <span style={{ color: S.orange, fontSize: 12 }}>AI offline — using keyword fallback</span>
+              )}
+              {micStatus === "error" && (
+                <span style={{ color: S.red, fontSize: 12 }}>Mic error — check browser permissions</span>
+              )}
+
+              {/* Mic level meter (HQ only) */}
+              {listening && transcribeMode === "hq" && micStatus === "active" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+                  <span style={{ color: S.muted, fontSize: 11 }}>Mic</span>
+                  <div style={{ width: 80, height: 6, background: S.border, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: `${micLevel}%`, height: "100%", background: micLevel > 70 ? S.green : micLevel > 30 ? S.teal : S.blue, transition: "width 80ms linear", borderRadius: 3 }} />
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -566,19 +770,22 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
         <div>
           <Card>
             <SLabel>Live Transcript</SLabel>
-            {!supported ? (
+            {(!supported && transcribeMode === "browser") ? (
               <textarea
                 placeholder="Paste prospect's words here to detect objections…"
                 onChange={(e) => {
-                  setTranscript(e.target.value);
-                  runKwFallback(e.target.value);
-                  scheduleAI(e.target.value);
+                  const v = e.target.value;
+                  transcriptRef.current = v;
+                  setTranscript(v);
+                  runKwFallback(v);
+                  clearTimeout(debounceRef.current);
+                  debounceRef.current = setTimeout(() => callAIRef.current?.(v), AI_DEBOUNCE_MS);
                 }}
                 style={{ ...baseInput, minHeight: 220, resize: "vertical", marginTop: 8, fontSize: 14, lineHeight: 1.7 }}
               />
             ) : (
               <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: 14, minHeight: 220, maxHeight: 380, overflowY: "auto", color: transcript ? S.text : "#3a3e58", fontSize: 14, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
-                {transcript || "Transcript will appear here as the prospect speaks…"}
+                {transcript || (transcribeMode === "hq" ? "Start Listening to capture audio via Whisper…" : "Transcript will appear here as the prospect speaks…")}
               </div>
             )}
           </Card>

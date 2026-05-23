@@ -6,8 +6,11 @@ const express = require("express");
 const router = express.Router();
 
 let OpenAI;
+let toFile;
 try {
-  OpenAI = require("openai");
+  const openaiPkg = require("openai");
+  OpenAI = openaiPkg;
+  toFile = openaiPkg.toFile;
 } catch {
   console.warn("[salesAssistant] openai package not available");
 }
@@ -166,6 +169,71 @@ Analyze and return JSON.`;
   } catch (err) {
     console.error("[salesAssistant/analyze] error:", err?.message || err);
     return res.status(500).json({ ok: false, error: err?.message || "Analysis failed" });
+  }
+});
+
+/* ─── POST /api/sales-assistant/transcribe ─────────────────────────────────── */
+// Receives a base64 audio chunk, transcribes it with OpenAI Whisper, returns text.
+// Audio is never written to disk — processed in memory and discarded immediately.
+router.post("/sales-assistant/transcribe", async (req, res) => {
+  try {
+    const { audio, mimeType = "audio/webm", context = "" } = req.body || {};
+
+    if (!audio || typeof audio !== "string") {
+      return res.status(400).json({ ok: false, error: "audio field required (base64 string)" });
+    }
+
+    if (!OpenAI || !toFile || !process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ ok: false, error: "AI transcription service not configured" });
+    }
+
+    const buffer = Buffer.from(audio, "base64");
+
+    // Skip chunks that are too small to contain real speech (likely silence)
+    if (buffer.length < 1500) {
+      return res.json({ ok: true, text: "" });
+    }
+
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Determine file extension from MIME type for Whisper file hint
+    const cleanMime = mimeType.split(";")[0].trim();
+    const ext =
+      cleanMime.includes("mp4") || cleanMime.includes("m4a") ? "mp4"
+      : cleanMime.includes("ogg") ? "ogg"
+      : cleanMime.includes("wav") ? "wav"
+      : "webm";
+
+    // Wrap buffer as a File object (no disk I/O — in-memory only)
+    const file = await toFile(buffer, `chunk.${ext}`, { type: cleanMime });
+
+    // Domain hint helps Whisper recognise HVAC / sales vocabulary accurately.
+    // Prepend recent transcript context for cross-chunk continuity.
+    const domainHint =
+      "HVAC, heating, air conditioning, repair, install, marketing, advertising, " +
+      "Facebook ads, Instagram, Google ads, Yelp, Smartemark, monthly, cancel anytime, " +
+      "cold call, impressions, leads, results, agency, campaign, no contract";
+    const prompt = context
+      ? `${String(context).slice(-150)} ${domainHint}`
+      : domainHint;
+
+    const transcription = await client.audio.transcriptions.create({
+      file,
+      model: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
+      language: "en",
+      prompt,
+    });
+
+    // SDK returns { text } for json format (default)
+    const text =
+      typeof transcription === "string"
+        ? transcription
+        : String(transcription?.text || "").trim();
+
+    return res.json({ ok: true, text });
+  } catch (err) {
+    console.error("[salesAssistant/transcribe] error:", err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || "Transcription failed" });
   }
 });
 
