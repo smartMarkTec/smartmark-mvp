@@ -399,53 +399,20 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
   const transcriptRef = useRef("");
   const requestIdRef = useRef(0);
   const debounceRef = useRef(null);
+  // Refs so the one-time speech recognition handler always calls latest callback versions
+  const callAIRef = useRef(null);
+  const runKwRef = useRef(null);
 
-  // Set up SpeechRecognition once
-  useEffect(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setSupported(false); return; }
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.onresult = (e) => {
-      let final = "";
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
-      }
-      if (!final) return;
-      transcriptRef.current = final;
-      setTranscript(final);
-      runKwFallback(final);
-      scheduleAI(final);
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    recogRef.current = rec;
-  }, []); // runs once on mount
-
-  const runKwFallback = useCallback((text) => {
-    const matches = keywordDetect(text, objections, usedIds);
-    setKwMatches(matches);
-  }, [objections, usedIds]);
-
-  const scheduleAI = useCallback((text) => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => callAI(text), AI_DEBOUNCE_MS);
-  }, [callAI]);
-
+  // Defined before useEffect to avoid TDZ; stored in refs so handler stays current
   const callAI = useCallback(async (text) => {
     const recent = text.slice(-RECENT_CHARS).trim();
     const context = text.slice(-CONTEXT_CHARS).trim();
-
-    // Don't re-send same content
     if (recent === lastSentText || recent.length < AI_MIN_CHARS) return;
     setLastSentText(recent);
 
     const myId = ++requestIdRef.current;
     setAiStatus("analyzing");
 
-    // Build compact library for backend
     const approvedObjections = objections
       .filter((o) => !usedIds.includes(o.id))
       .map((o) => ({
@@ -461,26 +428,55 @@ function LiveCallTab({ objections, callLogs, onSaveCall }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ recentTranscript: recent, fullRecentContext: context, currentStage: stage, approvedObjections }),
       });
-
-      if (requestIdRef.current !== myId) return; // stale — ignore
-
+      if (requestIdRef.current !== myId) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (requestIdRef.current !== myId) return; // stale
-
+      if (requestIdRef.current !== myId) return;
       setAiResult(data);
       setAiStatus("done");
     } catch {
       if (requestIdRef.current !== myId) return;
       setAiStatus("error");
-      // fall through to keyword result
     }
   }, [objections, usedIds, stage, lastSentText]);
+
+  const runKwFallback = useCallback((text) => {
+    setKwMatches(keywordDetect(text, objections, usedIds));
+  }, [objections, usedIds]);
+
+  // Keep refs pointing at latest versions on every render
+  callAIRef.current = callAI;
+  runKwRef.current = runKwFallback;
+
+  // Set up SpeechRecognition exactly once; calls through refs so it's never stale
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setSupported(false); return; }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    rec.onresult = (e) => {
+      let final = "";
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+      }
+      if (!final) return;
+      transcriptRef.current = final;
+      setTranscript(final);
+      runKwRef.current?.(final);
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => callAIRef.current?.(final), AI_DEBOUNCE_MS);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recogRef.current = rec;
+  }, []); // intentionally empty — all live state accessed through refs above
 
   const regenerate = () => {
     const text = transcriptRef.current;
     if (!text) return;
-    setLastSentText(""); // force re-send
+    setLastSentText("");
     callAI(text);
   };
 
