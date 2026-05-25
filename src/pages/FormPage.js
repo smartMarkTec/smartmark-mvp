@@ -3054,4 +3054,5 @@ const CONVO_QUESTIONS = [
   { key: "hasOffer", question: "Do you have a special offer or promo right now? (yes/no)" },
   { key: "offer", question: "What is your offer or promo?", conditional: { key: "hasOffer", value: "yes" } },
   { key: "mainBenefit", question: "What's the main benefit or service you want the ad to highlight?" },
+  { key: "cta", question: "What do you want people to do after seeing this ad? (e.g. Call now, Schedule service, Request a quote, Book a demo, Visit website)" },
 ];
