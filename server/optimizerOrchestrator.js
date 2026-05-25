@@ -10,6 +10,7 @@ const { buildDiagnosisAsync } = require('./optimizerDiagnosis');
 const { buildDecisionAsync } = require('./optimizerDecision');
 const { executeAction } = require('./optimizerAction');
 const { buildMonitoring } = require('./optimizerMonitoring');
+const { shouldSkipOptimizationForCampaign } = require('./optimizerGuard');
 
 function normalizeActionType(value) {
   return String(value || '').trim();
@@ -71,6 +72,33 @@ async function runFullOptimizerCycle({
   // Dry-run mode: diagnose and decide but skip all Facebook API actions.
   // Enable via env: SMARTEMARK_AI_OPERATOR_DRY_RUN=1
   const DRY_RUN = String(process.env.SMARTEMARK_AI_OPERATOR_DRY_RUN || '').trim() === '1';
+
+  // Hard guard: never run a cycle on an archived or finished campaign.
+  // Re-read from DB here so the check is always against the latest persisted state.
+  const preCheckState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+  if (preCheckState) {
+    const skipCheck = shouldSkipOptimizationForCampaign(preCheckState);
+    if (skipCheck.skip) {
+      console.log('[optimizer orchestrator] skipping archived/finished campaign:', {
+        campaignId: normalizedCampaignId,
+        reason: skipCheck.reason,
+      });
+      return {
+        cycle: {
+          campaignId: normalizedCampaignId,
+          accountId: normalizedAccountId,
+          ownerKey: normalizedOwnerKey,
+          startedAt: new Date().toISOString(),
+          skipped: true,
+          reason: skipCheck.reason,
+          finishedAt: new Date().toISOString(),
+          mode: 'skipped_archived_or_finished',
+          dryRun: DRY_RUN,
+        },
+        optimizerState: preCheckState,
+      };
+    }
+  }
 
   const cycle = {
     campaignId: normalizedCampaignId,

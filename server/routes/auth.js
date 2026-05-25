@@ -35,6 +35,7 @@ const { buildPublicSummary } = require('../optimizerPublicSummary');
 const { runFullOptimizerCycle } = require('../optimizerOrchestrator');
 const { runScheduledOptimizerPass } = require('../optimizerScheduler');
 const { startOptimizerAutoRunner } = require('../optimizerAutoRunner');
+const { shouldSkipOptimizationForCampaign } = require('../optimizerGuard');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -4480,6 +4481,21 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle'
       }
     }
 
+    // Guard: never run a cycle on an archived or finished campaign.
+    const guardState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    if (guardState) {
+      const skipCheck = shouldSkipOptimizationForCampaign(guardState);
+      if (skipCheck.skip) {
+        return res.json({
+          ok: true,
+          skipped: true,
+          reason: skipCheck.reason,
+          campaignId: normalizedCampaignId,
+          message: 'Optimization is paused for this campaign (archived, finished, or disabled).',
+        });
+      }
+    }
+
     const result = await runFullOptimizerCycle({
       campaignId: normalizedCampaignId,
       accountId: normalizedAccountId,
@@ -6077,9 +6093,30 @@ async function bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken
 
   let bootstrapped = 0;
 
+  // Load existing optimizer states once so we can check smArchived before upserting.
+  await ensureOptimizerCampaignStateShape();
+  const existingStates = db.data.optimizer_campaign_state || [];
+
+  const TERMINAL = new Set(['ARCHIVED', 'DELETED', 'COMPLETED', 'CANCELLED', 'ENDED']);
+
   for (const campaign of liveCampaigns) {
     const campaignId = String(campaign?.id || '').trim();
     if (!campaignId) continue;
+
+    const effectiveStatus = String(
+      campaign?.effective_status || campaign?.status || 'ACTIVE'
+    ).trim().toUpperCase();
+
+    // Check existing DB state to respect previously-set smArchived flag.
+    const existingOptState = existingStates.find(
+      (r) => String(r?.campaignId || '').trim() === campaignId
+    );
+    const alreadySmArchived = existingOptState?.smArchived === true;
+    const isTerminalStatus = TERMINAL.has(effectiveStatus);
+
+    // Never re-enable optimization for campaigns that are already archived in our DB
+    // or that Meta reports as terminal. Preserve existing smArchived flag if present.
+    const optimizationEnabled = !alreadySmArchived && !isTerminalStatus;
 
     await upsertOptimizerCampaignState({
       campaignId,
@@ -6089,10 +6126,9 @@ async function bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken
       pageId: '',
       campaignName: String(campaign?.name || '').trim(),
       niche: '',
-      currentStatus: String(
-        campaign?.effective_status || campaign?.status || 'ACTIVE'
-      ).trim(),
-      optimizationEnabled: true,
+      currentStatus: effectiveStatus,
+      optimizationEnabled,
+      ...(alreadySmArchived ? { smArchived: true } : {}),
       billingBlocked: false,
       publicSummary: makeInitialPublicSummary(),
     });
@@ -6137,6 +6173,16 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
       campaign?.effective_status || campaign?.status || 'ACTIVE'
     ).toUpperCase();
 
+    // Check existing DB state to respect previously-set smArchived flag.
+    await ensureOptimizerCampaignStateShape();
+    const existingOptState2 = (db.data.optimizer_campaign_state || []).find(
+      (r) => String(r?.campaignId || '').trim() === campaignId
+    );
+    const alreadySmArchived2 = existingOptState2?.smArchived === true;
+    const sweepTerminal = new Set(['ARCHIVED', 'DELETED', 'COMPLETED', 'CANCELLED', 'ENDED']);
+    const sweepIsTerminal = sweepTerminal.has(effectiveStatus);
+    const sweepOptEnabled = !alreadySmArchived2 && !sweepIsTerminal;
+
     await upsertOptimizerCampaignState({
       campaignId,
       metaCampaignId: campaignId,
@@ -6146,16 +6192,17 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
       campaignName: String(campaign?.name || '').trim(),
       niche: '',
       currentStatus: effectiveStatus,
-      optimizationEnabled: true,
+      optimizationEnabled: sweepOptEnabled,
+      ...(alreadySmArchived2 ? { smArchived: true } : {}),
       billingBlocked: false,
       publicSummary: makeInitialPublicSummary(),
     });
 
-    if (['PAUSED', 'ARCHIVED', 'DELETED'].includes(effectiveStatus)) {
+    if (['PAUSED', 'ARCHIVED', 'DELETED'].includes(effectiveStatus) || alreadySmArchived2) {
       out.details.push({
         campaignId,
         skipped: true,
-        reason: 'inactive_status',
+        reason: alreadySmArchived2 ? 'sm_archived' : 'inactive_status',
         status: effectiveStatus,
       });
       continue;

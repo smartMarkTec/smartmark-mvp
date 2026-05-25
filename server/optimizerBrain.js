@@ -1,6 +1,7 @@
 'use strict';
 
 const OpenAI = require('openai');
+const { loadStrategyContext } = require('./optimizerStrategyContext');
 
 const MODEL = process.env.OPTIMIZER_BRAIN_MODEL || 'gpt-4.1-mini';
 
@@ -65,40 +66,43 @@ async function runOptimizerBrainDiagnosis({
     'test_new_audience_or_creative',
   ];
 
-  const systemPrompt = `
-You are Smartemark's autonomous marketer diagnosis engine.
+  const strategyContext = loadStrategyContext();
 
-You must diagnose Meta ad campaign performance using the provided campaign state, metrics, recent actions, and creative context.
-
-Return ONLY valid JSON with this exact shape:
-{
-  "diagnosis": "one of the allowed values",
-  "likelyProblem": "string",
-  "recommendedAction": "one of the allowed values",
-  "reason": "string",
-  "confidence": 0.0
-}
-
-Rules:
-- Be conservative.
-- Do not invent missing metrics.
-- Prefer "continue_monitoring" when signal is too weak.
-- If campaign is blocked, paused, or has zero delivery, diagnose delivery first.
-- If CTR is weak after meaningful impressions, prefer low_ctr.
-- If clicks exist but conversions are absent after meaningful click volume AND conversionTrackingConfirmed is true, consider post_click_conversion_gap. If conversionTrackingConfirmed is false, do NOT use post_click_conversion_gap.
-- If frequency is elevated and performance is softening, consider creative_fatigue_risk.
-- Confidence must be a number from 0 to 1.
-- Output JSON only. No markdown.
-- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do NOT reference conversions, conversion tracking, or conversion data in the reason field at all. Do not say "conversion tracking is not connected", "conversion data is unavailable", "ensure conversion tracking is set up", or anything similar. Write the reason purely using available metrics — CTR, CPC, clicks, impressions, spend — as a calm, operator-like observation about what the campaign data shows and what the next monitoring step is. Write as if conversion data simply does not exist. Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.
-
-Tone rules for the "reason" field:
-- Write like a calm, professional marketing advisor — not a judge.
-- Be constructive and forward-looking: describe what is happening and what the next focus is.
-- Do not say things like "weak hook" or "not compelling enough" — instead say "the next focus is strengthening the hook" or "a messaging refresh could improve click response."
-- Avoid language that makes the user feel the campaign is failing unless delivery is genuinely blocked.
-- "Early", "still gathering signal", "watching for stronger patterns", and "next step" are good framings.
-- Keep it concise: one to two sentences.
-`.trim();
+  const systemPrompt = [
+    `You are Smartemark's autonomous marketer diagnosis engine.`,
+    ``,
+    `You must diagnose Meta ad campaign performance using the provided campaign state, metrics, recent actions, and creative context.`,
+    ``,
+    `Return ONLY valid JSON with this exact shape:`,
+    `{`,
+    `  "diagnosis": "one of the allowed values",`,
+    `  "likelyProblem": "string",`,
+    `  "recommendedAction": "one of the allowed values",`,
+    `  "reason": "string",`,
+    `  "confidence": 0.0`,
+    `}`,
+    ``,
+    `Rules:`,
+    `- Be conservative.`,
+    `- Do not invent missing metrics.`,
+    `- Prefer "continue_monitoring" when signal is too weak.`,
+    `- If campaign is blocked, paused, or has zero delivery, diagnose delivery first.`,
+    `- If CTR is weak after meaningful impressions, prefer low_ctr.`,
+    `- If clicks exist but conversions are absent after meaningful click volume AND conversionTrackingConfirmed is true, consider post_click_conversion_gap. If conversionTrackingConfirmed is false, do NOT use post_click_conversion_gap.`,
+    `- If frequency is elevated and performance is softening, consider creative_fatigue_risk.`,
+    `- Confidence must be a number from 0 to 1.`,
+    `- Output JSON only. No markdown.`,
+    `- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do NOT reference conversions, conversion tracking, or conversion data in the reason field at all. Do not say "conversion tracking is not connected", "conversion data is unavailable", "ensure conversion tracking is set up", or anything similar. Write the reason purely using available metrics — CTR, CPC, clicks, impressions, spend — as a calm, operator-like observation about what the campaign data shows and what the next monitoring step is. Write as if conversion data simply does not exist. Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.`,
+    ``,
+    `Tone rules for the "reason" field:`,
+    `- Write like a calm, professional marketing advisor — not a judge.`,
+    `- Be constructive and forward-looking: describe what is happening and what the next focus is.`,
+    `- Do not say things like "weak hook" or "not compelling enough" — instead say "the next focus is strengthening the hook" or "a messaging refresh could improve click response."`,
+    `- Avoid language that makes the user feel the campaign is failing unless delivery is genuinely blocked.`,
+    `- "Early", "still gathering signal", "watching for stronger patterns", and "next step" are good framings.`,
+    `- Keep it concise: one to two sentences.`,
+    strategyContext ? `\n--- MARKETING STRATEGY REFERENCE (use for context only) ---\n${strategyContext}` : '',
+  ].filter((line) => line !== null && line !== undefined).join('\n').trim();
 
   const input = {
     campaignId: String(optimizerState?.campaignId || '').trim(),
@@ -197,33 +201,36 @@ async function runOptimizerBrainDecision({
     'wait_for_start_time',
   ];
 
-  const systemPrompt = `
-You are Smartemark's autonomous marketer decision engine.
+  const decisionStrategyContext = loadStrategyContext();
 
-You receive campaign metrics, diagnosis, monitoring state, and recent action history.
-Your job is to decide the next best marketer move.
-
-Return ONLY valid JSON with this exact shape:
-{
-  "decision": "one of the allowed values",
-  "actionType": "one of the allowed values",
-  "priority": "low | medium | high",
-  "reason": "string",
-  "requiresHumanApproval": true,
-  "confidence": 0.0
-}
-
-Rules:
-- Be conservative.
-- Prefer continue_monitoring when there is not enough trustworthy new signal.
-- If delivery is blocked, prioritize restoring delivery.
-- If copy was just refreshed, do not immediately refresh again.
-- If weak engagement or fatigue suggest creative testing, choose one or two creative variants depending on how strong the evidence is.
-- Action type must be from the allowed list.
-- Confidence must be from 0 to 1.
-- Output JSON only. No markdown.
-- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do not make conversion-based decisions. Do not recommend test_offer_or_audience_angle or test_new_audience_or_creative based solely on missing conversions. Focus on click quality, CTR, CPC, and spend efficiency instead.
-`.trim();
+  const systemPrompt = [
+    `You are Smartemark's autonomous marketer decision engine.`,
+    ``,
+    `You receive campaign metrics, diagnosis, monitoring state, and recent action history.`,
+    `Your job is to decide the next best marketer move.`,
+    ``,
+    `Return ONLY valid JSON with this exact shape:`,
+    `{`,
+    `  "decision": "one of the allowed values",`,
+    `  "actionType": "one of the allowed values",`,
+    `  "priority": "low | medium | high",`,
+    `  "reason": "string",`,
+    `  "requiresHumanApproval": true,`,
+    `  "confidence": 0.0`,
+    `}`,
+    ``,
+    `Rules:`,
+    `- Be conservative.`,
+    `- Prefer continue_monitoring when there is not enough trustworthy new signal.`,
+    `- If delivery is blocked, prioritize restoring delivery.`,
+    `- If copy was just refreshed, do not immediately refresh again.`,
+    `- If weak engagement or fatigue suggest creative testing, choose one or two creative variants depending on how strong the evidence is.`,
+    `- Action type must be from the allowed list.`,
+    `- Confidence must be from 0 to 1.`,
+    `- Output JSON only. No markdown.`,
+    `- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do not make conversion-based decisions. Do not recommend test_offer_or_audience_angle or test_new_audience_or_creative based solely on missing conversions. Focus on click quality, CTR, CPC, and spend efficiency instead.`,
+    decisionStrategyContext ? `\n--- MARKETING STRATEGY REFERENCE (use for context only) ---\n${decisionStrategyContext}` : '',
+  ].filter((line) => line !== null && line !== undefined).join('\n').trim();
 
   const input = {
     campaignId: String(optimizerState?.campaignId || '').trim(),

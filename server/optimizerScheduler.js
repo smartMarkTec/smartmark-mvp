@@ -4,6 +4,7 @@ const {
   getAllOptimizerCampaignStates,
 } = require('./optimizerCampaignState');
 const { runFullOptimizerCycle } = require('./optimizerOrchestrator');
+const { shouldSkipOptimizationForCampaign } = require('./optimizerGuard');
 
 function hoursBetween(earlierIso, laterIso) {
   const a = new Date(earlierIso).getTime();
@@ -80,8 +81,10 @@ function getEligibilityReason(state, nowIso, minHoursBetweenRuns = 1) {
     return { eligible: false, reason: 'invalid_state' };
   }
 
-  if (!state.optimizationEnabled) {
-    return { eligible: false, reason: 'optimization_disabled' };
+  // Archive / finished guard — checked first, before anything else.
+  const skipCheck = shouldSkipOptimizationForCampaign(state);
+  if (skipCheck.skip) {
+    return { eligible: false, reason: skipCheck.reason };
   }
 
   if (state.billingBlocked) {

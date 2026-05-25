@@ -1,0 +1,67 @@
+SMARTEMARK AI OPERATOR — MARKETING STRATEGY REFERENCE
+Distilled from Smartemark strategy playbooks (fb_profitable_rules, venus_fly_trap, forester, if_this_then_that_sop).
+Keep internal. Do not surface to users.
+
+--- CORE PHILOSOPHY ---
+A profitable Facebook ad for a local service business (HVAC, plumbing, roofing, etc.) is built on three pillars:
+1. A clear, specific offer that removes risk for the prospect (free quote, same-day service, price match, no-contract).
+2. A visual hook that stops the scroll — faces, before/after results, urgency cues, or local trust signals work best.
+3. Tight audience targeting: homeowners in a defined service radius, not broad interests.
+
+--- VENUS FLY TRAP STRATEGY ---
+Goal: attract inbound leads by being the obvious, low-risk choice. Do not push; pull.
+- Lead with a value statement: "Free AC tune-up for new customers in [City]."
+- Remove friction: one CTA, one phone number or form, no confusing options.
+- Trust signals beat discounts: "1,200 five-star reviews" outperforms "20% off" for premium buyers.
+- Use social proof in the ad body — a real customer outcome phrase beats a generic tagline.
+
+--- FORESTER STRATEGY (audience and retargeting) ---
+Goal: identify the highest-intent segment and concentrate budget there before expanding.
+- Start narrow (homeowners, 25–55, 15-mile radius, home-improvement interest) to gather clean signal.
+- Once CTR > 1.5% and CPC < $2.50 on the seed audience, test 1% lookalike before broadening.
+- Retarget website visitors and video viewers (3s+) with a direct-offer variant, not the awareness version.
+- Never expand to a new audience while a creative test is still running — conflates variables.
+
+--- FB PROFITABLE RULES ---
+Key thresholds for HVAC/local service campaigns:
+- CTR below 0.8%: messaging or creative is not resonating. Refresh copy or image before anything else.
+- Frequency above 2.5 with CTR declining: creative fatigue. Rotate to a fresh visual before the audience tunes out.
+- CPC above $3.50 with low conversions: misaligned audience, weak offer, or landing page disconnect.
+- Spend $10–$30 before judging: low-budget campaigns need at least this before drawing conclusions.
+- If impressions > 1,000 and zero clicks: something is actively blocking engagement (wrong placement, restricted audience, broken destination). Pause and investigate before spending more.
+
+--- IF-THIS-THEN-THAT SOP ---
+Decision rules for the AI operator to follow when generating copy/creative:
+
+IF CTR < 0.8% AND impressions > 500 THEN:
+  → Refresh primary text with a new hook. Lead with a specific benefit or outcome, not a feature.
+  → Keep image unchanged for first refresh (isolate the variable).
+
+IF frequency > 2.5 AND CTR falling THEN:
+  → Swap image to a new visual style: try lifestyle over product, or problem-aware over benefit-first.
+  → Run as a challenger ad alongside the current control — do not replace until test concludes.
+
+IF clicks > 10 AND zero conversions AND landing page confirmed THEN:
+  → Test a different offer angle or CTA (e.g., "Get a quote" → "See pricing").
+  → Consider a headline test on the landing page before blaming the ad.
+
+IF campaign is less than 48 hours old OR impressions < 300 THEN:
+  → Observe only. Do not change creative or copy — the learning phase needs uninterrupted data.
+
+IF a test has been running less than 72 hours THEN:
+  → Do not resolve or add a new challenger. Wait for statistically meaningful signal.
+
+--- CREATIVE AND COPY RULES ---
+- Always use real business details from the campaign brief (name, city, phone, offer).
+- Never invent phone numbers, websites, prices, or guarantees not in the original inputs.
+- If original business inputs are missing: mark as needs_human_review and do not generate.
+- Preferred copy formula: [Problem/Benefit hook] + [Social proof or trust signal] + [Single clear CTA].
+- Preferred visual: clean background, single focal point, legible headline at 50%+ of frame.
+- Avoid: stock-photo clichés, clip art, decorative gradients, or images with no people or results.
+
+--- PLAN-LEVEL AUTOMATION LIMITS ---
+Starter: observe and recommend only; one creative test per cycle; 5-day cooldown between tests.
+Pro: up to two creative variants per round; can test audience + creative simultaneously.
+Operator: up to three variants; proactive refresh cycles; can run retargeting logic.
+
+All plans: NEVER change budget. NEVER pause all ads. NEVER run more than one new challenger at a time.
