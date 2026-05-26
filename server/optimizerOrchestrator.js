@@ -2,6 +2,7 @@
 
 const {
   findOptimizerCampaignStateByCampaignId,
+  appendAiHistoryEntry,
 } = require('./optimizerCampaignState');
 const {
   syncCampaignMetricsToOptimizerState,
@@ -11,6 +12,7 @@ const { buildDecisionAsync } = require('./optimizerDecision');
 const { executeAction } = require('./optimizerAction');
 const { buildMonitoring } = require('./optimizerMonitoring');
 const { shouldSkipOptimizationForCampaign } = require('./optimizerGuard');
+const { buildDailyReport, shouldGenerateDailyReport } = require('./optimizerDailyReport');
 
 function normalizeActionType(value) {
   return String(value || '').trim();
@@ -204,6 +206,13 @@ async function runFullOptimizerCycle({
     cycle.secondAction = secondAction;
 
     state = await safeReloadState(normalizedCampaignId, 'after second action');
+  }
+
+  // Daily report: once per calendar day per campaign
+  if (shouldGenerateDailyReport(state)) {
+    const dailyReport = buildDailyReport(state);
+    await appendAiHistoryEntry(normalizedCampaignId, dailyReport).catch(() => {});
+    cycle.dailyReport = { generated: true, title: dailyReport.title };
   }
 
   cycle.finishedAt = new Date().toISOString();

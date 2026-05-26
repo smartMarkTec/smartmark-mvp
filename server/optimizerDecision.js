@@ -128,6 +128,26 @@ function buildFallbackDecision({ optimizerState }) {
   const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
   const liveCreativeTest = hasLiveCreativeTest(optimizerState);
 
+  // Age gate: hold all action decisions for campaigns < 24h old (not in a live test).
+  const _fbCreatedAt = String(optimizerState?.createdAt || '').trim();
+  if (_fbCreatedAt && !liveCreativeTest && !pendingCreativeReady) {
+    const _ageHours = (Date.now() - new Date(_fbCreatedAt).getTime()) / (1000 * 60 * 60);
+    if (Number.isFinite(_ageHours) && _ageHours < 24) {
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'hold_and_monitor',
+        actionType: 'continue_monitoring',
+        priority: 'low',
+        reason:
+          'The campaign is less than 24 hours old. Smartemark is in observation-only mode — watching delivery and early signals before suggesting any action.',
+        requiresHumanApproval: true,
+        confidence: 0.92,
+        generatedAt: new Date().toISOString(),
+        mode: 'fallback_rule_based_v1',
+      };
+    }
+  }
+
   if (latestMonitoringDecision) {
     const monitoringDecision = String(
       latestMonitoringDecision.monitoringDecision || ''
@@ -640,6 +660,26 @@ async function buildDecisionAsync({ optimizerState }) {
         },
         optimizerState,
       });
+    }
+  }
+
+  // Age gate for AI brain path as well — campaigns < 24h go straight to hold_and_monitor
+  const _asyncCreatedAt = String(optimizerState?.createdAt || '').trim();
+  if (_asyncCreatedAt) {
+    const _asyncAgeHours = (Date.now() - new Date(_asyncCreatedAt).getTime()) / (1000 * 60 * 60);
+    if (Number.isFinite(_asyncAgeHours) && _asyncAgeHours < 24) {
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'hold_and_monitor',
+        actionType: 'continue_monitoring',
+        priority: 'low',
+        reason:
+          'The campaign is less than 24 hours old. Smartemark is in observation-only mode — watching delivery and early signals before suggesting any action.',
+        requiresHumanApproval: true,
+        confidence: 0.92,
+        generatedAt: new Date().toISOString(),
+        mode: 'fallback_rule_based_v1',
+      };
     }
   }
 

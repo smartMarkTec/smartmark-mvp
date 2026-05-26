@@ -1751,10 +1751,12 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
         .slice(0, 50)
         .map((entry, idx) => ({
           id: entry.id || `${entry.type || 'entry'}-${idx}`,
+          rawType: entry.type || 'monitoring',
           kind:
             entry.type === 'diagnosis' ? 'Diagnosis'
             : entry.type === 'decision' ? 'Decision'
             : entry.type === 'action' ? 'Action'
+            : entry.type === 'daily_report' ? 'Daily Report'
             : 'Monitoring',
           title: entry.title || String(entry.actionType || entry.type || 'Update').replace(/_/g, ' '),
           detail: entry.reason || entry.summary || '',
@@ -1767,6 +1769,12 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
     : buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
   const [showHistory, setShowHistory] = useState(false);
+  const [histTab, setHistTab] = useState("all");
+  const filteredHistory =
+    histTab === "observations" ? history.filter((e) => e.rawType === "diagnosis" || e.rawType === "monitoring")
+    : histTab === "daily"      ? history.filter((e) => e.rawType === "daily_report")
+    : histTab === "actions"    ? history.filter((e) => e.rawType === "action" || e.rawType === "decision")
+    : history;
 
   const pending = optimizerState?.pendingCreativeTest || null;
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
@@ -1919,10 +1927,7 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
             }}
           >
             {(() => {
-              const ts =
-                optimizerState?.latestDiagnosis?.generatedAt ||
-                safeSummary?.updatedAt ||
-                null;
+              const ts = optimizerState?.latestDiagnosis?.generatedAt || null;
               return ts ? `Analyzed ${timeAgoShort(ts)}` : "Monitoring campaign";
             })()}
           </div>
@@ -1973,10 +1978,10 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "#111827" }}>AI Activity Log</div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>Latest optimizer cycle activity</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>Saved optimizer cycle history</div>
               </div>
               <button
                 onClick={() => setShowHistory(false)}
@@ -1984,20 +1989,50 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
               >×</button>
             </div>
 
-            {history.length === 0 ? (
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+              {[
+                { key: "all", label: "All" },
+                { key: "observations", label: "Observations" },
+                { key: "daily", label: "Daily Reports" },
+                { key: "actions", label: "Actions" },
+              ].map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setHistTab(t.key)}
+                  style={{
+                    background: histTab === t.key ? "#ede9fe" : "#f8fafc",
+                    border: `1px solid ${histTab === t.key ? "#c4b5fd" : "#e5e7eb"}`,
+                    color: histTab === t.key ? "#5b21b6" : "#6b7280",
+                    borderRadius: 999, padding: "4px 12px", fontSize: 11,
+                    fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredHistory.length === 0 ? (
               <div style={{ color: "#94a3b8", fontSize: 14, padding: "20px 0", textAlign: "center" }}>
-                No AI activity logged yet. Activity will appear after the first optimizer cycle runs.
+                {histTab === "daily"
+                  ? "No daily reports yet. Reports are generated once per day during the scheduled optimizer cycle."
+                  : histTab === "actions"
+                  ? "No actions logged yet. Actions appear when the AI Operator takes or evaluates a campaign move."
+                  : histTab === "observations"
+                  ? "No observations logged yet. Activity will appear after the first optimizer cycle runs."
+                  : "No AI activity logged yet. Activity will appear after the first optimizer cycle runs."}
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {history.map((item) => {
+                {filteredHistory.map((item) => {
                   const kindColors = {
-                    Diagnosis:  { bg: "#f5f3ff", border: "#e9d5ff", badge: "#7c3aed" },
-                    Decision:   { bg: "#eff6ff", border: "#bfdbfe", badge: "#1d4ed8" },
-                    Action:     item.dryRun
+                    Diagnosis:       { bg: "#f5f3ff", border: "#e9d5ff", badge: "#7c3aed" },
+                    Decision:        { bg: "#eff6ff", border: "#bfdbfe", badge: "#1d4ed8" },
+                    Action:          item.dryRun
                       ? { bg: "#fffbeb", border: "#fde68a", badge: "#b45309" }
                       : { bg: "#f0fdf4", border: "#bbf7d0", badge: "#15803d" },
-                    Monitoring: { bg: "#f8fafc", border: "#e2e8f0", badge: "#475569" },
+                    "Daily Report":  { bg: "#f0fdf4", border: "#bbf7d0", badge: "#16a34a" },
+                    Monitoring:      { bg: "#f8fafc", border: "#e2e8f0", badge: "#475569" },
                   };
                   const c = kindColors[item.kind] || kindColors.Monitoring;
                   return (
@@ -2036,8 +2071,8 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
 
             <div style={{ marginTop: 16, fontSize: 11, color: "#d1d5db", textAlign: "center" }}>
               {_aiHistoryRaw.length > 0
-                ? `Showing ${history.length} of ${_aiHistoryRaw.length} logged entries.`
-                : "Activity reflects the most recent optimizer cycle. History builds as the campaign runs."}
+                ? `Showing ${filteredHistory.length} of ${_aiHistoryRaw.length} logged entries.`
+                : "History builds as the optimizer cycle runs. Daily reports are generated once per day."}
             </div>
           </div>
         </div>
@@ -2830,11 +2865,6 @@ useEffect(() => {
   const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
   const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
   const [optimizerStateMap, setOptimizerStateMap] = useState({});
-  // Tracks last time we fired run-diagnosis per campaignId so we never call it more than ~hourly
-  const diagnosisLastCalledRef = useRef({});
-  // Tracks whether the previous poll for a campaignId had real metrics — used to detect
-  // the exact moment metrics first appear so we can diagnose immediately.
-  const prevActivityRef = useRef({});
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3918,13 +3948,6 @@ useEffect(() => {
   };
 
   const pollLightweightData = async () => {
-    // Hoisted so the diagnosis block can read live metrics even if metricsRes and summaryRes
-    // are processed in separate branches (optimizer-state has no reliable metricsSnapshot).
-    let liveImpressions = 0;
-    let liveSpend = 0;
-    let liveClicks = 0;
-    let liveCtr = 0;
-
     try {
       const [metricsRes, summaryRes] = await Promise.allSettled([
         authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/metrics`),
@@ -3943,12 +3966,6 @@ useEffect(() => {
         const clicks = Number(row?.clicks);
         const spend = Number(row?.spend);
         const ctr = Number(row?.ctr);
-
-        // Capture for diagnosis check below
-        liveImpressions = Number.isFinite(impressions) ? impressions : 0;
-        liveSpend = Number.isFinite(spend) ? spend : 0;
-        liveClicks = Number.isFinite(clicks) ? clicks : 0;
-        liveCtr = Number.isFinite(ctr) ? ctr : 0;
 
         setMetricsMap((m) => ({
           ...m,
@@ -3998,71 +4015,7 @@ if (
     [campaignId]: optimizerCreativeState,
   }));
 
-  // ── AI Observation refresh ─────────────────────────────────────────────
-  // Two-tier timing:
-  //   FRESHNESS_TTL  — how old the existing DB diagnosis must be before we consider it stale
-  //                    (short: 15 min, so a new session quickly gets a current diagnosis)
-  //   SESSION_THROTTLE — how long we wait before re-firing within the same page session
-  //                      (long: 50 min, prevents spam after the first run)
-  //
-  // Immediate trigger: if this poll is the FIRST one in this session that shows real metrics
-  // (prevActivityRef was false), bypass the freshness gate so the user sees AI text quickly.
-  const FRESHNESS_TTL_MS    = 15 * 60 * 1000; // existing diagnosis considered stale after 15 min
-  const SESSION_THROTTLE_MS = 50 * 60 * 1000; // don't re-fire more than once per 50 min/session
 
-  // Use live metrics from the /metrics endpoint (hoisted above).
-  const hasRealActivity = liveSpend > 0 || liveImpressions >= 50;
-
-  // Detect moment metrics first appear in this session so we can diagnose immediately.
-  const prevHadActivity = prevActivityRef.current[campaignId] || false;
-  const metricsJustAppeared = hasRealActivity && !prevHadActivity;
-  prevActivityRef.current[campaignId] = hasRealActivity;
-
-  const existingDiagnosisTs = optimizerState?.latestDiagnosis?.generatedAt
-    ? new Date(optimizerState.latestDiagnosis.generatedAt).getTime()
-    : 0;
-  const diagnosisFresh = existingDiagnosisTs && Date.now() - existingDiagnosisTs < FRESHNESS_TTL_MS;
-  const sessionLastCalled = diagnosisLastCalledRef.current[campaignId] || 0;
-  const calledRecentlyThisSession = Date.now() - sessionLastCalled < SESSION_THROTTLE_MS;
-
-  // Fire when:
-  //   • real metrics exist
-  //   • AND (metrics just appeared this session  OR  existing diagnosis is stale)
-  //   • AND we haven't already fired this session recently
-  if (!cancelled && hasRealActivity && (metricsJustAppeared || !diagnosisFresh) && !calledRecentlyThisSession) {
-    diagnosisLastCalledRef.current[campaignId] = Date.now();
-    // Fire async — do not block the poll loop
-    authFetch(
-      `/facebook/adaccount/${acctId}/campaign/${campaignId}/run-diagnosis`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // Pass the live metrics the UI already polled from Facebook.
-          // Backend will overlay these onto state.metricsSnapshot if the DB copy is empty,
-          // so the AI diagnosis is grounded in the same numbers the user sees.
-          clientMetrics: {
-            impressions: liveImpressions,
-            spend: liveSpend,
-            clicks: liveClicks,
-            ctr: liveCtr,
-          },
-        }),
-      }
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d?.optimizerState || cancelled) return;
-        const freshState = d.optimizerState;
-        setOptimizerStateMap((m) => ({ ...m, [campaignId]: freshState }));
-        setPublicSummaryMap((m) => ({
-          ...m,
-          [campaignId]: getPublicSummaryFromOptimizerState(freshState) || getFallbackPublicSummary(),
-        }));
-      })
-      .catch(() => {});
-  }
-  // ──────────────────────────────────────────────────────────────────────
 }
     } catch (err) {
       console.error("Failed to refresh campaign panel:", err);

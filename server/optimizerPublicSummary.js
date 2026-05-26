@@ -260,7 +260,7 @@ function buildPublicSummary({ optimizerState }) {
       spend,
       conversions,
     },
-    updatedAt: new Date().toISOString(),
+    updatedAt: optimizerState?.latestDiagnosis?.generatedAt || optimizerState?.updatedAt || new Date().toISOString(),
     mode: 'public_marketer_summary_v3',
   };
 }

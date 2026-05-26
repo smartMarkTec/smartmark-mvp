@@ -231,6 +231,22 @@ function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
     confidence = 0.72;
   }
 
+  // Age guard: downgrade aggressive diagnoses for campaigns < 24h old.
+  // createdAt on the optimizer state is set when the campaign is first enrolled.
+  const _createdAt = String(optimizerState?.createdAt || '').trim();
+  if (_createdAt) {
+    const _ageHours = (Date.now() - new Date(_createdAt).getTime()) / (1000 * 60 * 60);
+    const _earlyActionDiagnoses = new Set(['low_ctr', 'weak_engagement', 'high_cpc', 'post_click_conversion_gap']);
+    if (Number.isFinite(_ageHours) && _ageHours < 24 && _earlyActionDiagnoses.has(diagnosis)) {
+      diagnosis = 'insufficient_data';
+      likelyProblem = 'Campaign is less than 24 hours old — current metrics reflect early delivery patterns only.';
+      recommendedAction = 'continue_monitoring';
+      reason =
+        'The campaign is less than 24 hours old, so current signals are too early to act on. Smartemark is watching and will form a clearer picture as delivery and engagement data builds up over the first day or two.';
+      confidence = 0.85;
+    }
+  }
+
   return {
     campaignId: String(optimizerState?.campaignId || '').trim(),
     diagnosis,
