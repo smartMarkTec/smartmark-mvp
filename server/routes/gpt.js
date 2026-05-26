@@ -251,6 +251,9 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
     const a = (req.body && req.body.answers) || {};
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+    const _skipSet = new Set(["skip", "skipped", "none", "n/a", "na", "-", "no", "not provided"]);
+    const _isSkipped = (v) => !v || _skipSet.has(String(v).replace(/\s+/g, " ").trim().toLowerCase());
+
     console.log("[CREATIVE][context]", {
       route: "summarize-ad-copy",
       businessName: String(a.businessName || "").trim() || "(empty)",
@@ -367,7 +370,7 @@ const buildFallbackHeadline = () => {
   // Derive from industry + location only — never from raw benefit text (too echo-prone).
   // Check businessType and niche as fallbacks for industry (some clients populate those instead).
   const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
-  const city = String(a.city || "").trim();
+  const city = _isSkipped(a.city) ? "" : String(a.city || "").trim();
 
   if (/hvac|heating|cooling|air/.test(industry))   return city ? `HVAC service in ${city}` : "Trusted local HVAC service";
   if (/plumb/.test(industry))                       return city ? `Plumbing repairs in ${city}` : "Local plumbers ready to help";
@@ -395,7 +398,7 @@ const buildFallbackSubline = (headline) => {
   // Also check businessType and niche as fallbacks (consistent with buildFallbackHeadline).
   const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
   const audience = String(a.idealCustomer || "").trim().toLowerCase();
-  const city = String(a.city || "").trim();
+  const city = _isSkipped(a.city) ? "" : String(a.city || "").trim();
   const offer = String(a.offer || a.saveAmount || "").trim();
 
   const s1 = industry
@@ -438,7 +441,7 @@ const system =
   "Strong examples: 'AC down? Fixed same day.' — 'Roof replaced before the rain.' — 'Licensed plumber, shows up on time.' — 'New furnace installed this week.' — 'Cooling restored fast.' " +
   "" +
   "SUBLINE: 2–3 sentences, 20–50 words. Say what the business does, who it helps, and what makes it worth calling — in plain, direct, human language. No drama, no exaggeration, no padding. " +
-  "PHONE RULE: If Phone is in the brief, end the subline with a natural call phrase using that exact number (e.g. 'Call (713) 555-1234 to schedule.'). Never invent or placeholder a number. " +
+  "PHONE RULE: If and only if a real phone number appears in the PHONE field of the brief, end the subline with a natural call phrase using that exact number. If there is no PHONE field in the brief, never include any phone number, placeholder, or invented number anywhere in the copy — not in the subline, not in bullets, not anywhere. " +
   "" +
   "CTA: 2–5 words. A verb-forward action that matches what this business actually wants people to do next. " +
   "By industry: HVAC/cooling/heating → 'Schedule service today' / 'Book your service call' / 'Get a free estimate'. " +
@@ -456,15 +459,17 @@ const system =
     // Phone is now asked for all users (website and no-website alike).
     // Use whatever the user actually provided this run; empty string means no phone.
     const isNoWebsiteRun = String(a.noWebsite || "").trim().toLowerCase() === "yes";
-    const phoneForCopy = String(a.phone || "").trim();
+    const phoneForCopy = _isSkipped(a.phone) ? "" : String(a.phone || "").trim();
 
-    const websiteForCopy = String(a.website || a.url || "").trim();
+    const websiteForCopy = _isSkipped(a.website || a.url) ? "" : String(a.website || a.url || "").trim();
 
     // Build a structured creative brief so the model gets synthesized intent,
     // not a list of disconnected raw fields.
-    const locationStr = a.city
-      ? (a.state ? `${a.city}, ${a.state}` : a.city)
-      : (a.location || "");
+    const _city = _isSkipped(a.city) ? "" : String(a.city || "").trim();
+    const _state = _isSkipped(a.state) ? "" : String(a.state || "").trim();
+    const locationStr = _city
+      ? (_state ? `${_city}, ${_state}` : _city)
+      : (_state || String(a.location || "").trim());
     const mainService = String(a.mainBenefit || a.details || "").trim();
     const offerStr    = String(a.offer || a.saveAmount || "").trim();
     const audienceStr = String(a.idealCustomer || "").trim();

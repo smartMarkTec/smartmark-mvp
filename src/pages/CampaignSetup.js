@@ -4280,6 +4280,13 @@ const handleDeleteCampaign = async (campaignId) => {
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
+    // Clear all stale form/creative/image-cache/ctxKey state so FormPage starts completely fresh
+    purgeDraftArtifactsEverywhere();
+    // Re-enable draft saving for the new campaign (may have been disabled after a prior launch)
+    setDraftDisabled(resolvedUser, false);
+    // Mint a fresh ctxKey so FormPage's restore logic never matches the old campaign's draft
+    const freshCtx = `${Date.now()}|new||`;
+    setActiveCtx(freshCtx, resolvedUser);
     navigate("/form");
   };
 
