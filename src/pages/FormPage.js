@@ -1754,7 +1754,8 @@ useEffect(() => {
     setChatHistory((ch) => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    if (awaitingReady) {
+    // awaitingReady only gates the intro — never once questions have started (step > 0)
+    if (awaitingReady && step === 0) {
       if (
         /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
           value
@@ -1884,6 +1885,9 @@ try {
     }
 
     if (currentQ) {
+      // Defensive: if awaitingReady is somehow still true at this point, clear it now
+      if (awaitingReady) setAwaitingReady(false);
+
       let answerToSave = value;
       if (currentQ.key === "url") {
         const isNoWebsite = /^(none|no|n\/a|nope|skip|don'?t have one|no website|not yet)$/i.test(value.trim());
