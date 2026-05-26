@@ -104,6 +104,11 @@ function clean(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
 
+function isBlankOrSkipped(value) {
+  const s = String(value == null ? "" : value).replace(/\s+/g, " ").trim().toLowerCase();
+  return !s || ["skip", "skipped", "none", "n/a", "na", "-", "no", "no phone", "no website", "not provided"].includes(s);
+}
+
 function titleCase(s) {
   return clean(s)
     .toLowerCase()
@@ -366,12 +371,12 @@ function deriveOffer(a = {}, craftedCopy = {}) {
 function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = false) {
   const businessName  = clean(a.businessName || a.brand || a.business || a.company || "Local Business");
   const industry      = clean(a.industry || a.businessType || a.niche || "business");
-  const city          = clean(a.city || "");
-  const state         = clean(a.state || "");
+  const city          = isBlankOrSkipped(a.city) ? "" : clean(a.city || "");
+  const state         = isBlankOrSkipped(a.state) ? "" : clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
   const mainBenefit   = clean(a.mainBenefit || a.details || a.benefit || "");
-  const phone         = clean(a.phone || "");
-  const website       = clean(a.website || a.url || "");
+  const phone         = isBlankOrSkipped(a.phone) ? "" : clean(a.phone || "");
+  const website       = isBlankOrSkipped(a.website || a.url) ? "" : clean(a.website || a.url || "");
   const rawOffer      = clean(craftedCopy.offer || a.offer || a.promo || "");
   const hasOffer      = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
   const offer         = hasOffer ? clip(rawOffer, 70) : "";
@@ -384,18 +389,15 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   const summaryLines = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
-    // Form location wins; fall back to website-detected city/state only if form gave nothing
-    locationText              ? `Location: ${locationText}`
-      : (webContent?.cityState ? `Location: ${webContent.cityState}` : null),
+    locationText  ? `Location: ${locationText}` : null,
     idealCustomer ? `Audience: ${idealCustomer}` : null,
     mainBenefit   ? `Service: ${mainBenefit}` : null,
     offer         ? `Offer: "${offer}"` : null,
     headline      ? `Headline: "${headline}"` : null,
     supportLine   ? `Supporting text: "${supportLine}"` : null,
     `CTA: "${cta}"`,
-    // Form phone wins; fall back to website-detected phone only if form gave nothing
-    (phone || webContent?.phone) ? `Phone: ${phone || webContent.phone}` : null,
-    website       ? `Website: ${website}` : null,
+    phone   ? `Phone: ${phone}` : null,
+    website ? `Website: ${website}` : null,
   ].filter(Boolean);
 
   // Website context is supporting only — never replaces any form field above
@@ -408,8 +410,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   const websiteNote = website
     ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
     : " Do not display any website URL or web address — none was provided.";
-  // Prevent phone hallucination when no phone number is available from the form or website grounding
-  const phoneNote = (phone || webContent?.phone)
+  const phoneNote = phone
     ? ""
     : " Do not display any phone number — none was provided.";
 
@@ -437,7 +438,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — natural image-generation prompt
-  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote}${phoneNote} Keep the design simple to moderately bold — polished and visually appealing, but not extreme, overly dramatic, overly industrial, or cluttered. Use one clear primary visual focus; only include additional elements when they fit naturally and keep the composition clean. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Render the headline, supporting text, and CTA exactly as specified in the business context — do not rewrite or replace them. Keep every text element fully inside the visible image area with generous safe margins on all sides. Reserve a clear bottom safe zone: the bottom 15% of the image must remain free of text — never place the final line of copy, CTA, phone number, or website URL near the lower edge. Never crop, cut off, or partially hide any word, letter, headline, business name, phone number, website URL, or CTA — reduce font size if needed to ensure everything fits completely inside the frame. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
+  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote}${phoneNote} The visual can range from clean and modern to bold and eye-catching — choose the approach that best fits the business type and target audience. Use strong, brand-relevant visual storytelling: imagery that reflects the service, the customer experience, or the outcome the business delivers. Avoid generic defaults like laptops on desks, blank office scenes, or unrelated objects — choose a visual that feels specific to this business and its customers. The composition should feel intentional and professionally designed, not cluttered. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Only include contact information and location details explicitly listed in the business context below — do not invent or substitute any phone number, website URL, address, city, state, or other contact detail. Render the headline, supporting text, and CTA exactly as specified in the business context — do not rewrite or replace them. Keep every text element fully inside the visible image area with generous safe margins on all sides. Reserve a clear bottom safe zone: the bottom 15% of the image must remain free of text — never place the final line of copy, CTA, phone number, or website URL near the lower edge. Never crop, cut off, or partially hide any word, letter, headline, business name, phone number, website URL, or CTA — reduce font size if needed to ensure everything fits completely inside the frame. Use concise, readable copy. Let the AI decide the best composition, layout, and visual treatment naturally.
 
 ${summary}${logoInstruction}`;
 }
@@ -518,8 +519,8 @@ async function generateOpenAIAdImageEdit({ imageBuffer, prompt, size = "1024x102
 function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = false } = {}) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
-  const website = clean(a.website || a.url || "");
-  const phone = clean(a.phone || "");
+  const website = isBlankOrSkipped(a.website || a.url) ? "" : clean(a.website || a.url || "");
+  const phone = isBlankOrSkipped(a.phone) ? "" : clean(a.phone || "");
   const offer = clip(deriveOffer(a, craftedCopy), 70);
   const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
@@ -541,7 +542,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     ``,
     `Use the uploaded photo as the creative foundation. Keep its essential subject matter, but improve the overall visual presentation to make the result feel like a professionally designed ad creative — lively, attractive, and polished. If the original photo is flat, gloomy, dimly lit, or compositionally weak, enhance it: improve the mood, brighten the scene naturally, and make it feel more vibrant and inviting. The result should feel energetic and appealing, not dull or gloomy.`,
     ``,
-    `Keep the result photorealistic. Do not turn it into a cartoon, illustration, painting, or any non-photographic style. Keep it clean, simple, and professional. Use one clear primary visual focus; only include additional elements when they fit naturally and keep the composition clean. No people in the image. Let the AI decide the best overall ad composition and visual treatment naturally.`,
+    `Keep the result photorealistic. Do not turn it into a cartoon, illustration, painting, or any non-photographic style. Keep the composition polished and professionally designed — bold and visually striking compositions are welcome when they suit the business type. No people in the image. Let the AI decide the best overall ad composition and visual treatment naturally.`,
     ``,
     `Text layout: keep every text element fully inside the visible image area with generous safe margins on all sides — do not place any text near the top, bottom, left, or right edge. Reserve a clear bottom safe zone: the bottom 15% of the image must remain free of text — never position the CTA, phone number, website URL, or final line of copy inside this zone. Never crop, cut off, or partially hide any word, letter, headline, business name, phone number, website, or CTA — reduce the font size if needed so everything fits completely inside the frame. Use concise, strong ad copy: a short punchy headline, brief supporting text if needed, and a clear CTA. Avoid large text blocks or dense paragraphs. Text must be fully legible at social-feed viewing sizes.`,
     ``,
