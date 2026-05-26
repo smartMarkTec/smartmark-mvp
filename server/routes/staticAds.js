@@ -109,6 +109,13 @@ function isBlankOrSkipped(value) {
   return !s || ["skip", "skipped", "none", "n/a", "na", "-", "no", "no phone", "no website", "not provided"].includes(s);
 }
 
+function formatPhone(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits[0] === "1") return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return raw;
+}
+
 function titleCase(s) {
   return clean(s)
     .toLowerCase()
@@ -375,7 +382,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   const state         = isBlankOrSkipped(a.state) ? "" : clean(a.state || "");
   const idealCustomer = clean(a.idealCustomer || "");
   const mainBenefit   = clean(a.mainBenefit || a.details || a.benefit || "");
-  const phone         = isBlankOrSkipped(a.phone) ? "" : clean(a.phone || "");
+  const phone         = isBlankOrSkipped(a.phone) ? "" : formatPhone(clean(a.phone || ""));
   const website       = isBlankOrSkipped(a.website || a.url) ? "" : clean(a.website || a.url || "");
   const rawOffer      = clean(craftedCopy.offer || a.offer || a.promo || "");
   const hasOffer      = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
@@ -437,8 +444,14 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     ? "\nA real business logo will be composited into the top-right corner of this image after generation — keep the top-right area visually clean and unobstructed. Do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol."
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
-  // Step B — natural image-generation prompt
-  return `Create a high-quality, visually compelling advertisement image for this business. Make it look like a polished, professionally composed ad creative — photorealistic, creatively designed, and visually engaging. No people in the image. Keep it realistic and not cartoonish.${industryHint}${websiteNote}${phoneNote} The visual can range from clean and modern to bold and eye-catching — choose the approach that best fits the business type and target audience. Match the visual concept to the business: digital, software, AI, or marketing businesses call for a polished digital or abstract tech aesthetic — clean UI elements, data-driven imagery, or bold graphic compositions; local service businesses call for imagery grounded in the work they do and the outcomes they deliver; product businesses call for product-centric compositions. Avoid arbitrary filler scenery, disconnected symbolic props, or generic stock-photo collages with no clear relationship to what this business actually does. Aim for the visual quality of a professionally art-directed ad campaign — strong contrast, deliberate focal point, premium lighting, and a composition that feels intentional rather than assembled from unrelated elements. Choose one dominant visual concept — a single clear subject or scene that best represents the business and its outcome — and build the whole composition around it. Supporting visual elements should complement that focal point, not compete with it; avoid split-scene layouts, overcrowded backgrounds, or multiple industry objects sharing equal visual weight. Interpret user-stated goals and benefits according to the full business context — do not take ambiguous words at face value when the business type, industry, and service description imply a different meaning. Use the business details below as the source for all ad copy and claims — do not invent unrelated services, fake offers, fictional locations, or random slogans. Only include contact information and location details explicitly listed in the business context below — do not invent or substitute any phone number, website URL, address, city, state, or other contact detail. Render the headline, supporting text, and CTA exactly as specified in the business context — do not rewrite or replace them. Keep all text comfortably inside the image with a clear, generous bottom margin — no text should sit near the lower edge of the canvas. Every piece of text must be fully visible inside the frame: never crop, cut off, or partially hide any word, letter, headline, CTA, or website URL. Use clean, well-spaced typography with a clear visual hierarchy: a strong headline, a brief supporting line, and a clear CTA — sized and spaced so the layout looks polished, not cramped. If the text layout starts to feel crowded toward the bottom, simplify it naturally by using fewer lower elements rather than squeezing or shrinking text; do not reduce font sizes to the point where they become hard to read. Let the AI decide the best composition, layout, and visual treatment naturally.
+  // Step B — build the generation prompt
+  return `Create a high-quality, polished advertisement image for this business based on the brief below. Make it look like a real, professionally art-directed ad creative — photorealistic, visually compelling, and tailored to the business type and industry. No people in the image.${industryHint}
+
+Visual concept: choose one clear visual idea that best represents this business and its customer outcome, and build the whole composition around it. Supporting elements should complement that focal point, not compete — avoid cramming multiple industry objects or split-scene layouts into one image. Match the visual style to the business: a software, AI, or marketing business calls for a polished digital or tech aesthetic; a local service business calls for imagery grounded in the service and its outcome; all businesses deserve strong contrast, deliberate composition, and premium visual quality. Interpret user-stated goals and benefits through the business and industry context — do not read ambiguous words literally when the surrounding context implies a business or service outcome.
+
+Typography: render the headline, supporting text, and CTA from the brief below. Keep all text fully visible inside the image with a comfortable bottom margin — no word or line should touch or cross the lower edge. Use clean, well-spaced type with a clear visual hierarchy. If text feels crowded near the bottom, use fewer lower elements rather than squeezing or shrinking to an unreadable size.
+
+Contact details: use only the phone number, website URL, and location explicitly listed in the brief below — do not invent or substitute any contact information.${phoneNote}${websiteNote}
 
 ${summary}${logoInstruction}`;
 }
@@ -520,7 +533,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = inferIndustry(a);
   const website = isBlankOrSkipped(a.website || a.url) ? "" : clean(a.website || a.url || "");
-  const phone = isBlankOrSkipped(a.phone) ? "" : clean(a.phone || "");
+  const phone = isBlankOrSkipped(a.phone) ? "" : formatPhone(clean(a.phone || ""));
   const offer = clip(deriveOffer(a, craftedCopy), 70);
   const headline = deriveHeadline(a, craftedCopy);
   const supportLine = deriveSupportLine(a, craftedCopy);
@@ -538,24 +551,22 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   ].filter(Boolean).join("\n");
 
   return [
-    `Transform this uploaded business photo into a high-quality, polished advertisement image for "${businessName}", a ${industry} business.`,
+    `Transform this uploaded photo into a high-quality, polished advertisement image for "${businessName}", a ${industry} business.`,
     ``,
-    `Use the uploaded photo as the creative foundation. Keep its essential subject matter, but improve the overall visual presentation to make the result feel like a professionally designed ad creative — lively, attractive, and polished. If the original photo is flat, gloomy, dimly lit, or compositionally weak, enhance it: improve the mood, brighten the scene naturally, and make it feel more vibrant and inviting. The result should feel energetic and appealing, not dull or gloomy.`,
+    `Use the uploaded photo as the creative foundation. Keep its essential subject matter but improve the visual presentation so it feels like a professionally designed ad creative — energetic, attractive, and polished. If the photo is flat, dark, or compositionally weak, enhance it naturally.`,
     ``,
-    `Keep the result photorealistic. Do not turn it into a cartoon, illustration, painting, or any non-photographic style. Keep the composition polished and professionally designed — bold and visually striking compositions are welcome when they suit the business type. Match the visual treatment to the business: digital, software, or AI businesses deserve a polished digital or tech-forward aesthetic; local service businesses deserve imagery grounded in their work context; all businesses deserve premium lighting, strong contrast, and an intentionally composed result that looks like a professionally art-directed ad campaign. Build the composition around one dominant visual concept — a single focal point that represents the business clearly — and let supporting elements complement rather than compete with it; avoid overcrowded arrangements or multiple competing scenes. No people in the image. Let the AI decide the best overall ad composition and visual treatment naturally.`,
+    `Keep it photorealistic. Choose one dominant visual treatment that best reflects the business and its customer outcome — build the composition around that single focal point. Supporting elements should complement it, not compete. Match the visual style to the business: a software or AI business calls for a polished digital or tech aesthetic; a local service business calls for imagery grounded in the service and its outcome; all businesses deserve strong contrast and intentional composition. No people in the image.`,
     ``,
-    `Text layout: keep all text comfortably inside the image with a clear, generous bottom margin — no text should sit near the lower edge of the canvas. Every piece of text must be fully visible inside the frame: never crop, cut off, or partially hide any word, letter, headline, CTA, or website URL. Use clean, well-spaced typography with a clear visual hierarchy: a strong headline, a brief supporting line if space allows, and a clear CTA — sized and spaced so the layout looks polished, not cramped. If the text stack feels crowded toward the bottom, simplify it naturally by using fewer lower elements rather than squeezing or shrinking text; do not reduce font sizes to the point where they become hard to read. Avoid dense text blocks. Text must be fully legible at social-feed viewing sizes.`,
+    `Typography: render the headline, supporting text, and CTA from the brief below. Keep all text fully visible inside the image with a comfortable bottom margin — no word or line should touch or cross the lower edge. Use clean, well-spaced type with a clear visual hierarchy. If text feels crowded, use fewer lower elements rather than squeezing.`,
     ``,
-    `Business context for the ad — use these as the source for all copy and claims. Do not invent unrelated services, fake offers, or fictional locations:`,
+    `Contact details: use only the phone, website, and location explicitly listed in the brief below — do not invent or substitute any contact information.${!phone ? " No phone number was provided — do not display any phone number." : ""}${!website ? " No website was provided — do not display any URL or web address." : ` If a website URL appears in the image, use exactly "${website}".`}`,
+    ``,
+    `Business brief:`,
     contextLines,
     ``,
-    `Only display the exact contact details listed above. Never invent or hallucinate any website URL, phone number, or contact information.`,
-    !website ? `No website was provided — do not display any URL or web address.` : null,
-    !phone   ? `No phone number was provided — do not display any phone number.` : null,
-    ``,
     logoFound
-      ? `A real business logo will be composited onto the image after generation — do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol.`
-      : `Do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.`,
+      ? `A real business logo will be placed in the top-right corner of this image after generation — keep that corner visually clean and unobstructed. Do not draw any logo, brand mark, manufacturer badge, or fake business symbol.`
+      : `Do not draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.`,
   ].filter(Boolean).join("\n");
 }
 
