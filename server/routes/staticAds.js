@@ -196,14 +196,14 @@ const OUTCOME_PATTERNS = [
     headline: "Results You Can Measure",
     support: "Clear goals, real tracking, and campaigns built to actually perform." },
   { re: /\b(comfort|cool|warm|temperat|indoor)\b/i,
-    headline: "Comfort You Can Count On",
-    support: "Reliable service that keeps your home comfortable all year long." },
+    headline: "Comfort Restored, No Surprise Bill",
+    support: "Same-day service, most jobs fixed in one visit." },
   { re: /\b(clean|spotless|fresh|tidy)\b/i,
-    headline: "Clean Home, Clear Mind",
-    support: "Professional cleaning you can count on for every room, every time." },
+    headline: "Clean Home Without Lifting a Finger",
+    support: "Thorough cleaning every visit, no corners cut." },
   { re: /\b(safe|secur|protect|peace.of.mind)\b/i,
-    headline: "Peace of Mind, Guaranteed",
-    support: "Trusted professionals keeping your home and family protected." },
+    headline: "Protected Before the Problem Starts",
+    support: "Licensed professionals, clear scope, work that holds up." },
 ];
 
 function matchOutcomePattern(rawText) {
@@ -331,13 +331,13 @@ function deriveSupportLine(a = {}, craftedCopy = {}) {
 
   // 5. Industry-based fallback support lines (randomized to avoid repetition)
   const ind = inferIndustry(a).toLowerCase();
-  if (/market|advertis|agency/.test(ind))  return pickOne(["Practical marketing built for local businesses that want real results.", "Campaigns designed to bring in qualified customers, not just clicks.", "Focused strategies that grow your business without the guesswork."]);
-  if (/hvac|heating|cooling/.test(ind))    return pickOne(["Fast, reliable service from technicians you can trust.", "Same-day service from local HVAC professionals.", "Keep your home comfortable with experienced local technicians.", "Certified technicians ready when your system needs attention."]);
-  if (/plumb/.test(ind))                   return pickOne(["Local plumbers ready to help when you need it most.", "Fast response, quality work, honest pricing."]);
-  if (/clean|maid/.test(ind))              return pickOne(["Professional cleaning you can count on, every visit.", "Thorough, reliable cleaning for homes and businesses."]);
-  if (/roof/.test(ind))                    return pickOne(["Expert roofing from a team your neighbors already trust.", "Quality materials, professional installation, lasting results."]);
-  if (/dental|dent/.test(ind))             return pickOne(["Gentle, professional care for your whole family.", "Comfortable dental visits for patients of all ages."]);
-  if (/auto|car|vehicle/.test(ind))        return pickOne(["Honest service from mechanics who take pride in their work.", "Fast, reliable auto repair from your local experts."]);
+  if (/market|advertis|agency/.test(ind))  return pickOne(["Campaigns built to bring in qualified customers, not just clicks.", "Focused strategies that grow your business without the guesswork.", "Real ad performance with clear results you can track."]);
+  if (/hvac|heating|cooling/.test(ind))    return pickOne(["Same-day service, most jobs fixed in one visit.", "Certified technicians with same-day availability.", "Fast diagnosis, most repairs completed the same day.", "Licensed HVAC technicians ready when your system needs it."]);
+  if (/plumb/.test(ind))                   return pickOne(["Same-day response, licensed plumbers, work done right.", "Fast response, most repairs completed the same visit."]);
+  if (/clean|maid/.test(ind))              return pickOne(["Thorough cleaning every visit, no corners cut.", "Professional cleaners who get every room right."]);
+  if (/roof/.test(ind))                    return pickOne(["Licensed roofers, quality materials, free estimates.", "Full replacement and repair, clean job site every time."]);
+  if (/dental|dent/.test(ind))             return pickOne(["Gentle, thorough care for patients of all ages.", "Comfortable visits, clear treatment plans, no surprises."]);
+  if (/auto|car|vehicle/.test(ind))        return pickOne(["Fast diagnostics and honest repair estimates.", "Repairs done right, no surprises on the bill."]);
 
   return "";
 }

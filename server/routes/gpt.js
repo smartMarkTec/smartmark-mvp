@@ -366,31 +366,32 @@ const safeSubline = (s = "") => {
   return out;
 };
 
+const _pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
 const buildFallbackHeadline = () => {
-  // Derive from industry + location only — never from raw benefit text (too echo-prone).
+  // Derive from industry only — never from raw benefit text (too echo-prone).
   // Check businessType and niche as fallbacks for industry (some clients populate those instead).
   const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
-  const city = _isSkipped(a.city) ? "" : String(a.city || "").trim();
 
-  if (/hvac|heating|cooling|air/.test(industry))   return city ? `HVAC service in ${city}` : "Trusted local HVAC service";
-  if (/plumb/.test(industry))                       return city ? `Plumbing repairs in ${city}` : "Local plumbers ready to help";
-  if (/electr/.test(industry))                      return city ? `Electrical work in ${city}` : "Electrical work done right";
-  if (/roof/.test(industry))                        return city ? `Roofing in ${city}` : "Expert roofing, every job";
-  if (/landscap|lawn/.test(industry))               return city ? `Lawn care in ${city}` : "Yard work done professionally";
-  if (/clean|maid/.test(industry))                  return city ? `Cleaning service in ${city}` : "Professional cleaning done right";
-  if (/pest/.test(industry))                        return city ? `Pest control in ${city}` : "Pest-free home, guaranteed";
-  if (/market|advertis|agency/.test(industry))      return "Marketing that brings in real customers";
-  if (/dental|dent/.test(industry))                 return city ? `Dental care in ${city}` : "Dental care you can trust";
-  if (/legal|law/.test(industry))                   return city ? `Legal help in ${city}` : "Trusted legal advice";
-  if (/auto|car|vehicle/.test(industry))            return city ? `Auto repair in ${city}` : "Auto service done right";
-  if (/insur/.test(industry))                       return "Coverage that fits your situation";
-  if (/real.?estate|realt/.test(industry))          return city ? `Real estate in ${city}` : "Find the right home";
-  if (/restaurant|food|cater/.test(industry))       return city ? `Great food in ${city}` : "Fresh food, real flavor";
-  if (/fitness|gym|train/.test(industry))           return "Fitness results that actually stick";
-  if (/salon|hair|beauty/.test(industry))           return "Look great, feel confident";
-  if (/pet|animal|vet/.test(industry))              return "Compassionate care for your pet";
-  if (industry) return safeHeadline(city ? `${industry} service in ${city}` : `Professional ${industry} service`);
-  return "Local experts you can count on";
+  if (/hvac|heating|cooling|air/.test(industry))   return _pick(["AC down? Fixed today.", "Comfort restored, no surprise bill.", "Same-day HVAC service.", "Cool again before the day gets worse."]);
+  if (/plumb/.test(industry))                       return _pick(["Leak stopped before it spreads.", "Same-day plumber, shows up on time.", "Plumbing fixed right the first time."]);
+  if (/electr/.test(industry))                      return _pick(["Electrical work done safely.", "Licensed electrician, real prices.", "Power issues fixed fast."]);
+  if (/roof/.test(industry))                        return _pick(["Roof replaced before the rain.", "Free estimate, real price.", "Roofing done right the first time."]);
+  if (/landscap|lawn/.test(industry))               return _pick(["Lawn looking great every week.", "Curb appeal done right.", "Yard transformed, no effort required."]);
+  if (/clean|maid/.test(industry))                  return _pick(["Clean home without lifting a finger.", "Spotless every single visit.", "Home cleaned top to bottom."]);
+  if (/pest/.test(industry))                        return _pick(["Pests gone, stays gone.", "Home protected from pests today.", "Pest-free living starts here."]);
+  if (/market|advertis|agency/.test(industry))      return _pick(["More leads, less manual work.", "Stop guessing. Start getting customers.", "Ads that bring real customers in."]);
+  if (/dental|dent/.test(industry))                 return _pick(["Healthy smile starts here.", "Comfortable visits, healthy results.", "Dental care done right."]);
+  if (/legal|law/.test(industry))                   return _pick(["Legal help when you need it.", "Real legal advice, real results.", "Protect what matters most."]);
+  if (/auto|car|vehicle/.test(industry))            return _pick(["Car fixed right the first time.", "Same-day service, real mechanics.", "Auto repair, honest prices."]);
+  if (/insur/.test(industry))                       return _pick(["Coverage that fits your life.", "Protected when it matters most.", "Insurance made simple."]);
+  if (/real.?estate|realt/.test(industry))          return _pick(["Find the right home today.", "Buy or sell with confidence.", "Real estate done right."]);
+  if (/restaurant|food|cater/.test(industry))       return _pick(["Fresh food, ready when you are.", "Real ingredients, real flavor.", "Great food, made right here."]);
+  if (/fitness|gym|train/.test(industry))           return _pick(["Reach your fitness goals faster.", "Real results, real training.", "Get fit with a real plan."]);
+  if (/salon|hair|beauty/.test(industry))           return _pick(["Look great, feel confident.", "Salon results that last.", "Professional styling, every time."]);
+  if (/pet|animal|vet/.test(industry))              return _pick(["Compassionate care for every pet.", "Healthy pets, happy families.", "Your pet deserves real care."]);
+  if (industry) return safeHeadline(`${industry} service that delivers`);
+  return "Real results, real service.";
 };
 
 const buildFallbackSubline = (headline) => {
@@ -398,22 +399,30 @@ const buildFallbackSubline = (headline) => {
   // Also check businessType and niche as fallbacks (consistent with buildFallbackHeadline).
   const industry = String(a.industry || a.businessType || a.niche || "").trim().toLowerCase();
   const audience = String(a.idealCustomer || "").trim().toLowerCase();
-  const city = _isSkipped(a.city) ? "" : String(a.city || "").trim();
   const offer = String(a.offer || a.saveAmount || "").trim();
 
-  const s1 = industry
-    ? city
-      ? `Professional ${industry} service serving ${city} and the surrounding area.`
-      : `A professional ${industry} service built around what local customers actually need.`
-    : "A professional local service built around what customers actually need.";
+  let s1;
+  if (/hvac|heating|cooling|air/.test(industry))   s1 = _pick(["Same-day service, most jobs fixed in one visit.", "Certified technicians with same-day availability.", "Fast diagnosis, most repairs completed the same day."]);
+  else if (/plumb/.test(industry))                  s1 = _pick(["Same-day response, work done right the first time.", "Licensed plumbers handling repairs and replacements."]);
+  else if (/electr/.test(industry))                 s1 = _pick(["Licensed electricians handling jobs of any size.", "Safe, code-compliant electrical work done fast."]);
+  else if (/roof/.test(industry))                   s1 = _pick(["Full roof replacement and repair with free estimates.", "Licensed roofers with quality materials and clean work."]);
+  else if (/clean|maid/.test(industry))             s1 = _pick(["Thorough cleaning every visit, no corners cut.", "Professional cleaners who get every room right."]);
+  else if (/pest/.test(industry))                   s1 = _pick(["Targeted treatment that eliminates the problem, not just the symptom.", "Licensed pest control with results that last."]);
+  else if (/market|advertis|agency/.test(industry)) s1 = _pick(["Campaigns built to bring in qualified customers, not just clicks.", "Focused strategies that grow your business without the guesswork."]);
+  else if (/landscap|lawn/.test(industry))          s1 = _pick(["Consistent lawn care that keeps your yard looking sharp.", "Reliable service, same crew, every visit."]);
+  else if (/dental|dent/.test(industry))            s1 = _pick(["Gentle, thorough care for patients of all ages.", "Comfortable visits, clear treatment plans, no surprises."]);
+  else if (/legal|law/.test(industry))              s1 = _pick(["Clear legal advice you can act on.", "Experienced attorneys, straightforward guidance."]);
+  else if (/auto|car|vehicle/.test(industry))       s1 = _pick(["Fast diagnostics and honest repair estimates.", "Repairs done right, with no surprises on the bill."]);
+  else if (industry)                                s1 = `Professional ${industry} service built around what customers actually need.`;
+  else                                              s1 = "A professional local service built around what customers actually need.";
 
   const s2 = audience
-    ? `Ideal for ${audience} looking for reliable, honest service they can count on.`
-    : "Straightforward service, honest pricing, and quality that speaks for itself.";
+    ? `${audience.charAt(0).toUpperCase() + audience.slice(1)} who want quality work without the runaround.`
+    : "Straightforward service, clear pricing, and work that holds up.";
 
   const s3 = offer
-    ? "Take advantage of the current offer and get in touch today."
-    : "Get in touch to learn what’s included and take the next step.";
+    ? "Take advantage of the current offer and reach out today."
+    : "Get in touch to see what’s included and take the next step.";
 
   let out = `${s1} ${s2} ${s3}`.replace(/\s+/g, " ").trim();
   if (headline && norm(out).startsWith(norm(headline))) out = out.slice(headline.length).trim();
@@ -421,38 +430,48 @@ const buildFallbackSubline = (headline) => {
 };
 
 const system =
-  "You are an expert Facebook/Instagram ad copywriter for small and medium local businesses. " +
+  "You are an expert Facebook/Instagram ad copywriter for local and online businesses. " +
   "You receive a CREATIVE BRIEF describing a specific business and what they want to advertise. " +
-  "Your job: write from the CUSTOMER'S perspective — someone who has this problem and is considering calling this business. " +
+  "Your job: write from the CUSTOMER'S perspective — someone who has this problem or desire and is deciding whether to call or click. " +
   "The copy must be grounded in the actual service described in the brief. Generic category language is a failure. " +
   "" +
   "HOW TO TRANSLATE THE BRIEF INTO AD COPY: " +
   "Read the brief carefully to understand the specific service, customer problem, and desired outcome. " +
-  "Then write as if you are speaking to a real person who just Googled that problem. " +
-  "TRANSLATE the customer's pain point into an outcome — do not parrot the brief's words back literally. " +
-  "If the brief says 'same-day AC repair', don't write 'Same-day AC repair available' — write 'AC down? Fixed today.' or 'Cool again by tonight.' " +
-  "If the brief says 'furnace installation with financing', don't write 'Furnace installation, financing available' — write 'New furnace, pay over time.' or 'Heat this winter, pay later.' " +
-  "If the brief says 'roof replacement, free estimates', write 'New roof, no guesswork.' or 'Free estimate, real price.' " +
+  "Then write as if you are speaking to a real person in that situation. " +
+  "TRANSLATE the customer's pain point or goal into a concrete outcome — do not echo the brief's words back literally. " +
+  "If the brief says 'same-day AC repair' → write 'AC down? Fixed today.' or 'Cool again by tonight.' " +
+  "If the brief says 'affordable HVAC service' → write 'Comfort restored without the surprise bill.' — never 'Affordable HVAC service.' " +
+  "If the brief says 'fast service' → write 'Fixed before the day gets worse.' — never 'Fast service at affordable rates.' " +
+  "If the brief says 'furnace installation with financing' → write 'New furnace, pay over time.' " +
+  "If the brief says 'roof replacement, free estimates' → write 'Free estimate, real price.' or 'New roof before the rain.' " +
+  "If the brief describes a marketing or AI platform → write 'More leads, less manual work.' or 'Stop guessing. Start getting customers.' " +
   "" +
-  "HEADLINE: 5–8 words. Write a complete, natural-sounding thought — NOT a compressed fragment. " +
-  "Name the specific job, outcome, or timing. Read it aloud: it should sound like something a real ad would say. " +
-  "NEVER write a question headline ('Need...?', 'Looking for...?'). NEVER add city or location. NEVER use generic phrases ('quality service', 'professional X', 'trusted Y', 'local experts'). " +
-  "DO NOT write comma-separated fragment headlines like 'Quality HVAC, Reliable' or 'Cool air, quality care' — these are slogans, not useful ad copy. Write complete thoughts. " +
-  "Strong examples: 'AC down? Fixed same day.' — 'Roof replaced before the rain.' — 'Licensed plumber, shows up on time.' — 'New furnace installed this week.' — 'Cooling restored fast.' " +
+  "HEADLINE: 5–9 words. One complete, punchy thought that either names the exact outcome, states the problem with an instant answer, or frames the key benefit in a way the customer feels. " +
+  "Strong patterns: Problem + fix ('AC down? Fixed today.') — Outcome statement ('Comfort restored, no surprise bill.') — Situation + answer ('Roof leaking? Free inspection today.') — Benefit framing ('Clean home without lifting a finger.'). " +
+  "NEVER echo input words directly: if the brief says 'affordable', write what affordable means to the customer ('no surprise bill', 'pay over time') — not the word 'affordable'. " +
+  "NEVER write: 'quality service', 'professional X', 'trusted Y', 'local experts', 'affordable rates', 'fast and affordable', 'at affordable prices'. " +
+  "NEVER add city or location. NEVER write comma-separated slogans ('Cool air, quality care'). NEVER write a question-only headline with no answer ('Need HVAC help?'). " +
+  "Strong examples — HVAC: 'AC down? Fixed today.' / 'Comfort restored, no surprise bill.' / 'Cool again before the day gets worse.' " +
+  "Plumbing: 'Leak stopped before it spreads.' / 'Same-day plumber, shows up on time.' " +
+  "Roofing: 'Roof replaced before the rain.' / 'Free estimate, real price.' " +
+  "Cleaning: 'Clean home without lifting a finger.' / 'Spotless every visit.' " +
+  "Marketing/SaaS/AI: 'More leads, less manual work.' / 'Stop guessing. Start getting customers.' / 'Ads that bring real customers in.' " +
   "" +
-  "SUBLINE: 2–3 sentences, 20–50 words. Say what the business does, who it helps, and what makes it worth calling — in plain, direct, human language. No drama, no exaggeration, no padding. " +
+  "SUBLINE: 2–3 sentences, 20–45 words. Sentence 1: what the business specifically delivers — grounded in the brief, not a vague claim. Sentence 2: what makes this worth calling (speed, method, offer, reliability as a fact not a buzzword). Sentence 3 (optional): a soft reason to act or a reinforcing detail. " +
+  "Be specific: 'Same-day service, most jobs fixed in one visit.' beats 'Fast, reliable service from technicians you can trust.' — the second sentence says nothing. " +
+  "NEVER write: 'service you can trust', 'solutions that work', 'dedicated to excellence', 'serving customers with pride', 'hassle-free experience', 'team of professionals'. These phrases are invisible to readers. " +
   "PHONE RULE: If and only if a real phone number appears in the PHONE field of the brief, end the subline with a natural call phrase using that exact number. If there is no PHONE field in the brief, never include any phone number, placeholder, or invented number anywhere in the copy — not in the subline, not in bullets, not anywhere. " +
   "" +
   "CTA: 2–5 words. A verb-forward action that matches what this business actually wants people to do next. " +
   "By industry: HVAC/cooling/heating → 'Schedule service today' / 'Book your service call' / 'Get a free estimate'. " +
   "Plumbing → 'Book a plumber' / 'Call for same-day service'. Electrical → 'Book an electrician' / 'Get a free quote'. " +
   "Roofing → 'Get a free estimate' / 'Book your inspection'. Cleaning → 'Book your cleaning'. " +
-  "Dental → 'Book an appointment'. Legal → 'Book a consultation'. General service → 'Get a free quote' / 'Schedule today'. " +
+  "Dental → 'Book an appointment'. Legal → 'Book a consultation'. Marketing/SaaS → 'Get started today' / 'See how it works'. General service → 'Get a free quote' / 'Schedule today'. " +
   "NEVER return 'Learn more' as the CTA — it is too weak for any service business. " +
   "" +
-  "Return strict JSON: headline (5–8 words, complete thought, no city), subline (2–3 sentences, 20–50 words), offer (brief string if promotion exists, else empty string ''), bullets (array up to 3 short facts), disclaimers (optional short string), cta (2–5 words). " +
+  "Return strict JSON: headline (5–9 words, complete thought, no city), subline (2–3 sentences, 20–45 words), offer (brief string if promotion exists, else empty string ''), bullets (array up to 3 short facts), disclaimers (optional short string), cta (2–5 words). " +
   "Hard rules: NO URLs anywhere. NO 'our/we/I/my' language. NO superlatives (best, #1, guaranteed, fastest, revolutionary). " +
-  "NEVER write: 'transform', 'game-changer', 'effortlessly', 'seamless', 'hassle-free', 'cutting-edge', 'quality service is just a call away', 'service you can trust', 'next level', 'designed with you in mind'. " +
+  "NEVER write: 'transform', 'game-changer', 'effortlessly', 'seamless', 'hassle-free', 'cutting-edge', 'quality service is just a call away', 'service you can trust', 'next level', 'designed with you in mind', 'team of experts'. " +
   "OFFER RULE: If no promotion is in the brief, return offer as an empty string ''. Never invent a discount or promotion.";
 
 
@@ -497,7 +516,7 @@ const system =
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.65,
+      temperature: 0.72,
       max_tokens: 420,
       messages: [
         { role: "system", content: system },
