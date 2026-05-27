@@ -387,36 +387,35 @@ function inferBusinessContext(optimizerState) {
   };
 }
 
+function buildCreativeAnswers(optimizerState) {
+  const brief = optimizerState?.businessBrief || {};
+  const niche = String(optimizerState?.niche || '').trim();
+
+  // Map businessBrief fields to the answers format expected by buildAdPrompt().
+  // Fall back gracefully when individual fields are absent.
+  return {
+    businessName: String(brief.businessName || brief.brand || '').trim(),
+    industry:     String(brief.industry || brief.businessType || niche || '').trim(),
+    offer:        String(brief.offer || brief.promo || '').trim(),
+    mainBenefit:  String(brief.mainBenefit || brief.benefit || brief.details || '').trim(),
+    city:         String(brief.city || '').trim(),
+    state:        String(brief.state || '').trim(),
+    phone:        String(brief.phone || '').trim(),
+    website:      String(brief.website || brief.url || '').trim(),
+    idealCustomer: String(brief.idealCustomer || '').trim(),
+    cta:          String(brief.cta || '').trim(),
+  };
+}
+
 function buildCreativePromptContext({ optimizerState, variantCount, creativeGoal }) {
   const ctx = inferBusinessContext(optimizerState);
-
-  const businessType = ctx.niche || 'local business';
-  const hookDirection =
-    creativeGoal === 'launch_ab_creative_test'
-      ? 'Create distinct visual angles that feel different enough for an A/B test.'
-      : creativeGoal === 'test_two_fresh_angles'
-      ? 'Create stronger, clearer ad concepts with sharper visual hooks.'
-      : creativeGoal === 'support_copy_refresh_with_new_visual'
-      ? 'Create a cleaner, more compelling visual that supports the refreshed ad copy.'
-      : 'Create a stronger visual hook for performance improvement.';
-
-  const prompt = [
-    `Business type: ${businessType}.`,
-    `Campaign name: ${ctx.campaignName}.`,
-    `Diagnosis: ${ctx.diagnosis || 'performance improvement needed'}.`,
-    `Decision: ${ctx.decision || 'refresh creative'}.`,
-    ctx.currentCopy ? `Current ad copy: ${ctx.currentCopy}` : '',
-    `Goal: ${creativeGoal}.`,
-    hookDirection,
-    `Generate ${variantCount} static ad creative ${variantCount === 1 ? 'concept' : 'concepts'} suitable for Meta ads.`,
-    'Make the image clean, modern, attention-grabbing, and conversion-oriented.',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const answers = buildCreativeAnswers(optimizerState);
+  const businessType = answers.industry || ctx.niche || 'local business';
 
   return {
-    prompt,
+    answers,
     businessType,
+    creativeGoal,
   };
 }
 
@@ -826,7 +825,7 @@ async function executeCreativeGeneration({
   const creativeGoal =
     String(actionConfig?.creativeGoal || '').trim() || plan.creativeGoal;
 
-  const { prompt, businessType } = buildCreativePromptContext({
+  const { answers, businessType } = buildCreativePromptContext({
     optimizerState,
     variantCount,
     creativeGoal,
@@ -834,12 +833,16 @@ async function executeCreativeGeneration({
 
   const apiBase = getInternalApiBase();
 
+  // Pass businessBrief as structured answers so buildAdPrompt() has full context.
+  // Include internal key header to bypass per-user rate limiting for optimizer calls.
   const requestBody = {
-    prompt,
-    businessType,
-    styleTemplate: String(actionConfig?.styleTemplate || 'poster_b').trim(),
+    answers,
     count: variantCount,
   };
+
+  const internalHeaders = {};
+  const internalKey = String(process.env.SM_INTERNAL_API_KEY || '').trim();
+  if (internalKey) internalHeaders['x-sm-internal-key'] = internalKey;
 
   const response = await axios.post(
     `${apiBase}/api/generate-static-ad`,
@@ -848,6 +851,7 @@ async function executeCreativeGeneration({
       timeout: 120000,
       maxBodyLength: 20 * 1024 * 1024,
       maxContentLength: 20 * 1024 * 1024,
+      headers: internalHeaders,
     }
   );
 
@@ -894,7 +898,8 @@ async function executeCreativeGeneration({
       allowedVariantCount: variantCount,
       generatedVariantCount: imageUrls.length,
       imageUrls,
-      generationPrompt: prompt,
+      generationAnswers: answers,
+      businessType,
       generatorResponse: data,
       promotionIntent:
         String(actionConfig?.promotionIntent || '').trim() || 'launch_generated_creative_test',

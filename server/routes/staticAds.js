@@ -975,6 +975,14 @@ function _getSidFromReq(req) {
 
 async function _resolveIdentityAndPlan(req) {
   try {
+    // Internal optimizer calls bypass user-session lookup and get operator-tier limits.
+    // Requires SM_INTERNAL_API_KEY env var to be set and matching (prevents external abuse).
+    const _internalKey = String(process.env.SM_INTERNAL_API_KEY || "").trim();
+    const _requestKey = String(req.get("x-sm-internal-key") || "").trim();
+    if (_internalKey && _requestKey === _internalKey) {
+      return { identity: "internal:optimizer", planKey: "operator" };
+    }
+
     const sid = _getSidFromReq(req);
     if (!sid) return { identity: null, planKey: "visitor" };
 

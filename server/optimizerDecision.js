@@ -79,7 +79,14 @@ function standardTestGatePassed(optimizerState, diagnosis) {
 
   if (impressions < STANDARD_MIN_IMPRESSIONS || spend < STANDARD_MIN_SPEND) return false;
 
-  // Check campaign age: createdAt on the optimizer state or latestAction
+  // High impression count is strong evidence the campaign has been running well over 48h
+  // (1500+ impressions at typical local-business budgets takes multiple days).
+  // This bypasses the createdAt age check, which reflects optimizer enrollment date —
+  // not the actual campaign launch date — and would incorrectly block old campaigns
+  // that were recently enrolled in the optimizer.
+  if (impressions >= 1500) return true;
+
+  // For lower-impression campaigns, fall back to enrollment date as age proxy.
   const createdAt = String(optimizerState?.createdAt || '').trim();
   if (createdAt) {
     const ageMs = Date.now() - new Date(createdAt).getTime();
