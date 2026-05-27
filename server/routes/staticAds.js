@@ -448,13 +448,11 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — build the generation prompt
-  return `Create a high-quality, polished advertisement image for this business based on the brief below. Make it look like a real, professionally art-directed ad creative — photorealistic, visually compelling, and tailored to the business type and industry. No people in the image.${industryHint}
+  return `Create a professional, industry-specific advertisement image for this business. Make it feel like a real, polished ad creative — photorealistic, visually compelling, and designed with genuine creative intent. No people in the image.${industryHint}
 
-Visual concept: choose one clear visual idea that captures the customer outcome, transformation, or the feeling the service delivers — not merely the product, tool, or equipment in isolation. The most compelling creative choice is usually the environment, atmosphere, result, or emotional moment the customer experiences — not the piece of equipment used to achieve it. Build the entire composition around that single focal point. Supporting elements should complement that focal point, not compete — avoid cramming multiple industry objects or split-scene layouts into one image. Match the visual style to the business: a software, AI, or marketing business calls for a polished digital or tech aesthetic; a local service business calls for imagery grounded in the service outcome and its environment; all businesses deserve strong contrast, deliberate composition, and premium visual quality. Interpret user-stated goals and benefits through the business and industry context — do not read ambiguous words literally when the surrounding context implies a business or service outcome.
+Build the image around a visual concept that captures the feeling or outcome the service delivers — not just the product or equipment in isolation. Design the overlay copy with the same creative intent: a strong headline, optional supporting line, and clear CTA. Keep the copy tasteful and mildly creative — compelling but not over the top. Keep the overall ad clean, readable, and well-composed. All text must stay fully inside the image frame with comfortable margins on every edge.
 
-Overlay design: treat the on-image text as a professionally designed ad layout — not text pasted onto a photo. Design with clear typographic hierarchy: one dominant headline rendered in a strong, bold weight as the primary visual anchor; an optional short supporting line in a lighter weight; and a CTA designed as a real button or badge with visible contrast, padding, and deliberate placement. Where text sits over a complex or light area of the photo, add a contrast treatment — a subtle translucent panel, gradient fade, drop shadow, or color block — so the copy reads cleanly without floating loosely. Spacing should be generous and intentional: consistent vertical rhythm, no cramped text, no scattered words, no awkward mismatched font sizing. The overall overlay should feel balanced, premium, and designed — like a real Facebook or Instagram ad creative built by a professional art director. Supporting text, phone number, and website URL are optional; include them only if they integrate naturally into the layout without crowding. Keep every displayed text element fully inside the image with a comfortable margin from all edges — no word or line should touch or approach the frame boundary.
-
-Contact details: never display a phone number or website URL that is not explicitly listed in the brief below — do not invent any contact information.${phoneNote}${websiteNote} If a phone or website is listed, it may appear in the overlay only if it fits the design naturally; it is not required to show both.
+Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${phoneNote}${websiteNote}
 
 ${summary}${logoInstruction}`;
 }
@@ -553,23 +551,24 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     phone   ? `Phone: ${phone}` : null,
   ].filter(Boolean).join("\n");
 
+  const photoWebsiteNote = website
+    ? ` If a website URL appears in the image, use exactly "${website}" — do not alter it.`
+    : " Do not display any website URL — none was provided.";
+  const photoPhoneNote = phone ? "" : " Do not display any phone number — none was provided.";
+
   return [
-    `Transform this uploaded photo into a high-quality, polished advertisement image for "${businessName}", a ${industry} business.`,
+    `Transform this uploaded photo into a professional, polished advertisement for "${businessName}", a ${industry} business. Keep its essential subject matter but elevate the visual presentation so it feels like a real, well-designed ad creative. Enhance naturally if the photo is flat or dark. Photorealistic. No people in the image.`,
     ``,
-    `Use the uploaded photo as the creative foundation. Keep its essential subject matter but improve the visual presentation so it feels like a professionally designed ad creative — energetic, attractive, and polished. If the photo is flat, dark, or compositionally weak, enhance it naturally.`,
+    `Design the overlay copy with genuine creative intent: a strong headline, optional supporting line, and clear CTA. The copy should be tasteful and mildly creative — compelling but not over the top. Keep the ad clean and readable. All text must stay fully inside the image frame with comfortable margins on every edge.`,
     ``,
-    `Keep it photorealistic. Choose one dominant visual treatment that captures the customer outcome, transformation, or the feeling the service delivers — not merely the product, tool, or equipment in isolation. The most compelling creative choice is usually the environment, atmosphere, or result the customer experiences — not the piece of equipment used to achieve it. Build the composition around that single focal point. Supporting elements should complement it, not compete. Match the visual style to the business: a software or AI business calls for a polished digital or tech aesthetic; a local service business calls for imagery grounded in the service outcome and its environment; all businesses deserve strong contrast and intentional composition. No people in the image.`,
-    ``,
-    `Overlay design: treat the on-image text as a professionally designed ad layout — not text pasted onto a photo. Design with clear typographic hierarchy: one dominant headline rendered in a strong, bold weight as the primary visual anchor; an optional short supporting line in a lighter weight; and a CTA designed as a real button or badge with visible contrast, padding, and deliberate placement. Where text sits over a complex or light area of the photo, add a contrast treatment — a subtle translucent panel, gradient fade, drop shadow, or color block — so the copy reads cleanly without floating loosely. Spacing should be generous and intentional: consistent vertical rhythm, no cramped text, no scattered words, no awkward mismatched font sizing. The overall overlay should feel balanced, premium, and designed — like a real Facebook or Instagram ad creative built by a professional art director. Supporting text, phone number, and website URL are optional; include them only if they integrate naturally into the layout without crowding. Keep every displayed text element fully inside the image with a comfortable margin from all edges — no word or line should touch or approach the frame boundary.`,
-    ``,
-    `Contact details: never display a phone number or website URL that is not explicitly listed in the brief below — do not invent any contact information.${!phone ? " Do not display any phone number — none was provided." : ""}${!website ? " Do not display any website URL or web address — none was provided." : ` If a website URL appears in the image, use exactly "${website}".`} If a phone or website is listed, it may appear in the overlay only if it fits the design naturally; it is not required to show both.`,
+    `Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${photoPhoneNote}${photoWebsiteNote}`,
     ``,
     `Business brief:`,
     contextLines,
     ``,
     logoFound
-      ? `A real business logo will be placed in the top-right corner of this image after generation — keep that corner visually clean and unobstructed. Do not draw any logo, brand mark, manufacturer badge, or fake business symbol.`
-      : `Do not draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.`,
+      ? `A real business logo will be placed in the top-right corner after generation — keep that corner clean and unobstructed. Do not draw any logo, brand mark, or fake business symbol.`
+      : `Do not draw any logo, brand mark, manufacturer badge, or fake business symbol.`,
   ].filter(Boolean).join("\n");
 }
 
