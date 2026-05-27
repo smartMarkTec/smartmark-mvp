@@ -400,8 +400,8 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     idealCustomer ? `Audience: ${idealCustomer}` : null,
     mainBenefit   ? `Service: ${mainBenefit}` : null,
     offer         ? `Offer: "${offer}"` : null,
-    headline      ? `Headline: "${headline}"` : null,
-    supportLine   ? `Supporting text: "${supportLine}"` : null,
+    headline      ? `Suggested headline: "${headline}"` : null,
+    supportLine   ? `Suggested tagline: "${supportLine}"` : null,
     `CTA: "${cta}"`,
     phone   ? `Phone: ${phone}` : null,
     website ? `Website: ${website}` : null,
@@ -450,7 +450,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   // Step B — build the generation prompt
   return `Create a professional, industry-specific advertisement image for this business. Make it feel like a real, polished ad creative — photorealistic, visually compelling, and designed with genuine creative intent. No people in the image.${industryHint}
 
-Build the image around a visual concept that captures the feeling or outcome the service delivers — not just the product or equipment in isolation. Design the overlay copy with the same creative intent: a strong headline, optional supporting line, and clear CTA. Keep the copy tasteful and mildly creative — compelling but not over the top. Keep the overall ad clean, readable, and well-composed. All text must stay fully inside the image frame with comfortable margins on every edge.
+Build the image around a visual concept that captures the feeling or outcome the service delivers — not just the product or equipment in isolation. Write the overlay copy with the creative confidence of a premium ad director: use the suggested copy from the brief as your starting point, but feel free to elevate it — the headline should capture what the customer gains or feels, short and punchy, not a category label or service list. Add supporting copy only if it genuinely strengthens the message. Include a clear CTA. Keep the overall ad clean, readable, and well-composed. All text must stay fully inside the image frame with comfortable margins on every edge.
 
 Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${phoneNote}${websiteNote}
 
@@ -543,8 +543,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const contextLines = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
-    headline    ? `Headline: "${headline}"` : null,
-    supportLine ? `Tagline: "${supportLine}"` : null,
+    headline    ? `Suggested headline: "${headline}"` : null,
+    supportLine ? `Suggested tagline: "${supportLine}"` : null,
     `CTA: "${cta}"`,
     offer   ? `Offer: "${offer}"` : null,
     website ? `Website: ${website}` : null,
@@ -559,7 +559,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   return [
     `Transform this uploaded photo into a professional, polished advertisement for "${businessName}", a ${industry} business. Keep its essential subject matter but elevate the visual presentation so it feels like a real, well-designed ad creative. Enhance naturally if the photo is flat or dark. Photorealistic. No people in the image.`,
     ``,
-    `Design the overlay copy with genuine creative intent: a strong headline, optional supporting line, and clear CTA. The copy should be tasteful and mildly creative — compelling but not over the top. Keep the ad clean and readable. All text must stay fully inside the image frame with comfortable margins on every edge.`,
+    `Write the overlay copy with the creative confidence of a premium ad director: use the suggested copy from the brief as your starting point, but feel free to elevate it — the headline should capture what the customer gains or feels, short and punchy, not a category label or service list. Add supporting copy only if it genuinely strengthens the message. Include a clear CTA. Keep the ad clean and readable. All text must stay fully inside the image frame with comfortable margins on every edge.`,
     ``,
     `Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${photoPhoneNote}${photoWebsiteNote}`,
     ``,
