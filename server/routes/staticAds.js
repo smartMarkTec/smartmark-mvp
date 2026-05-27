@@ -400,8 +400,6 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     idealCustomer ? `Audience: ${idealCustomer}` : null,
     mainBenefit   ? `Service: ${mainBenefit}` : null,
     offer         ? `Offer: "${offer}"` : null,
-    headline      ? `Suggested headline: "${headline}"` : null,
-    supportLine   ? `Suggested tagline: "${supportLine}"` : null,
     `CTA: "${cta}"`,
     phone   ? `Phone: ${phone}` : null,
     website ? `Website: ${website}` : null,
@@ -421,38 +419,16 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     ? ""
     : " Do not display any phone number — none was provided.";
 
-  // Per-generation creative style seed — applied to every industry, every call.
-  // Describes ad composition energy and visual approach ONLY — not specific objects or scenes.
-  // The business summary below determines subject matter; this seed sets the creative style.
-  const AD_DIRECTIONS = [
-    "Make this ad feel clean and confident — polished composition, strong visual presence, premium brand feel.",
-    "Make this ad feel clean and premium — polished, high-quality visual treatment, professional brand aesthetic.",
-    "Make this ad feel bright and energetic — open, fresh, visually dynamic, inviting atmosphere.",
-    "Make this ad feel trustworthy and established — credible, authoritatively composed, distinctive visual identity.",
-    "Make this ad feel sleek and contemporary — clean design, strong visual hierarchy, modern professional look.",
-    "Make this ad feel bold and high-impact — striking visual contrast, strong focal point, premium marketing energy.",
-    "Make this ad feel simple and direct — clear, service-focused, visually strong, clean professional composition.",
-    "Make this ad feel polished and visually strong — well-composed, professional, clean, and visually compelling.",
-    "Make this ad feel emotionally resonant — evoke the customer outcome or transformation, building the composition around the feeling the service delivers, not just the product or equipment.",
-    "Make this ad feel story-driven and premium — the scene should capture the atmosphere of the result or moment the customer cares about, with deliberate composition and depth.",
-    "Make this ad feel aspirational and grounded — show the environment or context where this service makes a real difference, not the equipment or object in isolation.",
-  ];
-  const adDir = AD_DIRECTIONS[Math.floor(Math.random() * AD_DIRECTIONS.length)];
-  const industryHint = ` ${adDir}`;
-  console.log("[generate-static-ad] ad-direction:", adDir.slice(0, 80));
-
-  // Anti-fake-logo instruction: specific about what is banned (invented brand marks, house icons,
-  // manufacturer badges) without suppressing general creative ad design or graphic composition.
   const logoInstruction = logoFound
     ? "\nA real business logo will be composited into the top-right corner of this image after generation — keep the top-right area visually clean and unobstructed. Do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol."
     : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
 
   // Step B — build the generation prompt
-  return `Create a professional, industry-specific advertisement image for this business. Make it feel like a real, polished ad creative — photorealistic, visually compelling, and designed with genuine creative intent. No people in the image.${industryHint}
+  return `Make a simple, visually appealing, mildly creative ad for this business based on the brief below. Keep it professional and not over the top. Avoid humans when possible, but if humans are used, ensure variety in race, gender, facial appearance, and overall look.
 
-Build the image around a visual concept that captures the feeling or outcome the service delivers — not just the product or equipment in isolation. Write the overlay copy with the creative confidence of a premium ad director: use the suggested copy from the brief as your starting point, but feel free to elevate it — the headline should capture what the customer gains or feels, short and punchy, not a category label or service list. Add supporting copy only if it genuinely strengthens the message. Include a clear CTA. Keep the overall ad clean, readable, and well-composed. All text must stay fully inside the image frame with comfortable margins on every edge.
+All ad text must stay fully inside the image frame with comfortable margins — nothing should crop at the edges.
 
-Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${phoneNote}${websiteNote}
+Do not display any phone number, website, or contact detail not listed in the brief.${phoneNote}${websiteNote}
 
 ${summary}${logoInstruction}`;
 }
@@ -543,8 +519,6 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const contextLines = [
     `Business: ${businessName}`,
     `Industry: ${industry}`,
-    headline    ? `Suggested headline: "${headline}"` : null,
-    supportLine ? `Suggested tagline: "${supportLine}"` : null,
     `CTA: "${cta}"`,
     offer   ? `Offer: "${offer}"` : null,
     website ? `Website: ${website}` : null,
@@ -557,11 +531,11 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const photoPhoneNote = phone ? "" : " Do not display any phone number — none was provided.";
 
   return [
-    `Transform this uploaded photo into a professional, polished advertisement for "${businessName}", a ${industry} business. Keep its essential subject matter but elevate the visual presentation so it feels like a real, well-designed ad creative. Enhance naturally if the photo is flat or dark. Photorealistic. No people in the image.`,
+    `Transform this uploaded photo into a simple, visually appealing, mildly creative advertisement for "${businessName}", a ${industry} business. Keep the photo's essential subject matter but make it feel like a polished ad creative. Keep it professional and not over the top. Avoid humans when possible, but if humans are used, ensure variety in race, gender, facial appearance, and overall look.`,
     ``,
-    `Write the overlay copy with the creative confidence of a premium ad director: use the suggested copy from the brief as your starting point, but feel free to elevate it — the headline should capture what the customer gains or feels, short and punchy, not a category label or service list. Add supporting copy only if it genuinely strengthens the message. Include a clear CTA. Keep the ad clean and readable. All text must stay fully inside the image frame with comfortable margins on every edge.`,
+    `All ad text must stay fully inside the image frame with comfortable margins — nothing should crop at the edges.`,
     ``,
-    `Do not display any phone number, website, city, offer, or contact detail not listed in the brief below.${photoPhoneNote}${photoWebsiteNote}`,
+    `Do not display any phone number, website, or contact detail not listed in the brief.${photoPhoneNote}${photoWebsiteNote}`,
     ``,
     `Business brief:`,
     contextLines,
