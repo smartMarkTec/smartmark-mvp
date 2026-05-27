@@ -390,43 +390,31 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   const locationText  = [city, state].filter(Boolean).join(", ");
   const cta           = deriveCTA(a, craftedCopy);
 
-  // Step A — structured business summary (form answers are canonical)
+  // Business brief: condensed so the model uses it as visual context,
+  // not as a list of text elements to render one-by-one on the image.
+  const businessLine = [businessName, industry, locationText].filter(Boolean).join(", ");
+  const serviceContext = [
+    mainBenefit   ? mainBenefit : null,
+    idealCustomer ? `audience: ${idealCustomer}` : null,
+  ].filter(Boolean).join(". ");
+
   const summaryLines = [
-    `Business: ${businessName}`,
-    `Industry: ${industry}`,
-    locationText  ? `Location: ${locationText}` : null,
-    idealCustomer ? `Audience: ${idealCustomer}` : null,
-    mainBenefit   ? `Service: ${mainBenefit}` : null,
-    offer         ? `Offer: "${offer}"` : null,
+    businessLine,
+    serviceContext || null,
+    offer ? `Offer: ${offer}` : null,
     `CTA: "${cta}"`,
-    phone   ? `Phone: ${phone}` : null,
-    website ? `Website: ${website}` : null,
+    (phone || website)
+      ? `Contact (include only if it fits naturally): ${[phone, website].filter(Boolean).join(" | ")}`
+      : null,
   ].filter(Boolean);
 
-  // Website context is supporting only — never replaces any form field above
-  if (webContent?.headline)    summaryLines.push(`Context (from website): "${webContent.headline}"`);
-  if (webContent?.description) summaryLines.push(`About (from website): "${clip(webContent.description, 180)}"`);
-
   const summary = summaryLines.join("\n");
-
-  // Prevent URL hallucination; explicitly block invented URLs when no website was provided
-  const websiteNote = website
-    ? ` If any website URL appears in the image, use exactly "${website}" — do not invent or alter it.`
-    : " Do not display any website URL or web address — none was provided.";
-  const phoneNote = phone
-    ? ""
-    : " Do not display any phone number — none was provided.";
 
   const logoInstruction = logoFound
     ? "\nKeep the top-right corner clean and unobstructed — a real business logo will be placed there after generation. Do not draw any invented logo or brand mark."
     : "\nDo not draw any invented logo or brand mark.";
 
-  // Step B — build the generation prompt
-  return `Make a simple, visually appealing, mildly creative ad for this business based on the brief below. Keep it professional and not over the top. Avoid humans when possible, but if humans are used, ensure variety in race, gender, facial appearance, and overall look.
-
-All ad text must stay fully inside the image frame with comfortable margins — nothing should crop at the edges.
-
-Do not display any phone number, website, or contact detail not listed in the brief.${phoneNote}${websiteNote}
+  return `Create a simple, visually appealing, mildly creative, photorealistic ad for this business using the brief below. Base the visual concept on the industry and inputs. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent phone numbers, websites, locations, offers, guarantees, or contact details. Only include the provided contact details if they fit naturally in the design.
 
 ${summary}${logoInstruction}`;
 }
@@ -512,28 +500,20 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const offer = clip(deriveOffer(a, craftedCopy), 70);
   const cta = deriveCTA(a, craftedCopy);
 
+  const businessLine = [businessName, industry].filter(Boolean).join(", ");
   const contextLines = [
-    `Business: ${businessName}`,
-    `Industry: ${industry}`,
+    businessLine,
+    offer ? `Offer: ${offer}` : null,
     `CTA: "${cta}"`,
-    offer   ? `Offer: "${offer}"` : null,
-    website ? `Website: ${website}` : null,
-    phone   ? `Phone: ${phone}` : null,
+    (phone || website)
+      ? `Contact (include only if it fits naturally): ${[phone, website].filter(Boolean).join(" | ")}`
+      : null,
   ].filter(Boolean).join("\n");
 
-  const photoWebsiteNote = website
-    ? ` If a website URL appears in the image, use exactly "${website}" — do not alter it.`
-    : " Do not display any website URL — none was provided.";
-  const photoPhoneNote = phone ? "" : " Do not display any phone number — none was provided.";
-
   return [
-    `Transform this uploaded photo into a simple, visually appealing, mildly creative advertisement for "${businessName}", a ${industry} business. Keep the photo's essential subject matter but make it feel like a polished ad creative. Keep it professional and not over the top. Avoid humans when possible, but if humans are used, ensure variety in race, gender, facial appearance, and overall look.`,
+    `Transform this uploaded photo into a simple, visually appealing, mildly creative, photorealistic ad for "${businessName}", a ${industry} business. Keep the photo's essential subject matter but make it feel like a polished ad creative. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent contact details, locations, offers, or guarantees. Only include the provided contact details if they fit naturally.`,
     ``,
-    `All ad text must stay fully inside the image frame with comfortable margins — nothing should crop at the edges.`,
-    ``,
-    `Do not display any phone number, website, or contact detail not listed in the brief.${photoPhoneNote}${photoWebsiteNote}`,
-    ``,
-    `Business brief:`,
+    `Brief:`,
     contextLines,
     ``,
     logoFound
@@ -1071,6 +1051,10 @@ router.post("/generate-static-ad", async (req, res) => {
         : null;
       const editPrompt = buildAdEditPromptFromAnswers(a, craftedCopy, { logoFound: !!logoBuf });
       console.log("[generate-static-ad] using user-uploaded image via edit endpoint");
+      if (process.env.SMARTEMARK_AD_PROMPT_DEBUG === "1") {
+        console.log("[AD_PROMPT_DEBUG] route=generate-static-ad | path=photo-edit | model=gpt-image-1.5 | size=1024x1024 | quality=high | logoFound=" + !!logoBuf + " | phone=" + !!(a.phone && !isBlankOrSkipped(a.phone)) + " | website=" + !!(a.website || a.url));
+        console.log("[AD_PROMPT_DEBUG] prompt:\n" + editPrompt);
+      }
       imageBuffers = await generateOpenAIAdImageEdit({
         imageBuffer: userImageBuffer,
         prompt: editPrompt,
@@ -1104,7 +1088,10 @@ router.post("/generate-static-ad", async (req, res) => {
       console.log("[generate-static-ad] image-gen params | model=gpt-image-1.5 | quality=high | size=1024x1024 | output_format=png | n=" + count);
 
       const prompt = buildAdPrompt(a, craftedCopy, webContent, !!logoBuf);
-      console.log("[generate-static-ad] full prompt:", prompt);
+      if (process.env.SMARTEMARK_AD_PROMPT_DEBUG === "1") {
+        console.log("[AD_PROMPT_DEBUG] route=generate-static-ad | path=text-to-image | model=gpt-image-1.5 | size=1024x1024 | quality=high | logoFound=" + !!logoBuf + " | phone=" + !!(a.phone && !isBlankOrSkipped(a.phone)) + " | website=" + !!(a.website || a.url));
+        console.log("[AD_PROMPT_DEBUG] prompt:\n" + prompt);
+      }
 
       imageBuffers = await generateOpenAIAdImageBuffers({
         prompt,
