@@ -388,8 +388,6 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
   const hasOffer      = rawOffer && !["no","none","n/a","na","-","no offer","no promo","nothing"].includes(rawOffer.toLowerCase());
   const offer         = hasOffer ? clip(rawOffer, 70) : "";
   const locationText  = [city, state].filter(Boolean).join(", ");
-  const headline      = deriveHeadline(a, craftedCopy);
-  const supportLine   = deriveSupportLine(a, craftedCopy);
   const cta           = deriveCTA(a, craftedCopy);
 
   // Step A — structured business summary (form answers are canonical)
@@ -420,8 +418,8 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     : " Do not display any phone number — none was provided.";
 
   const logoInstruction = logoFound
-    ? "\nA real business logo will be composited into the top-right corner of this image after generation — keep the top-right area visually clean and unobstructed. Do not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol."
-    : "\nDo not invent or draw any logo, brand mark, manufacturer badge, house icon, or fake business symbol. If no real logo is provided, use text branding only.";
+    ? "\nKeep the top-right corner clean and unobstructed — a real business logo will be placed there after generation. Do not draw any invented logo or brand mark."
+    : "\nDo not draw any invented logo or brand mark.";
 
   // Step B — build the generation prompt
   return `Make a simple, visually appealing, mildly creative ad for this business based on the brief below. Keep it professional and not over the top. Avoid humans when possible, but if humans are used, ensure variety in race, gender, facial appearance, and overall look.
@@ -512,8 +510,6 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   const website = isBlankOrSkipped(a.website || a.url) ? "" : clean(a.website || a.url || "");
   const phone = isBlankOrSkipped(a.phone) ? "" : formatPhone(clean(a.phone || ""));
   const offer = clip(deriveOffer(a, craftedCopy), 70);
-  const headline = deriveHeadline(a, craftedCopy);
-  const supportLine = deriveSupportLine(a, craftedCopy);
   const cta = deriveCTA(a, craftedCopy);
 
   const contextLines = [
@@ -541,8 +537,8 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
     contextLines,
     ``,
     logoFound
-      ? `A real business logo will be placed in the top-right corner after generation — keep that corner clean and unobstructed. Do not draw any logo, brand mark, or fake business symbol.`
-      : `Do not draw any logo, brand mark, manufacturer badge, or fake business symbol.`,
+      ? `Keep the top-right corner clean and unobstructed — a real business logo will be placed there after generation. Do not draw any invented logo or brand mark.`
+      : `Do not draw any invented logo or brand mark.`,
   ].filter(Boolean).join("\n");
 }
 
