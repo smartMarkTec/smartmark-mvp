@@ -2882,6 +2882,11 @@ useEffect(() => {
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [copyEditMode, setCopyEditMode] = useState(false);
+  const [copyEditPrimaryText, setCopyEditPrimaryText] = useState("");
+  const [copyEditHeadline, setCopyEditHeadline] = useState("");
+  const [copyEditLoading, setCopyEditLoading] = useState(false);
+  const [copyEditError, setCopyEditError] = useState(null);
 const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(false);
   const [campaignSettingsMap, setCampaignSettingsMap] = useState(() =>
     readCampaignSettingsMap(resolvedUser)
@@ -4180,6 +4185,53 @@ const handleUnarchiveCampaign = async (campaignId) => {
     alert("Could not unarchive campaign.");
   }
   setLoading(false);
+};
+
+const handleSaveCopyEdit = async () => {
+  const trimmedText = String(copyEditPrimaryText || "").trim();
+  if (!trimmedText) {
+    setCopyEditError("Primary text cannot be blank.");
+    return;
+  }
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  setCopyEditLoading(true);
+  setCopyEditError(null);
+
+  try {
+    const r = await authFetch(
+      `/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/copy`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryText: trimmedText,
+          headline: String(copyEditHeadline || "").trim() || undefined,
+        }),
+      }
+    );
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || `Copy update failed (HTTP ${r.status})`);
+
+    // Immediately update the optimizer state map so the UI reflects the new copy
+    // without waiting for the next optimizer-state poll.
+    const updatedText = String(data?.updatedPrimaryText || trimmedText).trim();
+    setOptimizerStateMap((prev) => ({
+      ...prev,
+      [selectedCampaignId]: {
+        ...(prev[selectedCampaignId] || {}),
+        currentPrimaryText: updatedText,
+      },
+    }));
+
+    setCopyEditMode(false);
+  } catch (err) {
+    setCopyEditError(err.message || "Copy update failed. Please try again.");
+  } finally {
+    setCopyEditLoading(false);
+  }
 };
 
 const handleDeleteCampaign = async (campaignId) => {
@@ -5756,6 +5808,41 @@ const selectedCampaignCreatives =
                         Clear draft creatives
                       </button>
                     )}
+                    {!isDraftView && !selectedLiveCampaign?.smArchived && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCopyEditPrimaryText(
+                            aiCurrentPrimaryText ||
+                            creativeMeta?.body ||
+                            previewCopy?.body ||
+                            body ||
+                            ""
+                          );
+                          setCopyEditHeadline(
+                            creativeMeta?.headline ||
+                            previewCopy?.headline ||
+                            headline ||
+                            ""
+                          );
+                          setCopyEditError(null);
+                          setCopyEditMode(true);
+                        }}
+                        style={{
+                          background: "#fff",
+                          border: "1px solid #dbe4ff",
+                          borderRadius: 8,
+                          padding: "5px 10px",
+                          color: "#4f46e5",
+                          fontWeight: 700,
+                          fontSize: 11,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Edit copy
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -5872,6 +5959,161 @@ const selectedCampaignCreatives =
                     }}
                   >
                     No creatives available yet.
+                  </div>
+                )}
+
+                {copyEditMode && !isDraftView && (
+                  <div
+                    style={{
+                      border: "1px solid #dbe4ff",
+                      borderRadius: 16,
+                      padding: 18,
+                      background: "#fff",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 15 }}>
+                      Edit Campaign Copy
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          color: "#64748b",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          marginBottom: 6,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                        }}
+                      >
+                        Primary Text
+                      </div>
+                      <textarea
+                        value={copyEditPrimaryText}
+                        onChange={(e) => setCopyEditPrimaryText(e.target.value)}
+                        maxLength={2000}
+                        rows={5}
+                        style={{
+                          width: "100%",
+                          padding: "10px 12px",
+                          border: "1px solid #dbe4ff",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontFamily: "inherit",
+                          lineHeight: 1.6,
+                          resize: "vertical",
+                          boxSizing: "border-box",
+                          outline: "none",
+                        }}
+                      />
+                      <div
+                        style={{
+                          color: "#94a3b8",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          marginTop: 3,
+                          textAlign: "right",
+                        }}
+                      >
+                        {String(copyEditPrimaryText || "").length}/2000
+                      </div>
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          color: "#64748b",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          marginBottom: 6,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                        }}
+                      >
+                        Headline <span style={{ fontWeight: 500, color: "#94a3b8" }}>(optional)</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={copyEditHeadline}
+                        onChange={(e) => setCopyEditHeadline(e.target.value)}
+                        maxLength={255}
+                        style={{
+                          width: "100%",
+                          padding: "10px 12px",
+                          border: "1px solid #dbe4ff",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontFamily: "inherit",
+                          boxSizing: "border-box",
+                          outline: "none",
+                        }}
+                      />
+                    </div>
+
+                    {copyEditError && (
+                      <div
+                        style={{
+                          color: "#b42318",
+                          fontWeight: 700,
+                          fontSize: 13,
+                          background: "#fff1f2",
+                          border: "1px solid #ffd6d6",
+                          borderRadius: 8,
+                          padding: "8px 12px",
+                        }}
+                      >
+                        {copyEditError}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={handleSaveCopyEdit}
+                        disabled={copyEditLoading || !String(copyEditPrimaryText || "").trim()}
+                        style={{
+                          background:
+                            copyEditLoading || !String(copyEditPrimaryText || "").trim()
+                              ? "#a5b4fc"
+                              : "#4f46e5",
+                          border: "none",
+                          borderRadius: 8,
+                          padding: "9px 18px",
+                          color: "#fff",
+                          fontWeight: 900,
+                          fontSize: 13,
+                          cursor:
+                            copyEditLoading || !String(copyEditPrimaryText || "").trim()
+                              ? "default"
+                              : "pointer",
+                        }}
+                      >
+                        {copyEditLoading ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCopyEditMode(false);
+                          setCopyEditError(null);
+                        }}
+                        disabled={copyEditLoading}
+                        style={{
+                          background: "#f1f5f9",
+                          border: "1px solid #dbe4ff",
+                          borderRadius: 8,
+                          padding: "9px 18px",
+                          color: "#64748b",
+                          fontWeight: 700,
+                          fontSize: 13,
+                          cursor: copyEditLoading ? "default" : "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
 

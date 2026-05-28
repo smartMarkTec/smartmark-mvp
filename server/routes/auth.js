@@ -5897,6 +5897,212 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 
+router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/copy', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = '';
+
+    if (usingDebugKey) {
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        req.query?.ownerKey ||
+        req.query?.owner_key ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(400).json({ error: 'owner_key is required for debug copy edit route.' });
+      }
+
+      userToken = String(getFbUserToken(ownerKey) || '').trim();
+
+      if (!userToken) {
+        return res.status(401).json({ error: 'Not authenticated with Facebook', ownerKey });
+      }
+    } else {
+      const resolved = await resolveFacebookTokenFromReq(req, {
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        preferredOwnerKey: String(
+          req.query?.ownerKey ||
+          req.query?.owner_key ||
+          req.body?.ownerKey ||
+          req.body?.owner_key ||
+          ''
+        ).trim(),
+      });
+
+      ownerKey = String(resolved?.ownerKey || ownerKeyFromReq(req) || '').trim();
+      userToken = String(resolved?.userToken || '').trim();
+
+      if (!userToken) {
+        return res.status(401).json({
+          error: 'Not authenticated with Facebook',
+          ownerKeyUsed: ownerKey || null,
+          sid: String(getSidFromReq(req) || '').trim() || null,
+        });
+      }
+    }
+
+    const rawPrimaryText = String(req.body?.primaryText || '').trim();
+    const rawHeadline = String(req.body?.headline || '').trim();
+
+    if (!rawPrimaryText) {
+      return res.status(400).json({ error: 'primaryText is required and cannot be blank.' });
+    }
+
+    if (rawPrimaryText.length > 2000) {
+      return res.status(400).json({ error: 'primaryText exceeds the 2000 character limit.' });
+    }
+
+    const GRAPH_BASE = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v18.0'}`;
+
+    // Fetch campaign ads to find one with an editable link_data creative.
+    const adsRes = await axios.get(`${GRAPH_BASE}/${normalizedCampaignId}/ads`, {
+      params: {
+        access_token: userToken,
+        fields: [
+          'id',
+          'name',
+          'status',
+          'effective_status',
+          'adset_id',
+          'creative{id,name,object_story_spec,effective_object_story_id}',
+        ].join(','),
+        limit: 20,
+      },
+    });
+
+    const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+
+    const ad = ads.find(
+      (item) =>
+        item &&
+        item.id &&
+        item.creative &&
+        item.creative.id &&
+        item.creative.object_story_spec &&
+        item.creative.object_story_spec.link_data
+    );
+
+    if (!ad) {
+      return res.status(422).json({
+        error:
+          'No editable ad with a link_data creative was found for this campaign. Cannot update copy.',
+        scannedAdCount: ads.length,
+      });
+    }
+
+    const creative = ad.creative;
+    const objectStorySpec = creative.object_story_spec;
+    const linkData = objectStorySpec.link_data || {};
+    const previousPrimaryText = String(linkData.message || '').trim();
+    const previousHeadline = String(linkData.name || '').trim();
+
+    // Build updated spec — change only message (primary text) and optionally name (headline).
+    // Never touch image_hash, link, call_to_action, or any other field.
+    const newObjectStorySpec = {
+      ...objectStorySpec,
+      link_data: {
+        ...linkData,
+        message: rawPrimaryText,
+        ...(rawHeadline ? { name: rawHeadline } : {}),
+      },
+    };
+
+    // Meta requires creating a new creative — existing creatives cannot be patched in-place.
+    const creativeCreateRes = await axios.post(
+      `${GRAPH_BASE}/act_${normalizedAccountId}/adcreatives`,
+      {
+        name: `Smartemark Manual Edit ${new Date().toISOString()}`,
+        object_story_spec: JSON.stringify(newObjectStorySpec),
+      },
+      { params: { access_token: userToken } }
+    );
+
+    const newCreativeId = String(creativeCreateRes.data?.id || '').trim();
+
+    if (!newCreativeId) {
+      return res.status(500).json({
+        error: 'Meta did not return a new creative ID. The copy update could not be completed.',
+        adId: String(ad.id || '').trim(),
+        previousCreativeId: String(creative.id || '').trim(),
+      });
+    }
+
+    // Swap the ad to point at the new creative.
+    const adUpdateRes = await axios.post(
+      `${GRAPH_BASE}/${ad.id}`,
+      { creative: JSON.stringify({ creative_id: newCreativeId }) },
+      { params: { access_token: userToken } }
+    );
+
+    const updatedAt = new Date().toISOString();
+
+    // Persist currentPrimaryText — keep businessBrief.originalPrimaryText untouched for AI grounding.
+    try {
+      await updateBestKnownOptimizerCampaignState({
+        campaignId: normalizedCampaignId,
+        patch: {
+          currentPrimaryText: rawPrimaryText,
+          lastManualCopyEditAt: updatedAt,
+          lastManualCopyEditBy: ownerKey,
+        },
+      });
+    } catch (stateErr) {
+      console.warn('[copy edit] failed to persist currentPrimaryText:', stateErr?.message || stateErr);
+    }
+
+    try {
+      await appendAiHistoryEntry(normalizedCampaignId, {
+        type: 'action',
+        timestamp: updatedAt,
+        title: 'Manual Copy Edit',
+        summary: 'Primary text was manually updated from Smartemark.',
+        reason: `Was: "${previousPrimaryText.slice(0, 80)}${previousPrimaryText.length > 80 ? '...' : ''}" → Now: "${rawPrimaryText.slice(0, 80)}${rawPrimaryText.length > 80 ? '...' : ''}"`,
+        actionType: 'manual_copy_edit',
+        dryRun: false,
+        skipped: false,
+        source: 'manual',
+      });
+    } catch (histErr) {
+      console.warn('[copy edit] failed to append aiHistory entry:', histErr?.message || histErr);
+    }
+
+    return res.json({
+      ok: true,
+      campaignId: normalizedCampaignId,
+      adId: String(ad.id || '').trim(),
+      adName: String(ad.name || '').trim(),
+      previousCreativeId: String(creative.id || '').trim(),
+      newCreativeId,
+      previousPrimaryText,
+      previousHeadline,
+      updatedPrimaryText: rawPrimaryText,
+      updatedHeadline: rawHeadline || previousHeadline || null,
+      adUpdateResponse: adUpdateRes.data || null,
+      updatedAt,
+    });
+  } catch (err) {
+    const metaError = err?.response?.data?.error?.message || null;
+    console.error('[copy edit] failed:', {
+      campaignId: req.params?.campaignId,
+      accountId: req.params?.accountId,
+      error: metaError || err?.message || 'unknown',
+    });
+    return res.status(500).json({
+      error: metaError || err?.message || 'Failed to update ad copy.',
+    });
+  }
+});
+
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
   const { campaignId, accountId } = req.params;
   const normalizedCampaignId = String(campaignId || '').trim();
