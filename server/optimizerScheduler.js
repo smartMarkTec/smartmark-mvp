@@ -6,6 +6,8 @@ const {
 const { runFullOptimizerCycle } = require('./optimizerOrchestrator');
 const { shouldSkipOptimizationForCampaign } = require('./optimizerGuard');
 
+const OPTIMIZER_DEBUG = String(process.env.SMARTEMARK_OPTIMIZER_DEBUG || '').trim() === '1';
+
 function hoursBetween(earlierIso, laterIso) {
   const a = new Date(earlierIso).getTime();
   const b = new Date(laterIso).getTime();
@@ -49,13 +51,15 @@ function hasResolvedCreativeTest(state) {
 }
 
 function getLastRunAt(state) {
+  // Only use actual optimizer-cycle timestamps — NOT updatedAt.
+  // updatedAt is set by dashboard visits and bootstrap, which are not optimizer runs.
+  // Returning null here means the scheduler treats the campaign as never-run → eligible immediately.
   return (
     state?.latestMonitoringDecision?.generatedAt ||
     state?.latestAction?.generatedAt ||
     state?.latestDecision?.generatedAt ||
     state?.latestDiagnosis?.generatedAt ||
     state?.metricsSnapshot?.lastSyncedAt ||
-    state?.updatedAt ||
     null
   );
 }
@@ -162,11 +166,39 @@ async function runScheduledOptimizerPass({
     .map((state) => {
       const eligibility = getEligibilityReason(state, nowIso, minHoursBetweenRuns);
 
+      // Campaigns with no optimizer history yet — highest normal priority so they
+      // don't get starved behind campaigns that have already run many cycles.
+      const hasNeverRun = !state?.latestDiagnosis?.generatedAt;
+      const syncFailCount = Number(state?.syncFailCount) || 0;
+
       let priority = 0;
       if (hasReadyCreativePromotion(state)) priority = 300;
       else if (hasLiveCreativeTest(state)) priority = 200;
       else if (hasResolvedCreativeTest(state)) priority = 120;
+      else if (hasNeverRun) priority = 100;
       else priority = 50;
+
+      // Campaigns with 5+ consecutive sync failures are deprioritized so they don't
+      // permanently block other campaigns from getting their turn.
+      if (syncFailCount >= 5 && priority <= 100) priority = Math.max(priority - 40, 10);
+
+      if (OPTIMIZER_DEBUG) {
+        console.log('[optimizer scheduler] candidate', {
+          campaignId: String(state?.campaignId || ''),
+          accountId: String(state?.accountId || ''),
+          ownerKey: String(state?.ownerKey || ''),
+          status: String(state?.currentStatus || ''),
+          optimizationEnabled: state?.optimizationEnabled,
+          smArchived: state?.smArchived || false,
+          syncFailCount,
+          hasNeverRun,
+          lastRunAt: getLastRunAt(state),
+          updatedAt: state?.updatedAt,
+          priority,
+          eligible: eligibility.eligible,
+          skipReason: eligibility.eligible ? null : eligibility.reason,
+        });
+      }
 
       return {
         state,
@@ -178,6 +210,9 @@ async function runScheduledOptimizerPass({
     .sort((a, b) => {
       if (b.priority !== a.priority) return b.priority - a.priority;
 
+      // Within the same priority tier, sort by updatedAt DESCENDING (newest first).
+      // This ensures recently-active campaigns (e.g. the one the user just opened in
+      // the dashboard) get processed before old stale records with ancient updatedAt.
       const aUpdated = new Date(
         a.state?.updatedAt ||
         a.state?.latestMonitoringDecision?.generatedAt ||
@@ -192,7 +227,7 @@ async function runScheduledOptimizerPass({
         0
       ).getTime();
 
-      return aUpdated - bUpdated;
+      return bUpdated - aUpdated;
     })
     .slice(0, Number(limit || 10));
 
@@ -204,6 +239,13 @@ async function runScheduledOptimizerPass({
     const userToken = getUserTokenForOwnerKey(ownerKey);
 
     if (!userToken) {
+      if (OPTIMIZER_DEBUG) {
+        console.log('[optimizer scheduler] skipped (no token)', {
+          campaignId: String(state.campaignId || '').trim(),
+          ownerKey,
+          eligibilityReason: item.reason,
+        });
+      }
       results.push({
         campaignId: String(state.campaignId || '').trim(),
         accountId: String(state.accountId || '').trim(),
@@ -214,6 +256,15 @@ async function runScheduledOptimizerPass({
         eligibilityReason: item.reason,
       });
       continue;
+    }
+
+    if (OPTIMIZER_DEBUG) {
+      console.log('[optimizer scheduler] selected', {
+        campaignId: String(state.campaignId || '').trim(),
+        ownerKey,
+        priority: item.priority,
+        eligibilityReason: item.reason,
+      });
     }
 
     try {
