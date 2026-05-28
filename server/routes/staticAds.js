@@ -414,7 +414,7 @@ function buildAdPrompt(a = {}, craftedCopy = {}, webContent = null, logoFound = 
     ? "\nKeep the top-right corner clean and unobstructed — a real business logo will be placed there after generation. Do not draw any invented logo or brand mark."
     : "\nDo not draw any invented logo or brand mark.";
 
-  return `Create a simple, visually appealing, mildly creative, photorealistic ad for this business using the brief below. Base the visual concept on the industry and inputs. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent phone numbers, websites, locations, offers, guarantees, or contact details. Only include the provided contact details if they fit naturally in the design.
+  return `Create a simple, visually appealing, mildly creative, photorealistic ad for this business using the brief below. Base the visual concept on the industry and inputs. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent phone numbers, websites, locations, offers, guarantees, or contact details. Only include the provided contact details if they fit naturally in the design. Each generation should have a visually distinct concept — vary the subject, composition, angle, setting, and layout so repeated generations feel fresh and different from one another.
 
 ${summary}${logoInstruction}`;
 }
@@ -511,7 +511,7 @@ function buildAdEditPromptFromAnswers(a = {}, craftedCopy = {}, { logoFound = fa
   ].filter(Boolean).join("\n");
 
   return [
-    `Transform this uploaded photo into a simple, visually appealing, mildly creative, photorealistic ad for "${businessName}", a ${industry} business. Keep the photo's essential subject matter but make it feel like a polished ad creative. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent contact details, locations, offers, or guarantees. Only include the provided contact details if they fit naturally.`,
+    `Transform this uploaded photo into a simple, visually appealing, mildly creative, photorealistic ad for "${businessName}", a ${industry} business. Keep the photo's essential subject matter but make it feel like a polished ad creative. Keep it professional and not over the top. Avoid humans when possible; if humans appear, vary race, gender, age, facial appearance, and overall look. Use tasteful overlay copy that feels like a real ad, not a template. Keep all text fully inside the image frame. Do not invent contact details, locations, offers, or guarantees. Only include the provided contact details if they fit naturally. Each generation should have a visually distinct concept — vary the subject, composition, angle, setting, and layout so repeated generations feel fresh and different from one another.`,
     ``,
     `Brief:`,
     contextLines,
