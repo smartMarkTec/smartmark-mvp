@@ -457,9 +457,10 @@ const system =
   "Cleaning: 'Clean home without lifting a finger.' / 'Spotless every visit.' " +
   "Marketing/SaaS/AI: 'More leads, less manual work.' / 'Stop guessing. Start getting customers.' / 'Ads that bring real customers in.' " +
   "" +
-  "SUBLINE: 2–3 sentences, 20–45 words. Sentence 1: what the business specifically delivers — grounded in the brief, not a vague claim. Sentence 2: what makes this worth calling (speed, method, offer, reliability as a fact not a buzzword). Sentence 3 (optional): a soft reason to act or a reinforcing detail. " +
+  "SUBLINE: 2–3 sentences, 20–45 words. Sentence 1: what the business specifically delivers — grounded in the brief, not a vague claim. Sentence 2: a specific trust signal or credibility fact (a speed, a process detail, a concrete number, or a result) — trust signals outperform discounts for service businesses. Sentence 3 (optional): a soft reason to act. " +
   "Be specific: 'Same-day service, most jobs fixed in one visit.' beats 'Fast, reliable service from technicians you can trust.' — the second sentence says nothing. " +
   "NEVER write: 'service you can trust', 'solutions that work', 'dedicated to excellence', 'serving customers with pride', 'hassle-free experience', 'team of professionals'. These phrases are invisible to readers. " +
+  "VARIETY: Every generation must feel distinct — vary the opening angle, sentence structure, and phrasing based on the COPY ANGLE instruction in the brief. Do not default to the same hook or formula every time. " +
   "PHONE RULE: If and only if a real phone number appears in the PHONE field of the brief, end the subline with a natural call phrase using that exact number. If there is no PHONE field in the brief, never include any phone number, placeholder, or invented number anywhere in the copy — not in the subline, not in bullets, not anywhere. " +
   "" +
   "CTA: 2–5 words. A verb-forward action that matches what this business actually wants people to do next. " +
@@ -494,6 +495,17 @@ const system =
     const audienceStr = String(a.idealCustomer || "").trim();
     const secondaryStr = String(a.secondary || a.financingLine || "").trim();
 
+    // Rotating copy angle — changes per generation so the headline/body feel fresh each time.
+    const _COPY_ANGLES = [
+      "Lead with the customer's biggest pain point and the immediate relief this service provides.",
+      "Lead with the key outcome or transformation — what the customer's situation looks like after.",
+      "Lead with a specific trust signal or credibility fact — what makes this business worth calling.",
+      "Lead with speed, ease, or offer — make taking the next step feel low-risk and obvious.",
+      "Lead with a before/after contrast — the problem state versus how it gets resolved.",
+      "Lead with what's specific and different about this business versus a generic option.",
+    ];
+    const _copyAngle = _COPY_ANGLES[Math.floor(Math.random() * _COPY_ANGLES.length)];
+
     const user = [
       `CREATIVE BRIEF — write ad copy specific to this business:`,
       ``,
@@ -512,6 +524,7 @@ const system =
       phoneForCopy ? `PHONE: ${phoneForCopy}` : null,
       isNoWebsiteRun
         ? `NOTE: call-only business. Include the phone number naturally in the subline.` : null,
+      `COPY ANGLE FOR THIS GENERATION: ${_copyAngle}`,
     ].filter(Boolean).join("\n");
 
     const completion = await client.chat.completions.create({
