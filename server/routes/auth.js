@@ -375,9 +375,11 @@ async function recordMetaCall({ method, url, status, ok }) {
   const memoryRow = recordMetaCallMemory({ method, url, status, ok });
   const dbRow = buildMetaUsageRow({ method, url, status, ok });
 
-  console.log(
-    `[META_API] ${memoryRow.t} | ${dbRow.label} | ${dbRow.method} ${dbRow.url} | status=${dbRow.status} | ok=${dbRow.ok ? 1 : 0} | qualified=${dbRow.qualifiedMarketingCall ? 1 : 0} | qLabel=${dbRow.qualifiedLabel || 'none'}`
-  );
+  if (String(process.env.SMARTEMARK_META_API_DEBUG || '').trim() === '1') {
+    console.log(
+      `[META_API] ${memoryRow.t} | ${dbRow.label} | ${dbRow.method} ${dbRow.url} | status=${dbRow.status} | ok=${dbRow.ok ? 1 : 0} | qualified=${dbRow.qualifiedMarketingCall ? 1 : 0} | qLabel=${dbRow.qualifiedLabel || 'none'}`
+    );
+  }
 
   await persistMetaUsageRow(dbRow);
 }

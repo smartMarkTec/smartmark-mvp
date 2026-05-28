@@ -119,12 +119,20 @@ async function runFullOptimizerCycle({
     dryRun: DRY_RUN,
   };
 
-  const syncResult = await syncCampaignMetricsToOptimizerState({
-    userToken,
-    campaignId: normalizedCampaignId,
-    accountId: normalizedAccountId,
-    ownerKey: normalizedOwnerKey,
-  });
+  let syncResult = null;
+  try {
+    syncResult = await syncCampaignMetricsToOptimizerState({
+      userToken,
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: normalizedOwnerKey,
+    });
+  } catch (syncErr) {
+    console.error('[optimizer orchestrator] metrics sync failed, continuing with cached state:', {
+      campaignId: normalizedCampaignId,
+      error: syncErr?.message || 'unknown',
+    });
+  }
 
   cycle.metricsSync = syncResult?.snapshot || null;
 
