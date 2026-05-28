@@ -1628,20 +1628,27 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
+  // Strip the internal routing flag so it never lands in the persisted state record.
+  const skipHistory = decision?._skipHistoryEntry === true;
+  const { _skipHistoryEntry: _dropped, ...decisionToSave } = decision || {};
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: { latestDecision: decision },
+    patch: { latestDecision: decisionToSave },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'decision',
-    timestamp: decision?.generatedAt || new Date().toISOString(),
-    title: String(decision?.actionType || decision?.decision || 'decision made').replace(/_/g, ' '),
-    summary: String(decision?.decision || '').replace(/_/g, ' '),
-    reason: decision?.reason || '',
-    actionType: decision?.actionType || '',
-    dryRun: false,
-    source: decision?.mode || '',
-  }).catch(() => {});
+  // Only log the first (pre-action) decision per cycle. The post-monitoring decision
+  // is internal state routing and does not need its own history card.
+  if (!skipHistory) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'decision',
+      timestamp: decisionToSave?.generatedAt || new Date().toISOString(),
+      title: String(decisionToSave?.actionType || decisionToSave?.decision || 'decision made').replace(/_/g, ' '),
+      summary: String(decisionToSave?.decision || '').replace(/_/g, ' '),
+      reason: decisionToSave?.reason || '',
+      actionType: decisionToSave?.actionType || '',
+      dryRun: false,
+      source: decisionToSave?.mode || '',
+    }).catch(() => {});
+  }
   return result;
 },
 persistAction: async (campaignIdArg, action) => {
@@ -1657,21 +1664,27 @@ persistAction: async (campaignIdArg, action) => {
       ...buildGeneratedCreativePatchFromAction(action),
     },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'action',
-    timestamp: action?.generatedAt || new Date().toISOString(),
-    title: String(
-      action?.dryRun && action?.plannedActionType
-        ? action.plannedActionType
-        : action?.actionType || 'action'
-    ).replace(/_/g, ' '),
-    summary: action?.status || '',
-    reason: action?.reason || '',
-    actionType: action?.actionType || '',
-    dryRun: !!action?.dryRun,
-    skipped: !!action?.skipped,
-    source: action?.mode || '',
-  }).catch(() => {});
+  // "continue_monitoring" is not a real action — skip it from history to avoid noise.
+  const isContinueMonitoring =
+    action?.actionType === 'continue_monitoring' ||
+    action?.status === 'monitoring_only';
+  if (!isContinueMonitoring) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'action',
+      timestamp: action?.generatedAt || new Date().toISOString(),
+      title: String(
+        action?.dryRun && action?.plannedActionType
+          ? action.plannedActionType
+          : action?.actionType || 'action'
+      ).replace(/_/g, ' '),
+      summary: action?.status || '',
+      reason: action?.reason || '',
+      actionType: action?.actionType || '',
+      dryRun: !!action?.dryRun,
+      skipped: !!action?.skipped,
+      source: action?.mode || '',
+    }).catch(() => {});
+  }
   return result;
 },
 persistMonitoring: async (campaignIdArg, monitoring) => {
@@ -1679,16 +1692,20 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
     campaignId: campaignIdArg,
     patch: { latestMonitoringDecision: monitoring },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'monitoring',
-    timestamp: monitoring?.generatedAt || new Date().toISOString(),
-    title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
-    summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
-    reason: monitoring?.reason || '',
-    actionType: monitoring?.nextRecommendedStep || '',
-    dryRun: false,
-    source: monitoring?.mode || '',
-  }).catch(() => {});
+  // Skip trivial monitoring states that add no signal value to the history feed.
+  const trivialMonitoring = monitoring?.monitoringDecision === 'no_action_to_monitor';
+  if (!trivialMonitoring) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'monitoring',
+      timestamp: monitoring?.generatedAt || new Date().toISOString(),
+      title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
+      summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
+      reason: monitoring?.reason || '',
+      actionType: monitoring?.nextRecommendedStep || '',
+      dryRun: false,
+      source: monitoring?.mode || '',
+    }).catch(() => {});
+  }
   return result;
 },
     minHoursBetweenRuns,
@@ -4536,20 +4553,24 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
+  const skipHistory = decision?._skipHistoryEntry === true;
+  const { _skipHistoryEntry: _dropped, ...decisionToSave } = decision || {};
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
-    patch: { latestDecision: decision },
+    patch: { latestDecision: decisionToSave },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'decision',
-    timestamp: decision?.generatedAt || new Date().toISOString(),
-    title: String(decision?.actionType || decision?.decision || 'decision made').replace(/_/g, ' '),
-    summary: String(decision?.decision || '').replace(/_/g, ' '),
-    reason: decision?.reason || '',
-    actionType: decision?.actionType || '',
-    dryRun: false,
-    source: decision?.mode || '',
-  }).catch(() => {});
+  if (!skipHistory) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'decision',
+      timestamp: decisionToSave?.generatedAt || new Date().toISOString(),
+      title: String(decisionToSave?.actionType || decisionToSave?.decision || 'decision made').replace(/_/g, ' '),
+      summary: String(decisionToSave?.decision || '').replace(/_/g, ' '),
+      reason: decisionToSave?.reason || '',
+      actionType: decisionToSave?.actionType || '',
+      dryRun: false,
+      source: decisionToSave?.mode || '',
+    }).catch(() => {});
+  }
   return result;
 },
 persistAction: async (campaignIdArg, action) => {
@@ -4565,21 +4586,26 @@ persistAction: async (campaignIdArg, action) => {
       ...buildGeneratedCreativePatchFromAction(action),
     },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'action',
-    timestamp: action?.generatedAt || new Date().toISOString(),
-    title: String(
-      action?.dryRun && action?.plannedActionType
-        ? action.plannedActionType
-        : action?.actionType || 'action'
-    ).replace(/_/g, ' '),
-    summary: action?.status || '',
-    reason: action?.reason || '',
-    actionType: action?.actionType || '',
-    dryRun: !!action?.dryRun,
+  const isContinueMonitoring =
+    action?.actionType === 'continue_monitoring' ||
+    action?.status === 'monitoring_only';
+  if (!isContinueMonitoring) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'action',
+      timestamp: action?.generatedAt || new Date().toISOString(),
+      title: String(
+        action?.dryRun && action?.plannedActionType
+          ? action.plannedActionType
+          : action?.actionType || 'action'
+      ).replace(/_/g, ' '),
+      summary: action?.status || '',
+      reason: action?.reason || '',
+      actionType: action?.actionType || '',
+      dryRun: !!action?.dryRun,
     skipped: !!action?.skipped,
     source: action?.mode || '',
   }).catch(() => {});
+  }
   return result;
 },
 persistMonitoring: async (campaignIdArg, monitoring) => {
@@ -4587,16 +4613,19 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
     campaignId: campaignIdArg,
     patch: { latestMonitoringDecision: monitoring },
   });
-  appendAiHistoryEntry(campaignIdArg, {
-    type: 'monitoring',
-    timestamp: monitoring?.generatedAt || new Date().toISOString(),
-    title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
-    summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
-    reason: monitoring?.reason || '',
-    actionType: monitoring?.nextRecommendedStep || '',
-    dryRun: false,
-    source: monitoring?.mode || '',
-  }).catch(() => {});
+  const trivialMonitoring = monitoring?.monitoringDecision === 'no_action_to_monitor';
+  if (!trivialMonitoring) {
+    appendAiHistoryEntry(campaignIdArg, {
+      type: 'monitoring',
+      timestamp: monitoring?.generatedAt || new Date().toISOString(),
+      title: String(monitoring?.monitoringDecision || 'monitoring check').replace(/_/g, ' '),
+      summary: String(monitoring?.nextRecommendedStep || '').replace(/_/g, ' '),
+      reason: monitoring?.reason || '',
+      actionType: monitoring?.nextRecommendedStep || '',
+      dryRun: false,
+      source: monitoring?.mode || '',
+    }).catch(() => {});
+  }
   return result;
 },
     });

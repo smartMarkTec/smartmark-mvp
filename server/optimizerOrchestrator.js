@@ -186,7 +186,9 @@ async function runFullOptimizerCycle({
  const decisionAfterMonitoring = await buildDecisionAsync({
   optimizerState: state,
 });
-  await persistDecision(normalizedCampaignId, decisionAfterMonitoring);
+  // Update state with the post-monitoring decision but do NOT add a second history entry.
+  // One decision card per cycle is enough — the second call is for internal state routing only.
+  await persistDecision(normalizedCampaignId, { ...decisionAfterMonitoring, _skipHistoryEntry: true });
   cycle.decisionAfterMonitoring = decisionAfterMonitoring;
 
   state = await safeReloadState(normalizedCampaignId, 'after post-monitoring decision');
