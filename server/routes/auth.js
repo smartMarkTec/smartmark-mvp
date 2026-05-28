@@ -1656,12 +1656,23 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
+  // When the AI successfully refreshes primary text, persist the new copy into optimizer
+  // state so the frontend can display it without relying on the stale launch record.
+  const primaryTextPatch = {};
+  if (
+    action?.actionType === 'update_primary_text' &&
+    action?.executed === true &&
+    action?.actionResult?.updatedPrimaryText
+  ) {
+    primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+  }
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
       latestAction: action,
       ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
       ...buildGeneratedCreativePatchFromAction(action),
+      ...primaryTextPatch,
     },
   });
   // "continue_monitoring" is not a real action — skip it from history to avoid noise.
@@ -4601,12 +4612,21 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
+  const primaryTextPatch = {};
+  if (
+    action?.actionType === 'update_primary_text' &&
+    action?.executed === true &&
+    action?.actionResult?.updatedPrimaryText
+  ) {
+    primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+  }
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
       latestAction: action,
       ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
       ...buildGeneratedCreativePatchFromAction(action),
+      ...primaryTextPatch,
     },
   });
   const isContinueMonitoring =

@@ -5681,6 +5681,13 @@ const selectedCampaignCreatives =
         <>
           {(() => {
             const creativeMeta = selectedCampaignCreatives?.meta || {};
+            // When the AI Operator has updated primary text, prefer that over the
+            // stale launch-time creative record body so the UI always shows what is
+            // currently live in Facebook rather than the original draft copy.
+            const aiCurrentPrimaryText =
+              selectedOptimizerState?.currentPrimaryText ||
+              selectedOptimizerState?.latestAction?.actionResult?.updatedPrimaryText ||
+              null;
             const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
             const pending =
               selectedCampaignId !== "__DRAFT__"
@@ -5820,7 +5827,7 @@ const selectedCampaignCreatives =
                                 lineHeight: 1.6,
                               }}
                             >
-                              {String(creativeMeta?.body || previewCopy?.body || body || "No copy available yet.").trim()}
+                              {String(aiCurrentPrimaryText || creativeMeta?.body || previewCopy?.body || body || "No copy available yet.").trim()}
                             </div>
                           </div>
 
