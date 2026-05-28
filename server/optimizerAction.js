@@ -665,6 +665,22 @@ async function executePrimaryTextRefresh({
     latestMonitoringDecision: optimizerState.latestMonitoringDecision || null,
   });
 
+  if (copyResult.needsContext) {
+    console.warn('[optimizer action] update_primary_text skipped: insufficient campaign context for grounded copy', {
+      campaignId,
+      context: copyResult.context,
+    });
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'update_primary_text',
+      status: 'needs_context',
+      reason:
+        'Campaign context is missing (businessName, industry, and originalBody are all empty). ' +
+        'Cannot generate on-brand copy without at least one of these fields. ' +
+        'Re-launch the campaign or manually save business context to enable copy refresh.',
+    });
+  }
+
   const ads = await fetchCampaignAds({ campaignId, userToken, limit: 20 });
   const ad = ads.find(
     (item) =>

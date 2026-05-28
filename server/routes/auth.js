@@ -3248,6 +3248,11 @@ const optimizerPayload = {
     businessName: String(
       bodyAnswers.businessName || form.businessName || form.name || ''
     ).trim(),
+    // 'industry' is the canonical key read by optimizerCopy.js; 'niche' kept for backward compat.
+    industry: String(
+      bodyAnswers.industry || bodyAnswers.businessType || bodyAnswers.niche ||
+      form.industry || form.businessType || form.niche || form.cuisineType || ''
+    ).trim(),
     niche: String(
       bodyAnswers.businessType || bodyAnswers.industry || bodyAnswers.niche ||
       form.businessType || form.industry || form.niche || form.cuisineType || ''
@@ -3255,6 +3260,15 @@ const optimizerPayload = {
     offer: String(
       bodyAnswers.offer || bodyAnswers.mainOffer || bodyAnswers.serviceOffering ||
       form.offer || form.mainOffer || ''
+    ).trim(),
+    mainBenefit: String(
+      bodyAnswers.mainBenefit || bodyAnswers.benefit || bodyAnswers.service ||
+      bodyAnswers.details || ''
+    ).trim(),
+    city: String(bodyAnswers.city || '').trim(),
+    state: String(bodyAnswers.state || '').trim(),
+    idealCustomer: String(
+      bodyAnswers.idealCustomer || bodyAnswers.targetAudience || ''
     ).trim(),
     website: String(
       bodyAnswers.website || bodyAnswers.websiteUrl ||
@@ -3265,9 +3279,18 @@ const optimizerPayload = {
       bodyAnswers.headline || bodyAnswers.adHeadline ||
       form.headline || form.adHeadline || ''
     ).trim(),
+    // 'originalPrimaryText' is the canonical key; 'originalBody' kept for backward compat.
+    originalPrimaryText: String(
+      bodyAnswers.body || bodyAnswers.primaryText || bodyAnswers.adBody ||
+      form.body || form.primaryText || ''
+    ).trim(),
     originalBody: String(
       bodyAnswers.body || bodyAnswers.primaryText || bodyAnswers.adBody ||
       form.body || form.primaryText || ''
+    ).trim(),
+    // 'cta' is the canonical key read by optimizerCopy.js; 'ctaStyle' kept for backward compat.
+    cta: String(
+      bodyAnswers.cta || bodyAnswers.ctaStyle || form.cta || form.ctaStyle || ''
     ).trim(),
     ctaStyle: String(
       bodyAnswers.ctaStyle || bodyAnswers.cta || form.ctaStyle || form.cta || ''
