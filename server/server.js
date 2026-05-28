@@ -6,11 +6,25 @@ if (!process.env.NODE_OPTIONS || !/max-old-space-size/.test(process.env.NODE_OPT
   process.env.NODE_OPTIONS = `--max-old-space-size=${MAX_HEAP_MB}`;
 }
 
+function sanitizeForLog(err) {
+  if (!err || typeof err !== 'object') return err;
+  // Axios errors carry config.params.access_token — strip everything except safe fields.
+  if (err.isAxiosError || err.config) {
+    return {
+      message: err.message,
+      status: err.response?.status ?? null,
+      metaError: err.response?.data?.error?.message ?? null,
+      metaCode: err.response?.data?.error?.code ?? null,
+    };
+  }
+  return { message: err.message || String(err), name: err.name };
+}
+
 process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
+  console.error("Unhandled Rejection:", sanitizeForLog(reason));
 });
 process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
+  console.error("Uncaught Exception:", sanitizeForLog(err));
 });
 
 require("dotenv").config({ path: "./.env" });
@@ -425,7 +439,7 @@ app.use((req, res) => {
 
 /* -------------------------- GLOBAL ERROR HANDLER -------------------------- */
 app.use((err, req, res, next) => {
-  console.error("Unhandled server error:", err?.stack || err);
+  console.error("Unhandled server error:", sanitizeForLog(err));
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -446,18 +460,8 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server started on http://0.0.0.0:${PORT} (heap<=${MAX_HEAP_MB}MB)`);
   console.log('[build check] code change test active');
-
-  // AI Operator Auto-Runner (enable via OPTIMIZER_AUTORUN_ENABLED=1)
-  try {
-    const { startOptimizerAutoRunner } = require('./optimizerAutoRunner');
-    if (typeof authRoutes.runInternalScheduledPass === 'function') {
-      startOptimizerAutoRunner({ runScheduledPass: authRoutes.runInternalScheduledPass });
-    } else {
-      console.warn('[optimizer autorun] runInternalScheduledPass not found on authRoutes — autorun skipped');
-    }
-  } catch (autoRunErr) {
-    console.error('[optimizer autorun] failed to start:', autoRunErr?.message || autoRunErr);
-  }
+  // Note: optimizer autorunner is started inside routes/auth.js when the module loads.
+  // Do NOT call startOptimizerAutoRunner here — that creates a duplicate interval.
 });
 
 module.exports = app;

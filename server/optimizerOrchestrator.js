@@ -2,6 +2,7 @@
 
 const {
   findOptimizerCampaignStateByCampaignId,
+  updateOptimizerCampaignState,
   appendAiHistoryEntry,
 } = require('./optimizerCampaignState');
 const {
@@ -127,11 +128,28 @@ async function runFullOptimizerCycle({
       accountId: normalizedAccountId,
       ownerKey: normalizedOwnerKey,
     });
+
+    // Reset consecutive failure counter on a successful sync.
+    if (Number(preCheckState?.syncFailCount || 0) > 0) {
+      updateOptimizerCampaignState(normalizedCampaignId, { syncFailCount: 0 }).catch(() => {});
+    }
   } catch (syncErr) {
+    // Safe log — never print config/params which may contain access_token.
     console.error('[optimizer orchestrator] metrics sync failed, continuing with cached state:', {
       campaignId: normalizedCampaignId,
-      error: syncErr?.message || 'unknown',
+      status: syncErr?.response?.status ?? null,
+      metaError: syncErr?.response?.data?.error?.message ?? null,
+      metaCode: syncErr?.response?.data?.error?.code ?? null,
+      message: syncErr?.message || 'unknown',
     });
+
+    // Increment consecutive failure counter so the scheduler can deprioritize/skip
+    // campaigns that keep returning Meta 400s (stale/inaccessible campaigns).
+    try {
+      const curState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+      const newCount = Number(curState?.syncFailCount || 0) + 1;
+      await updateOptimizerCampaignState(normalizedCampaignId, { syncFailCount: newCount });
+    } catch {}
   }
 
   cycle.metricsSync = syncResult?.snapshot || null;

@@ -269,8 +269,13 @@ async function persistMetaUsageRow(row) {
       return Number.isFinite(t) && t >= cutoff;
     });
 
-    // all-time store intentionally does NOT prune
-    db.data[META_USAGE_ALL_TIME_DB_KEY] = allTimeStore;
+    // all-time store: cap at 5000 entries to prevent unbounded db.json growth / OOM
+    const MAX_ALL_TIME = 5000;
+    if (allTimeStore.length > MAX_ALL_TIME) {
+      db.data[META_USAGE_ALL_TIME_DB_KEY] = allTimeStore.slice(allTimeStore.length - MAX_ALL_TIME);
+    } else {
+      db.data[META_USAGE_ALL_TIME_DB_KEY] = allTimeStore;
+    }
 
     await db.write();
   } catch (e) {
@@ -1615,6 +1620,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     campaignId: campaignIdArg,
     patch: { latestDiagnosis: diagnosis },
   });
+  // Suppress repeated identical diagnosis type within the configured run gap to avoid spam.
   appendAiHistoryEntry(campaignIdArg, {
     type: 'diagnosis',
     timestamp: diagnosis?.generatedAt || new Date().toISOString(),
@@ -1624,7 +1630,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     actionType: diagnosis?.recommendedAction || '',
     dryRun: false,
     source: diagnosis?.mode || '',
-  }).catch(() => {});
+  }, { skipDuplicateWithinMs: minHoursBetweenRuns * 60 * 60 * 1000 }).catch(() => {});
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
@@ -1703,9 +1709,22 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
     campaignId: campaignIdArg,
     patch: { latestMonitoringDecision: monitoring },
   });
-  // Skip trivial monitoring states that add no signal value to the history feed.
+  // Skip trivial/no-op monitoring states entirely.
   const trivialMonitoring = monitoring?.monitoringDecision === 'no_action_to_monitor';
   if (!trivialMonitoring) {
+    // Suppress repeated low-signal monitoring entries within 2h to reduce noise.
+    // Actionable states (creative test resolved, delivery blocked, etc.) are always logged.
+    const noisyDecisions = new Set([
+      'continue_monitoring',
+      'await_more_data',
+      'hold_steady',
+      'creative_test_collecting_data',
+      'creative_test_in_progress',
+      'wait_for_post_refresh_signal',
+      'monitor_post_copy_refresh',
+      'continue_monitoring_after_copy_refresh',
+    ]);
+    const isNoisy = noisyDecisions.has(monitoring?.monitoringDecision);
     appendAiHistoryEntry(campaignIdArg, {
       type: 'monitoring',
       timestamp: monitoring?.generatedAt || new Date().toISOString(),
@@ -1715,7 +1734,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       actionType: monitoring?.nextRecommendedStep || '',
       dryRun: false,
       source: monitoring?.mode || '',
-    }).catch(() => {});
+    }, { skipDuplicateWithinMs: isNoisy ? 2 * 60 * 60 * 1000 : 0 }).catch(() => {});
   }
   return result;
 },
@@ -4583,7 +4602,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     actionType: diagnosis?.recommendedAction || '',
     dryRun: false,
     source: diagnosis?.mode || '',
-  }).catch(() => {});
+  }, { skipDuplicateWithinMs: 60 * 60 * 1000 }).catch(() => {});
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
@@ -4645,9 +4664,9 @@ persistAction: async (campaignIdArg, action) => {
       reason: action?.reason || '',
       actionType: action?.actionType || '',
       dryRun: !!action?.dryRun,
-    skipped: !!action?.skipped,
-    source: action?.mode || '',
-  }).catch(() => {});
+      skipped: !!action?.skipped,
+      source: action?.mode || '',
+    }).catch(() => {});
   }
   return result;
 },
@@ -4658,6 +4677,17 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
   });
   const trivialMonitoring = monitoring?.monitoringDecision === 'no_action_to_monitor';
   if (!trivialMonitoring) {
+    const noisyDecisions = new Set([
+      'continue_monitoring',
+      'await_more_data',
+      'hold_steady',
+      'creative_test_collecting_data',
+      'creative_test_in_progress',
+      'wait_for_post_refresh_signal',
+      'monitor_post_copy_refresh',
+      'continue_monitoring_after_copy_refresh',
+    ]);
+    const isNoisy = noisyDecisions.has(monitoring?.monitoringDecision);
     appendAiHistoryEntry(campaignIdArg, {
       type: 'monitoring',
       timestamp: monitoring?.generatedAt || new Date().toISOString(),
@@ -4667,7 +4697,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       actionType: monitoring?.nextRecommendedStep || '',
       dryRun: false,
       source: monitoring?.mode || '',
-    }).catch(() => {});
+    }, { skipDuplicateWithinMs: isNoisy ? 2 * 60 * 60 * 1000 : 0 }).catch(() => {});
   }
   return result;
 },
@@ -4965,10 +4995,14 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
         });
       }
     } catch (cacheErr) {
-      console.error('[campaigns] cache fallback failed:', cacheErr?.message || cacheErr);
+      console.error('[campaigns] cache fallback failed:', cacheErr?.message || 'unknown');
     }
 
-    console.error('[campaigns] Facebook fetch failed with no cache fallback:', err.response?.data || err.message);
+    console.error('[campaigns] Facebook fetch failed:', {
+      status: err?.response?.status ?? null,
+      metaError: err?.response?.data?.error?.message ?? null,
+      message: err?.message || 'unknown',
+    });
 
     return res.status(500).json({
       error: err.response?.data?.error?.message || 'Failed to fetch campaigns.',
@@ -5250,7 +5284,11 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
       summary,
     });
   } catch (err) {
-    console.error('[delivery-debug] failed:', err?.response?.data || err?.message || err);
+    console.error('[delivery-debug] failed:', {
+      status: err?.response?.status ?? null,
+      metaError: err?.response?.data?.error?.message ?? null,
+      message: err?.message || 'unknown',
+    });
     return res.status(500).json({
       error: err?.response?.data?.error?.message || 'Failed to debug campaign delivery.',
       detail: err?.response?.data || err?.message,

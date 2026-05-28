@@ -95,6 +95,14 @@ function getEligibilityReason(state, nowIso, minHoursBetweenRuns = 1) {
     return { eligible: false, reason: 'billing_blocked' };
   }
 
+  // Skip campaigns with too many consecutive Meta sync failures — they are stale or
+  // inaccessible and should not keep consuming scheduler slots every cycle.
+  // The counter resets to 0 as soon as a sync succeeds again.
+  const syncFailCount = Number(state?.syncFailCount) || 0;
+  if (syncFailCount >= 10) {
+    return { eligible: false, reason: 'too_many_sync_failures' };
+  }
+
   if (state.manualOverride) {
     return { eligible: false, reason: 'manual_override_active' };
   }

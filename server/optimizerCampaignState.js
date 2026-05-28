@@ -270,7 +270,11 @@ async function findOptimizerCampaignStatesByAccountId(accountId) {
 // Append a single AI activity entry to the campaign's aiHistory array.
 // Keeps only the most recent 100 entries. Never overwrites latestDiagnosis/Decision/Action.
 // Failures are silent — callers should .catch(() => {}) so history never breaks the main flow.
-async function appendAiHistoryEntry(campaignId, entry) {
+//
+// options.skipDuplicateWithinMs — if > 0, skip the push when an entry with the same
+// type+title already exists in the recent window. Prevents log spam from repeated
+// identical "low ctr" diagnoses or "continue monitoring" entries every cycle.
+async function appendAiHistoryEntry(campaignId, entry, options = {}) {
   if (!entry || typeof entry !== 'object') return null;
 
   const id = normalizeId(campaignId);
@@ -288,6 +292,20 @@ async function appendAiHistoryEntry(campaignId, entry) {
 
   const existing = list[index];
   const history = Array.isArray(existing.aiHistory) ? existing.aiHistory.slice() : [];
+
+  const skipDuplicateWithinMs = Number(options?.skipDuplicateWithinMs || 0);
+  if (skipDuplicateWithinMs > 0) {
+    const cutoffMs = Date.now() - skipDuplicateWithinMs;
+    const entryType = String(entry.type || '').trim();
+    const entryTitle = String(entry.title || '').trim();
+    const isDuplicate = history.some((h) => {
+      if (String(h.type || '').trim() !== entryType) return false;
+      if (String(h.title || '').trim() !== entryTitle) return false;
+      const hMs = new Date(h.timestamp || 0).getTime();
+      return Number.isFinite(hMs) && hMs >= cutoffMs;
+    });
+    if (isDuplicate) return null;
+  }
 
   history.push({
     id: `${String(entry.type || 'entry').slice(0, 12)}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,

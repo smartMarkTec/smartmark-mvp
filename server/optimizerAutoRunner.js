@@ -1,8 +1,19 @@
 'use strict';
 
+const OPTIMIZER_DEBUG = String(process.env.SMARTEMARK_OPTIMIZER_DEBUG || '').trim() === '1';
+
+// Module-level singleton — prevents creating a second interval if this module is
+// required from multiple call sites (e.g. auth.js module load + server.js app.listen).
+let _singleton = null;
+
 function startOptimizerAutoRunner({ runScheduledPass }) {
   if (typeof runScheduledPass !== 'function') {
     throw new Error('runScheduledPass function is required');
+  }
+
+  if (_singleton) {
+    console.log('[optimizer autorun] already running — skipped duplicate start');
+    return { started: false, duplicate: true };
   }
 
   const enabled = String(process.env.OPTIMIZER_AUTORUN_ENABLED || '').trim() === '1';
@@ -21,33 +32,36 @@ function startOptimizerAutoRunner({ runScheduledPass }) {
 
   const tick = async () => {
     if (running) {
-      console.log('[optimizer autorun] skipped tick because previous run is still active');
+      console.log('[optimizer autorun] previous tick still running — skipped');
       return;
     }
 
     running = true;
 
     try {
-      console.log('[optimizer autorun] tick started', {
-        intervalMinutes,
-        limit,
-        minHoursBetweenRuns,
-      });
+      if (OPTIMIZER_DEBUG) {
+        console.log('[optimizer autorun] tick started', {
+          intervalMinutes,
+          limit,
+          minHoursBetweenRuns,
+        });
+      }
 
       const result = await runScheduledPass({
         minHoursBetweenRuns,
         limit,
       });
 
-      console.log('[optimizer autorun] tick completed', {
-        checked: result?.checked ?? null,
-        eligible: result?.eligible ?? null,
-        processed: result?.processed ?? null,
-      });
+      if (OPTIMIZER_DEBUG) {
+        console.log('[optimizer autorun] tick completed', {
+          checked: result?.checked ?? null,
+          eligible: result?.eligible ?? null,
+          processed: result?.processed ?? null,
+        });
+      }
     } catch (err) {
       console.error('[optimizer autorun] tick failed', {
         message: err?.message || 'unknown error',
-        stack: err?.stack || null,
       });
     } finally {
       running = false;
@@ -68,10 +82,15 @@ function startOptimizerAutoRunner({ runScheduledPass }) {
     tick().catch(() => {});
   }, intervalMs);
 
+  _singleton = { timer, intervalMs };
+
   return {
     started: true,
     intervalMs,
-    stop: () => clearInterval(timer),
+    stop: () => {
+      clearInterval(timer);
+      _singleton = null;
+    },
   };
 }
 
