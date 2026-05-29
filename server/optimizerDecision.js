@@ -185,10 +185,9 @@ function buildFallbackDecision({ optimizerState }) {
 
     if (
       monitoringDecision === 'wait_for_post_refresh_signal' ||
-      monitoringDecision === 'monitor_post_copy_refresh' ||
-      monitoringDecision === 'watch_copy_refresh_result' ||
-      monitoringDecision === 'continue_monitoring_after_copy_refresh'
+      monitoringDecision === 'monitor_post_copy_refresh'
     ) {
+      // Too early or too little post-refresh signal — hold.
       return {
         campaignId: String(optimizerState?.campaignId || '').trim(),
         decision: 'hold_after_copy_refresh',
@@ -201,6 +200,70 @@ function buildFallbackDecision({ optimizerState }) {
         supportingContext: {
           monitoringDecision,
           diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+          latestActionType: String(latestAction?.actionType || '').trim(),
+          spend,
+          impressions,
+          linkClicks,
+          conversions,
+          ctr,
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'fallback_rule_based_v1',
+      };
+    }
+
+    if (
+      monitoringDecision === 'watch_copy_refresh_result' ||
+      monitoringDecision === 'continue_monitoring_after_copy_refresh'
+    ) {
+      // Post-refresh data has accumulated. If CTR is still weak and the standard
+      // test gate is passed, escalate to a creative-angle test instead of waiting
+      // indefinitely. This breaks the "copy refresh → monitor forever" loop.
+      const diagnosis = String(latestDiagnosis?.diagnosis || '').trim();
+      if (
+        ctr < 1.0 &&
+        standardTestGatePassed(optimizerState, 'low_ctr') &&
+        !standardCooldownActive(optimizerState)
+      ) {
+        return {
+          campaignId: String(optimizerState?.campaignId || '').trim(),
+          decision: 'launch_creative_test_after_copy_refresh',
+          actionType: isStandardTier(optimizerState)
+            ? 'generate_single_creative_variant'
+            : 'generate_two_creative_variants',
+          priority: 'high',
+          reason:
+            'Copy refresh was applied but CTR remains weak after meaningful post-refresh data has accumulated. Smartemark should now test a fresh creative angle instead of continuing to monitor.',
+          requiresHumanApproval: true,
+          confidence: 0.85,
+          supportingContext: {
+            monitoringDecision,
+            diagnosis,
+            latestActionType: String(latestAction?.actionType || '').trim(),
+            spend,
+            impressions,
+            linkClicks,
+            conversions,
+            ctr,
+          },
+          generatedAt: new Date().toISOString(),
+          mode: 'fallback_rule_based_v1',
+        };
+      }
+
+      // Gate not yet passed or cooldown active — keep monitoring.
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'hold_after_copy_refresh',
+        actionType: 'continue_monitoring',
+        priority: 'medium',
+        reason:
+          'Copy refresh was applied. Gathering enough post-refresh signal before deciding the next move.',
+        requiresHumanApproval: true,
+        confidence: 0.88,
+        supportingContext: {
+          monitoringDecision,
+          diagnosis,
           latestActionType: String(latestAction?.actionType || '').trim(),
           spend,
           impressions,
@@ -667,6 +730,46 @@ async function buildDecisionAsync({ optimizerState }) {
         },
         optimizerState,
       });
+    }
+  }
+
+  // Post-copy-refresh escalation gate (async path).
+  // When the monitoring signals that post-refresh data has accumulated but CTR is
+  // still weak, escalate to a creative-angle test rather than waiting indefinitely.
+  // This check runs before the AI brain so the rule-based escalation always fires.
+  {
+    const monDecision = String(
+      latestMonitoringDecision?.monitoringDecision || ''
+    ).trim();
+    if (
+      monDecision === 'watch_copy_refresh_result' ||
+      monDecision === 'continue_monitoring_after_copy_refresh'
+    ) {
+      const metrics = optimizerState?.metricsSnapshot || {};
+      const _ctr = toNumber(metrics.ctr, 0);
+      if (
+        _ctr < 1.0 &&
+        standardTestGatePassed(optimizerState, 'low_ctr') &&
+        !standardCooldownActive(optimizerState)
+      ) {
+        return attachDecisionContext({
+          base: {
+            campaignId: String(optimizerState?.campaignId || '').trim(),
+            decision: 'launch_creative_test_after_copy_refresh',
+            actionType: isStandardTier(optimizerState)
+              ? 'generate_single_creative_variant'
+              : 'generate_two_creative_variants',
+            priority: 'high',
+            reason:
+              'Copy refresh was applied but CTR remains weak after meaningful post-refresh data has accumulated. Smartemark should now test a fresh creative angle instead of continuing to monitor.',
+            requiresHumanApproval: true,
+            confidence: 0.85,
+            generatedAt: new Date().toISOString(),
+            mode: 'state_priority_post_refresh_v1',
+          },
+          optimizerState,
+        });
+      }
     }
   }
 

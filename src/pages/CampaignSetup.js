@@ -5733,12 +5733,15 @@ const selectedCampaignCreatives =
         <>
           {(() => {
             const creativeMeta = selectedCampaignCreatives?.meta || {};
-            // When the AI Operator has updated primary text, prefer that over the
-            // stale launch-time creative record body so the UI always shows what is
-            // currently live in Facebook rather than the original draft copy.
+            // Prefer optimizer-state currentPrimaryText/currentHeadline (set by AI or manual
+            // Smartemark edit) over the creative record, which is refreshed from live Meta on
+            // every /creatives fetch and is now always the latest source of truth.
             const aiCurrentPrimaryText =
               selectedOptimizerState?.currentPrimaryText ||
               selectedOptimizerState?.latestAction?.actionResult?.updatedPrimaryText ||
+              null;
+            const aiCurrentHeadline =
+              selectedOptimizerState?.currentHeadline ||
               null;
             const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
             const pending =
@@ -5939,7 +5942,7 @@ const selectedCampaignCreatives =
                                 lineHeight: 1.5,
                               }}
                             >
-                              {String(creativeMeta?.headline || previewCopy?.headline || headline || "No headline available yet.").trim()}
+                              {String(aiCurrentHeadline || creativeMeta?.headline || previewCopy?.headline || headline || "No headline available yet.").trim()}
                             </div>
                           </div>
                         </div>

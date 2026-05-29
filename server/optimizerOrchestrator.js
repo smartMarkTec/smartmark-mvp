@@ -156,6 +156,24 @@ async function runFullOptimizerCycle({
 
   let state = await safeReloadState(normalizedCampaignId, 'after metrics sync');
 
+  // Post-sync guard: if the metrics sync updated currentStatus to PAUSED (or any
+  // terminal status), skip the rest of the cycle.  This detects campaigns that the
+  // user paused directly in Facebook Ads Manager without going through Smartemark.
+  const postSyncSkip = shouldSkipOptimizationForCampaign(state);
+  if (!postSyncSkip.skip) {
+    const liveStatus = String(state.currentStatus || '').trim().toUpperCase();
+    if (liveStatus === 'PAUSED') {
+      console.log('[optimizer orchestrator] campaign is paused — skipping diagnosis/action:', {
+        campaignId: normalizedCampaignId,
+        liveStatus,
+      });
+      cycle.finishedAt = new Date().toISOString();
+      cycle.skipped = true;
+      cycle.reason = 'campaign_paused';
+      return { cycle, optimizerState: state };
+    }
+  }
+
   const creativesRecord = await loadCreativesRecord(
     normalizedCampaignId,
     normalizedAccountId

@@ -1620,7 +1620,8 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     campaignId: campaignIdArg,
     patch: { latestDiagnosis: diagnosis },
   });
-  // Suppress repeated identical diagnosis type within the configured run gap to avoid spam.
+  // Suppress repeated identical diagnosis within 4h minimum (not just 1 run gap) to reduce spam.
+  const _diagDedup = Math.max(4, minHoursBetweenRuns) * 60 * 60 * 1000;
   appendAiHistoryEntry(campaignIdArg, {
     type: 'diagnosis',
     timestamp: diagnosis?.generatedAt || new Date().toISOString(),
@@ -1630,7 +1631,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     actionType: diagnosis?.recommendedAction || '',
     dryRun: false,
     source: diagnosis?.mode || '',
-  }, { skipDuplicateWithinMs: minHoursBetweenRuns * 60 * 60 * 1000 }).catch(() => {});
+  }, { skipDuplicateWithinMs: _diagDedup }).catch(() => {});
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
@@ -1671,6 +1672,9 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.updatedPrimaryText
   ) {
     primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+    if (action?.actionResult?.updatedHeadline) {
+      primaryTextPatch.currentHeadline = String(action.actionResult.updatedHeadline).trim();
+    }
   }
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
@@ -1722,6 +1726,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       'creative_test_in_progress',
       'wait_for_post_refresh_signal',
       'monitor_post_copy_refresh',
+      'watch_copy_refresh_result',
       'continue_monitoring_after_copy_refresh',
     ]);
     const isNoisy = noisyDecisions.has(monitoring?.monitoringDecision);
@@ -1734,7 +1739,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       actionType: monitoring?.nextRecommendedStep || '',
       dryRun: false,
       source: monitoring?.mode || '',
-    }, { skipDuplicateWithinMs: isNoisy ? 2 * 60 * 60 * 1000 : 0 }).catch(() => {});
+    }, { skipDuplicateWithinMs: isNoisy ? 6 * 60 * 60 * 1000 : 0 }).catch(() => {});
   }
   return result;
 },
@@ -4593,6 +4598,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     campaignId: campaignIdArg,
     patch: { latestDiagnosis: diagnosis },
   });
+  // Suppress repeated identical diagnosis within 4h to reduce spam.
   appendAiHistoryEntry(campaignIdArg, {
     type: 'diagnosis',
     timestamp: diagnosis?.generatedAt || new Date().toISOString(),
@@ -4602,7 +4608,7 @@ persistDiagnosis: async (campaignIdArg, diagnosis) => {
     actionType: diagnosis?.recommendedAction || '',
     dryRun: false,
     source: diagnosis?.mode || '',
-  }, { skipDuplicateWithinMs: 60 * 60 * 1000 }).catch(() => {});
+  }, { skipDuplicateWithinMs: 4 * 60 * 60 * 1000 }).catch(() => {});
   return result;
 },
 persistDecision: async (campaignIdArg, decision) => {
@@ -4638,6 +4644,9 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.updatedPrimaryText
   ) {
     primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+    if (action?.actionResult?.updatedHeadline) {
+      primaryTextPatch.currentHeadline = String(action.actionResult.updatedHeadline).trim();
+    }
   }
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
@@ -4685,6 +4694,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       'creative_test_in_progress',
       'wait_for_post_refresh_signal',
       'monitor_post_copy_refresh',
+      'watch_copy_refresh_result',
       'continue_monitoring_after_copy_refresh',
     ]);
     const isNoisy = noisyDecisions.has(monitoring?.monitoringDecision);
@@ -4697,7 +4707,7 @@ persistMonitoring: async (campaignIdArg, monitoring) => {
       actionType: monitoring?.nextRecommendedStep || '',
       dryRun: false,
       source: monitoring?.mode || '',
-    }, { skipDuplicateWithinMs: isNoisy ? 2 * 60 * 60 * 1000 : 0 }).catch(() => {});
+    }, { skipDuplicateWithinMs: isNoisy ? 6 * 60 * 60 * 1000 : 0 }).catch(() => {});
   }
   return result;
 },
@@ -5518,9 +5528,12 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 
     const perAdImages = [];
 
-   let recoveredHeadline = safeMetaFromRecord.headline;
-let recoveredBody = safeMetaFromRecord.body;
-let recoveredLink = safeMetaFromRecord.link;
+   // Always read live Meta copy first — never pre-seed from the stale DB record.
+// The DB record can lag behind manual Facebook edits or AI-driven copy refreshes.
+// We fall back to the DB record only after the Meta loop if fields are still empty.
+let recoveredHeadline = '';
+let recoveredBody = '';
+let recoveredLink = '';
 
 const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
 const storedLocalImages = [];
@@ -5560,29 +5573,19 @@ for (let i = 0; i < ads.length; i += 1) {
   const photoData = oss?.photo_data || {};
   const videoData = oss?.video_data || {};
 
-  if (!recoveredHeadline) {
-    recoveredHeadline = firstNonEmpty(
-      linkData?.name,
-      photoData?.title,
-      videoData?.title,
-      linkData?.caption
-    );
-  }
+  // Prefer the control (non-AI-challenger) ad's copy; skip if we already have it.
+  const isAiChallenger = String(ad?.name || '').toLowerCase().includes('ai challenger');
 
-  if (!recoveredBody) {
-    recoveredBody = firstNonEmpty(
-      linkData?.message,
-      photoData?.message,
-      videoData?.message
-    );
-  }
+  if (!isAiChallenger) {
+    // Always overwrite with the live Meta creative copy so the latest Facebook text
+    // is shown, regardless of what the DB cache says.
+    const liveHeadline = firstNonEmpty(linkData?.name, photoData?.title, videoData?.title, linkData?.caption);
+    const liveBody = firstNonEmpty(linkData?.message, photoData?.message, videoData?.message);
+    const liveLink = firstNonEmpty(linkData?.link, photoData?.link, videoData?.call_to_action?.value?.link);
 
-  if (!recoveredLink) {
-    recoveredLink = firstNonEmpty(
-      linkData?.link,
-      photoData?.link,
-      videoData?.call_to_action?.value?.link
-    );
+    if (liveHeadline) recoveredHeadline = liveHeadline;
+    if (liveBody) recoveredBody = liveBody;
+    if (liveLink) recoveredLink = liveLink;
   }
 
   if (!shouldRecacheFromMeta) {
@@ -5636,9 +5639,10 @@ console.log('[creatives] final images selected', {
   reusedExistingLocal: existingUsableLocalImages.length > 0,
 });
 
-if (!recoveredHeadline) {
-  recoveredHeadline = safeMetaFromRecord.headline || '';
-}
+// Fall back to DB record only if Meta returned nothing for a field.
+if (!recoveredHeadline) recoveredHeadline = safeMetaFromRecord.headline || '';
+if (!recoveredBody) recoveredBody = safeMetaFromRecord.body || '';
+if (!recoveredLink) recoveredLink = safeMetaFromRecord.link || '';
 
 if (!recoveredHeadline && recoveredBody) {
   recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
@@ -6086,13 +6090,15 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/copy', async (
 
     // Persist currentPrimaryText — keep businessBrief.originalPrimaryText untouched for AI grounding.
     try {
+      const copyEditPatch = {
+        currentPrimaryText: rawPrimaryText,
+        lastManualCopyEditAt: updatedAt,
+        lastManualCopyEditBy: ownerKey,
+      };
+      if (rawHeadline) copyEditPatch.currentHeadline = rawHeadline;
       await updateBestKnownOptimizerCampaignState({
         campaignId: normalizedCampaignId,
-        patch: {
-          currentPrimaryText: rawPrimaryText,
-          lastManualCopyEditAt: updatedAt,
-          lastManualCopyEditBy: ownerKey,
-        },
+        patch: copyEditPatch,
       });
     } catch (stateErr) {
       console.warn('[copy edit] failed to persist currentPrimaryText:', stateErr?.message || stateErr);

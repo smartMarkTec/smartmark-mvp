@@ -113,6 +113,23 @@ async function fetchCampaignInsightsSnapshot({ userToken, campaignId }) {
   return normalizeInsightsRow(row, campaignId);
 }
 
+async function fetchCampaignLiveStatus({ userToken, campaignId }) {
+  try {
+    const res = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+      params: {
+        access_token: userToken,
+        fields: 'effective_status,status',
+      },
+      timeout: 10000,
+    });
+    const data = res.data || {};
+    const status = String(data.effective_status || data.status || '').trim().toUpperCase();
+    return status || null;
+  } catch {
+    return null;
+  }
+}
+
 async function syncCampaignMetricsToOptimizerState({
   userToken,
   campaignId,
@@ -121,7 +138,10 @@ async function syncCampaignMetricsToOptimizerState({
 }) {
   if (!campaignId) throw new Error('campaignId is required');
 
-  const snapshot = await fetchCampaignInsightsSnapshot({ userToken, campaignId });
+  const [snapshot, liveStatus] = await Promise.all([
+    fetchCampaignInsightsSnapshot({ userToken, campaignId }),
+    fetchCampaignLiveStatus({ userToken, campaignId }),
+  ]);
 
   let existing = await findOptimizerCampaignStateByCampaignId(campaignId);
 
@@ -131,13 +151,14 @@ async function syncCampaignMetricsToOptimizerState({
       metaCampaignId: String(campaignId).trim(),
       accountId: String(accountId || '').replace(/^act_/, '').trim(),
       ownerKey: String(ownerKey || '').trim(),
-      currentStatus: 'ACTIVE',
+      currentStatus: liveStatus || 'ACTIVE',
       optimizationEnabled: true,
       metricsSnapshot: snapshot,
     });
 
     return {
       snapshot,
+      liveStatus,
       optimizerState: existing,
       created: true,
     };
@@ -146,6 +167,11 @@ async function syncCampaignMetricsToOptimizerState({
   const patch = {
     metricsSnapshot: snapshot,
   };
+
+  // Always sync the live Meta campaign status so the guard can detect paused campaigns.
+  if (liveStatus) {
+    patch.currentStatus = liveStatus;
+  }
 
   if (!existing.accountId && accountId) {
     patch.accountId = String(accountId).replace(/^act_/, '').trim();
@@ -159,6 +185,7 @@ async function syncCampaignMetricsToOptimizerState({
 
   return {
     snapshot,
+    liveStatus,
     optimizerState: updated,
     created: false,
   };
