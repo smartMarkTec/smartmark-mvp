@@ -300,6 +300,56 @@ function buildFallbackDecision({ optimizerState }) {
     }
   }
 
+  // lastCopyChangeAt escalation gate (fallback path — AI brain failed or not called).
+  // Same logic as the async gate; ensures the escalation fires even without the AI brain.
+  {
+    const _lastChange = String(
+      optimizerState?.lastCopyChangeAt || optimizerState?.lastManualCopyEditAt || ''
+    ).trim();
+    const _lastChangeMs = _lastChange ? new Date(_lastChange).getTime() : 0;
+    const _hoursSinceChange = _lastChangeMs
+      ? Math.max(0, (Date.now() - _lastChangeMs) / 3600000)
+      : null;
+    const _latestActionType = String(latestAction?.actionType || '').trim();
+    const _isNoOpAction =
+      !_latestActionType ||
+      _latestActionType === 'continue_monitoring' ||
+      _latestActionType === 'monitoring_only';
+
+    if (
+      _hoursSinceChange !== null &&
+      _isNoOpAction &&
+      _hoursSinceChange >= 4 &&
+      _hoursSinceChange <= 168 &&
+      impressions >= 2000 &&
+      ctr < 0.8 &&
+      spend >= 5 &&
+      standardTestGatePassed(optimizerState, 'low_ctr') &&
+      !standardCooldownActive(optimizerState)
+    ) {
+      const _hoursRounded = Math.round(_hoursSinceChange);
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'launch_creative_test_after_copy_refresh',
+        actionType: isStandardTier(optimizerState)
+          ? 'generate_single_creative_variant'
+          : 'generate_two_creative_variants',
+        priority: 'high',
+        reason: `Primary text was updated ${_hoursRounded}h ago but CTR remains at ${ctr.toFixed(2)}% after ${impressions.toLocaleString()} impressions — below the 0.8% target. The next strategic move is a fresh creative visual angle while keeping the updated copy in place.`,
+        requiresHumanApproval: true,
+        confidence: 0.87,
+        supportingContext: {
+          hoursSinceCopyChange: _hoursRounded,
+          impressions,
+          ctr,
+          spend,
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'copy_change_escalation_v1',
+      };
+    }
+  }
+
   if (pendingCreativeReady) {
     return {
       campaignId: String(optimizerState?.campaignId || '').trim(),
@@ -733,10 +783,9 @@ async function buildDecisionAsync({ optimizerState }) {
     }
   }
 
-  // Post-copy-refresh escalation gate (async path).
-  // When the monitoring signals that post-refresh data has accumulated but CTR is
-  // still weak, escalate to a creative-angle test rather than waiting indefinitely.
-  // This check runs before the AI brain so the rule-based escalation always fires.
+  // Post-copy-refresh escalation gate (async path — monitoring-signal path).
+  // When monitoring explicitly signals post-refresh data has accumulated + CTR still weak,
+  // escalate before calling the AI brain so rule-based logic always fires first.
   {
     const monDecision = String(
       latestMonitoringDecision?.monitoringDecision || ''
@@ -745,8 +794,8 @@ async function buildDecisionAsync({ optimizerState }) {
       monDecision === 'watch_copy_refresh_result' ||
       monDecision === 'continue_monitoring_after_copy_refresh'
     ) {
-      const metrics = optimizerState?.metricsSnapshot || {};
-      const _ctr = toNumber(metrics.ctr, 0);
+      const _m = optimizerState?.metricsSnapshot || {};
+      const _ctr = toNumber(_m.ctr, 0);
       if (
         _ctr < 1.0 &&
         standardTestGatePassed(optimizerState, 'low_ctr') &&
@@ -766,6 +815,62 @@ async function buildDecisionAsync({ optimizerState }) {
             confidence: 0.85,
             generatedAt: new Date().toISOString(),
             mode: 'state_priority_post_refresh_v1',
+          },
+          optimizerState,
+        });
+      }
+    }
+  }
+
+  // lastCopyChangeAt escalation gate (async path — safety-net path).
+  // Fires when latestAction has been overwritten by no-ops (current DB state) but
+  // lastCopyChangeAt proves copy was recently changed. Catches the transitional cycle
+  // before the latestAction-preservation fix propagates through the DB.
+  {
+    const _lastChange = String(
+      optimizerState?.lastCopyChangeAt || optimizerState?.lastManualCopyEditAt || ''
+    ).trim();
+    const _lastChangeMs = _lastChange ? new Date(_lastChange).getTime() : 0;
+    const _hoursSinceChange = _lastChangeMs
+      ? Math.max(0, (Date.now() - _lastChangeMs) / 3600000)
+      : null;
+
+    const _latestActionType = String(optimizerState?.latestAction?.actionType || '').trim();
+    const _isNoOpAction =
+      !_latestActionType ||
+      _latestActionType === 'continue_monitoring' ||
+      _latestActionType === 'monitoring_only';
+
+    if (_hoursSinceChange !== null) {
+      const _m2 = optimizerState?.metricsSnapshot || {};
+      const _impressions2 = toNumber(_m2.impressions, 0);
+      const _ctr2 = toNumber(_m2.ctr, 0);
+      const _spend2 = toNumber(_m2.spend, 0);
+
+      if (
+        _isNoOpAction &&
+        _hoursSinceChange >= 4 &&    // at least 4h of post-change signal
+        _hoursSinceChange <= 168 &&   // within 7 days (stale edits ignored)
+        _impressions2 >= 2000 &&      // meaningful delivery volume
+        _ctr2 < 0.8 &&               // CTR still below target
+        _spend2 >= 5 &&              // real spend confirms delivery
+        standardTestGatePassed(optimizerState, 'low_ctr') &&
+        !standardCooldownActive(optimizerState)
+      ) {
+        const _hoursRounded = Math.round(_hoursSinceChange);
+        return attachDecisionContext({
+          base: {
+            campaignId: String(optimizerState?.campaignId || '').trim(),
+            decision: 'launch_creative_test_after_copy_refresh',
+            actionType: isStandardTier(optimizerState)
+              ? 'generate_single_creative_variant'
+              : 'generate_two_creative_variants',
+            priority: 'high',
+            reason: `Primary text was updated ${_hoursRounded}h ago but CTR remains at ${_ctr2.toFixed(2)}% after ${_impressions2.toLocaleString()} impressions — below the 0.8% target. The next strategic move is a fresh creative visual angle while keeping the updated copy in place.`,
+            requiresHumanApproval: true,
+            confidence: 0.87,
+            generatedAt: new Date().toISOString(),
+            mode: 'copy_change_escalation_v1',
           },
           optimizerState,
         });

@@ -1663,8 +1663,8 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
-  // When the AI successfully refreshes primary text, persist the new copy into optimizer
-  // state so the frontend can display it without relying on the stale launch record.
+  // When the AI successfully refreshes primary text, persist the new copy and
+  // the copy-change timestamp so monitoring can track the post-refresh state.
   const primaryTextPatch = {};
   if (
     action?.actionType === 'update_primary_text' &&
@@ -1672,23 +1672,26 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.updatedPrimaryText
   ) {
     primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+    primaryTextPatch.lastCopyChangeAt = action?.generatedAt || new Date().toISOString();
     if (action?.actionResult?.updatedHeadline) {
       primaryTextPatch.currentHeadline = String(action.actionResult.updatedHeadline).trim();
     }
   }
+  // Don't overwrite latestAction with monitoring no-ops. Preserving the last real
+  // action (e.g. update_primary_text) lets monitoring correctly track post-refresh
+  // state across subsequent continue_monitoring cycles.
+  const isContinueMonitoring =
+    action?.actionType === 'continue_monitoring' ||
+    action?.status === 'monitoring_only';
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
-      latestAction: action,
+      ...(isContinueMonitoring ? {} : { latestAction: action }),
       ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
       ...buildGeneratedCreativePatchFromAction(action),
       ...primaryTextPatch,
     },
   });
-  // "continue_monitoring" is not a real action — skip it from history to avoid noise.
-  const isContinueMonitoring =
-    action?.actionType === 'continue_monitoring' ||
-    action?.status === 'monitoring_only';
   if (!isContinueMonitoring) {
     appendAiHistoryEntry(campaignIdArg, {
       type: 'action',
@@ -4644,22 +4647,24 @@ persistAction: async (campaignIdArg, action) => {
     action?.actionResult?.updatedPrimaryText
   ) {
     primaryTextPatch.currentPrimaryText = String(action.actionResult.updatedPrimaryText).trim();
+    primaryTextPatch.lastCopyChangeAt = action?.generatedAt || new Date().toISOString();
     if (action?.actionResult?.updatedHeadline) {
       primaryTextPatch.currentHeadline = String(action.actionResult.updatedHeadline).trim();
     }
   }
+  // Don't overwrite latestAction with monitoring no-ops (same rationale as first persistAction block).
+  const isContinueMonitoring =
+    action?.actionType === 'continue_monitoring' ||
+    action?.status === 'monitoring_only';
   const result = await updateBestKnownOptimizerCampaignState({
     campaignId: campaignIdArg,
     patch: {
-      latestAction: action,
+      ...(isContinueMonitoring ? {} : { latestAction: action }),
       ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
       ...buildGeneratedCreativePatchFromAction(action),
       ...primaryTextPatch,
     },
   });
-  const isContinueMonitoring =
-    action?.actionType === 'continue_monitoring' ||
-    action?.status === 'monitoring_only';
   if (!isContinueMonitoring) {
     appendAiHistoryEntry(campaignIdArg, {
       type: 'action',
@@ -6088,12 +6093,35 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/copy', async (
 
     const updatedAt = new Date().toISOString();
 
-    // Persist currentPrimaryText — keep businessBrief.originalPrimaryText untouched for AI grounding.
+    // Persist currentPrimaryText, lastCopyChangeAt, and a latestAction record so
+    // monitoring can detect the copy change and escape the "continue monitoring" loop.
+    // Keep businessBrief.originalPrimaryText untouched — that's the AI grounding anchor.
     try {
       const copyEditPatch = {
         currentPrimaryText: rawPrimaryText,
         lastManualCopyEditAt: updatedAt,
+        lastCopyChangeAt: updatedAt,
         lastManualCopyEditBy: ownerKey,
+        // Set latestAction so monitoring treats this as a real copy change event,
+        // the same way it treats an AI update_primary_text action.
+        latestAction: {
+          campaignId: normalizedCampaignId,
+          executed: true,
+          status: 'completed',
+          actionType: 'manual_copy_edit',
+          actionResult: {
+            mutationType: 'manual_copy_edit',
+            updatedPrimaryText: rawPrimaryText,
+            previousPrimaryText,
+            ...(rawHeadline ? { updatedHeadline: rawHeadline } : {}),
+            adId: String(ad.id || '').trim(),
+            newCreativeId,
+            mutatedAt: updatedAt,
+          },
+          reason: 'Primary text was manually updated from Smartemark.',
+          generatedAt: updatedAt,
+          mode: 'manual',
+        },
       };
       if (rawHeadline) copyEditPatch.currentHeadline = rawHeadline;
       await updateBestKnownOptimizerCampaignState({

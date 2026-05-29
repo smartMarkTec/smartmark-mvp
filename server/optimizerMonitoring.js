@@ -252,11 +252,14 @@ function buildMonitoring({ optimizerState }) {
     nextRecommendedStep = 'collect_new_delivery_signal';
     confidence = 0.94;
   } else if (
-    actionType === 'update_primary_text' &&
+    (actionType === 'update_primary_text' || actionType === 'manual_copy_edit') &&
     actionExecuted &&
     actionStatus === 'completed'
   ) {
-    const lowFreshSignal = impressions < 250 || linkClicks < 3;
+    // Use effective clicks (link_clicks with fallback to all clicks) so campaigns
+    // without link-click tracking still progress past the post-refresh gate.
+    const effectiveClicks = linkClicks > 0 ? linkClicks : clicks;
+    const lowFreshSignal = impressions < 250 || effectiveClicks < 3;
 
     if (minutesAfterLatestAction != null && minutesAfterLatestAction < 60) {
       monitoringDecision = 'wait_for_post_refresh_signal';
