@@ -2277,6 +2277,300 @@ router.get('/facebook/adaccount/:accountId/launch-limit-debug', async (req, res)
   }
 });
 
+/*
+ * Optimizer Decision Debug Route
+ *
+ * Read-only snapshot of exactly what the AI Operator is doing and why.
+ * No actions are executed. No API calls are made. No tokens are returned.
+ *
+ * Usage:
+ *   GET /auth/facebook/adaccount/<ACCT_ID>/campaign/<CAMPAIGN_ID>/optimizer-debug?debug_key=<KEY>
+ */
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-debug', async (req, res) => {
+  try {
+    if (!hasValidDebugKey(req)) {
+      return res.status(401).json({ ok: false, error: 'Missing or invalid debug_key.' });
+    }
+
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+
+    const state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    if (!state) {
+      return res.status(404).json({ ok: false, error: 'No optimizer state found for this campaign.' });
+    }
+
+    // ── Guard ──────────────────────────────────────────────────────
+    const guardResult = shouldSkipOptimizationForCampaign(state);
+    const currentStatus = String(state.currentStatus || '').trim().toUpperCase();
+    const isPaused = currentStatus === 'PAUSED';
+    const isBillingBlocked = !!state.billingBlocked;
+    const optimizationEnabled = state.optimizationEnabled !== false;
+
+    // ── Metrics ───────────────────────────────────────────────────
+    const metrics = state.metricsSnapshot || {};
+    const impressions = Number(metrics.impressions || 0);
+    const clicks = Number(metrics.clicks || 0);
+    const ctr = Number(metrics.ctr || 0);
+    const spend = Number(metrics.spend || 0);
+    const linkClicks = Number(metrics.linkClicks || 0);
+    const frequency = Number(metrics.frequency || 0);
+    const cpc = Number(metrics.cpc || 0);
+    const effectiveClicks = linkClicks > 0 ? linkClicks : clicks;
+
+    // ── Copy change tracking ──────────────────────────────────────
+    const lastCopyChangeAt = String(state.lastCopyChangeAt || state.lastManualCopyEditAt || '').trim();
+    const lastManualCopyEditAt = String(state.lastManualCopyEditAt || '').trim();
+    const lastCopyChangeMs = lastCopyChangeAt ? new Date(lastCopyChangeAt).getTime() : 0;
+    const hoursSinceChange = lastCopyChangeMs ? Math.max(0, (Date.now() - lastCopyChangeMs) / 3600000) : null;
+
+    // ── Action state ─────────────────────────────────────────────
+    const latestAction = state.latestAction || null;
+    const latestActionType = String(latestAction?.actionType || '').trim();
+    const isNoOpAction = !latestActionType || latestActionType === 'continue_monitoring' || latestActionType === 'monitoring_only';
+
+    // ── Standard gate (mirrors standardTestGatePassed for low_ctr) ─
+    const BYPASS_IMPRESSIONS = 1500;
+    const MIN_IMPRESSIONS = 500;
+    const MIN_SPEND = 5;
+    const standardGatePassed = impressions >= BYPASS_IMPRESSIONS || (impressions >= MIN_IMPRESSIONS && spend >= MIN_SPEND);
+
+    // ── Cooldown check ───────────────────────────────────────────
+    const resolvedActionType = String(latestAction?.actionType || '').trim();
+    const resolvedAt = String(latestAction?.actionResult?.resolvedAt || latestAction?.actionResult?.completedAt || latestAction?.generatedAt || '').trim();
+    const isResolvedTest = ['pause_losing_creative_variant', 'declare_creative_winner'].includes(resolvedActionType);
+    const COOLDOWN_DAYS = 5;
+    const cooldownActive = isResolvedTest && resolvedAt ? (Date.now() - new Date(resolvedAt).getTime()) < COOLDOWN_DAYS * 24 * 3600000 : false;
+
+    // ── Escalation gates ─────────────────────────────────────────
+    const monitoringDecision = String(state.latestMonitoringDecision?.monitoringDecision || '').trim();
+
+    const safetyNetCheck = {
+      hasLastCopyChange: !!lastCopyChangeAt,
+      isNoOpAction,
+      latestActionType: latestActionType || '(empty)',
+      hoursSinceChange: hoursSinceChange !== null ? Math.round(hoursSinceChange * 10) / 10 : null,
+      meetsHoursMin: hoursSinceChange !== null && hoursSinceChange >= 4,
+      meetsHoursMax: hoursSinceChange !== null && hoursSinceChange <= 168,
+      meetsImpressions: impressions >= 2000,
+      meetsCtr: ctr < 0.8,
+      meetsSpend: spend >= MIN_SPEND,
+      standardGatePassed,
+      cooldownActive,
+      isPaused,
+      isBillingBlocked,
+    };
+
+    const safetyNetWouldFire = (
+      !isPaused &&
+      !isBillingBlocked &&
+      optimizationEnabled &&
+      safetyNetCheck.hasLastCopyChange &&
+      safetyNetCheck.isNoOpAction &&
+      safetyNetCheck.meetsHoursMin &&
+      safetyNetCheck.meetsHoursMax &&
+      safetyNetCheck.meetsImpressions &&
+      safetyNetCheck.meetsCtr &&
+      safetyNetCheck.meetsSpend &&
+      standardGatePassed &&
+      !cooldownActive
+    );
+
+    const monitoringSignalWouldFire = (
+      !isPaused &&
+      !isBillingBlocked &&
+      optimizationEnabled &&
+      (monitoringDecision === 'watch_copy_refresh_result' || monitoringDecision === 'continue_monitoring_after_copy_refresh') &&
+      ctr < 1.0 &&
+      standardGatePassed &&
+      !cooldownActive
+    );
+
+    const anyEscalationFires = safetyNetWouldFire || monitoringSignalWouldFire;
+
+    // ── Projected outcome ─────────────────────────────────────────
+    let projectedActionType;
+    let projectedReason;
+    let decisionPath;
+
+    if (!optimizationEnabled) {
+      projectedActionType = 'skipped';
+      projectedReason = 'optimizationEnabled is false — no cycles run.';
+      decisionPath = 'guard_disabled';
+    } else if (guardResult.skip) {
+      projectedActionType = 'skipped';
+      projectedReason = `Pre-sync guard: ${guardResult.reason}`;
+      decisionPath = 'pre_sync_guard';
+    } else if (isPaused) {
+      projectedActionType = 'skipped_campaign_paused';
+      projectedReason = 'Campaign is PAUSED. Orchestrator returns early after metrics sync detects PAUSED status. No diagnosis, decision, or action is executed.';
+      decisionPath = 'post_sync_paused_guard';
+    } else if (safetyNetWouldFire) {
+      projectedActionType = 'generate_single_creative_variant';
+      projectedReason = `lastCopyChangeAt safety-net: copy changed ${safetyNetCheck.hoursSinceChange}h ago, CTR=${ctr.toFixed(2)}%, ${impressions.toLocaleString()} impressions. Escalates to creative test before AI brain is called.`;
+      decisionPath = 'lastCopyChangeAt_safety_net';
+    } else if (monitoringSignalWouldFire) {
+      projectedActionType = 'generate_single_creative_variant';
+      projectedReason = `Monitoring signal escalation: monitoringDecision="${monitoringDecision}", CTR=${ctr.toFixed(2)}%. Escalates to creative test before AI brain is called.`;
+      decisionPath = 'monitoring_signal_escalation';
+    } else {
+      projectedActionType = 'ai_brain_decides';
+      projectedReason = 'No rule-based escalation fires. AI brain (gpt-4.1-mini) will be called. It may return update_primary_text, generate_single_creative_variant, or continue_monitoring.';
+      decisionPath = 'ai_brain';
+    }
+
+    // ── Block reasons ─────────────────────────────────────────────
+    const blockedReasons = [];
+    if (isPaused) blockedReasons.push({ code: 'campaign_paused', detail: `currentStatus="${currentStatus}" — post-sync guard skips entire optimizer cycle.` });
+    if (isBillingBlocked) blockedReasons.push({ code: 'billing_blocked', detail: 'billingBlocked=true — optimizer will not run.' });
+    if (!optimizationEnabled) blockedReasons.push({ code: 'optimization_disabled', detail: 'optimizationEnabled=false.' });
+    if (guardResult.skip) blockedReasons.push({ code: `pre_sync_guard_${guardResult.reason}`, detail: `Pre-sync guard: ${guardResult.reason}` });
+    if (!safetyNetCheck.hasLastCopyChange) blockedReasons.push({ code: 'no_copy_change_timestamp', detail: 'lastCopyChangeAt and lastManualCopyEditAt are both empty. Safety-net cannot detect the copy change. Set lastManualCopyEditAt by doing a manual copy edit via Smartemark.' });
+    if (safetyNetCheck.hasLastCopyChange && !safetyNetCheck.isNoOpAction) blockedReasons.push({ code: 'latest_action_not_noop', detail: `latestAction.actionType="${latestActionType}" — safety-net only fires when latestAction is a monitoring no-op. Use monitoring-signal path instead.` });
+    if (safetyNetCheck.hasLastCopyChange && !safetyNetCheck.meetsHoursMin) blockedReasons.push({ code: 'too_soon_after_change', detail: `Only ${safetyNetCheck.hoursSinceChange}h since copy change — need ≥4h.` });
+    if (!safetyNetCheck.meetsImpressions) blockedReasons.push({ code: 'impressions_below_2000', detail: `${impressions} impressions < 2000 threshold.` });
+    if (!safetyNetCheck.meetsCtr) blockedReasons.push({ code: 'ctr_not_weak', detail: `CTR ${ctr.toFixed(2)}% ≥ 0.8% — not weak enough to escalate.` });
+    if (!safetyNetCheck.meetsSpend) blockedReasons.push({ code: 'spend_below_5', detail: `$${spend.toFixed(2)} spend < $5 minimum.` });
+    if (!standardGatePassed) blockedReasons.push({ code: 'standard_gate_not_passed', detail: `Need ≥1500 impressions (bypass) or ≥500 impressions + $5 spend. Have ${impressions} impressions, $${spend.toFixed(2)} spend.` });
+    if (cooldownActive) blockedReasons.push({ code: 'test_cooldown_active', detail: `Creative test was resolved within the last ${COOLDOWN_DAYS} days — cooldown is active.` });
+
+    // ── Action type availability ──────────────────────────────────
+    const availableActionTypes = [
+      { actionType: 'generate_single_creative_variant', implementation: 'full', status: isPaused ? 'blocked_paused' : 'available', description: 'Generate fresh AI creative and stage it. Calls /api/generate-static-ad internally.' },
+      { actionType: 'generate_two_creative_variants', implementation: 'full', status: isPaused ? 'blocked_paused' : 'available', description: 'Generate two variants for A/B. Same path, just count=2.' },
+      { actionType: 'promote_generated_creative_variants', implementation: 'full', status: isPaused ? 'blocked_paused' : (state.pendingCreativeTest?.status === 'ready' ? 'ready' : 'needs_prior_generation'), description: 'Promote staged variants into live Meta challenger ads.' },
+      { actionType: 'update_primary_text', implementation: 'full', status: isPaused ? 'blocked_paused' : 'available', description: 'AI rewrite of primary text. NOTE: copy was recently changed — repeat rewrite not recommended.' },
+      { actionType: 'pause_losing_creative_variant', implementation: 'full', status: state.pendingCreativeTest?.status === 'live' ? 'available' : 'no_live_test', description: 'Resolve a live A/B creative test by pausing the loser.' },
+      { actionType: 'unpause_campaign', implementation: 'full', status: isPaused ? 'available' : 'not_needed', description: 'Unpause the campaign via Meta API.' },
+      { actionType: 'continue_monitoring', implementation: 'full', status: 'always_available', description: 'No-op monitoring cycle. No Meta API call. Active when no escalation fires.' },
+    ];
+
+    // ── Sanitized history ─────────────────────────────────────────
+    const last10History = (Array.isArray(state.aiHistory) ? state.aiHistory : [])
+      .slice()
+      .sort((a, b) => (b.timestamp ? new Date(b.timestamp).getTime() : 0) - (a.timestamp ? new Date(a.timestamp).getTime() : 0))
+      .slice(0, 10)
+      .map((e) => ({
+        type: e.type,
+        title: e.title,
+        reason: (e.reason || '').slice(0, 300),
+        actionType: e.actionType || null,
+        timestamp: e.timestamp,
+        dryRun: !!e.dryRun,
+        skipped: !!e.skipped,
+      }));
+
+    // ── AI brain sanitized input (no tokens/secrets) ──────────────
+    const aiBrainInput = {
+      campaignId: normalizedCampaignId,
+      campaignName: String(state.campaignName || '').trim(),
+      niche: String(state.niche || '').trim(),
+      currentStatus,
+      metricsSnapshot: { impressions, clicks, ctr, spend, cpc, frequency, linkClicks, effectiveClicks, lastSyncedAt: metrics.lastSyncedAt || null },
+      latestDiagnosis: state.latestDiagnosis ? { diagnosis: state.latestDiagnosis.diagnosis, likelyProblem: state.latestDiagnosis.likelyProblem, recommendedAction: state.latestDiagnosis.recommendedAction, reason: (state.latestDiagnosis.reason || '').slice(0, 400), generatedAt: state.latestDiagnosis.generatedAt, mode: state.latestDiagnosis.mode } : null,
+      latestMonitoringDecision: state.latestMonitoringDecision ? { monitoringDecision, status: state.latestMonitoringDecision.status, reason: (state.latestMonitoringDecision.reason || '').slice(0, 400), nextRecommendedStep: state.latestMonitoringDecision.nextRecommendedStep, generatedAt: state.latestMonitoringDecision.generatedAt } : null,
+      latestAction: latestAction ? { actionType: latestActionType, status: latestAction.status, executed: latestAction.executed, dryRun: !!latestAction.dryRun, generatedAt: latestAction.generatedAt, mode: latestAction.mode } : null,
+      lastCopyChangeAt: lastCopyChangeAt || null,
+      lastManualCopyEditAt: lastManualCopyEditAt || null,
+      conversionTrackingConfirmed: !!state.conversionTrackingConfirmed,
+      allowedActionTypes: ['continue_monitoring', 'update_primary_text', 'generate_single_creative_variant', 'generate_two_creative_variants', 'unpause_campaign', 'check_delivery_status'],
+    };
+
+    return res.json({
+      ok: true,
+      _generatedAt: new Date().toISOString(),
+      _note: 'Read-only debug snapshot. No actions executed. No tokens included.',
+
+      // ── SUMMARY ───────────────────────────────────────────────
+      summary: {
+        currentStatus,
+        isPaused,
+        optimizerCycleWouldRun: !guardResult.skip && !isPaused && optimizationEnabled,
+        anyEscalationFires,
+        projectedActionType,
+        projectedReason,
+        decisionPath,
+        recommendation: isPaused
+          ? `Campaign is PAUSED. Unpause in Facebook Ads Manager, then the next optimizer cycle will fire the escalation → generate_single_creative_variant (conditions: hoursSince=${safetyNetCheck.hoursSinceChange}h, impressions=${impressions}, CTR=${ctr.toFixed(2)}%).`
+          : anyEscalationFires
+          ? `On the next scheduled cycle, AI should fire: ${projectedActionType}. If it keeps monitoring, check blockedReasons.`
+          : `No escalation fires. Check blockedReasons. AI brain (gpt-4.1-mini) will decide.`,
+      },
+
+      // ── CAMPAIGN STATE ────────────────────────────────────────
+      campaignState: {
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        ownerKey: String(state.ownerKey || '').replace(/(?<=^user:).+/, '[redacted]'),
+        currentStatus,
+        optimizationEnabled,
+        smArchived: !!state.smArchived,
+        billingBlocked: isBillingBlocked,
+        conversionTrackingConfirmed: !!state.conversionTrackingConfirmed,
+      },
+
+      // ── GUARD ─────────────────────────────────────────────────
+      guardCheck: {
+        preSync: { skip: guardResult.skip, reason: guardResult.reason || null },
+        postSync: { wouldSkipForPaused: isPaused },
+      },
+
+      // ── METRICS ──────────────────────────────────────────────
+      metricsSnapshot: { impressions, clicks, ctr: Number(ctr.toFixed(4)), spend: Number(spend.toFixed(2)), cpc: Number(cpc.toFixed(4)), frequency: Number(frequency.toFixed(3)), linkClicks, effectiveClicks, lastSyncedAt: metrics.lastSyncedAt || null },
+
+      // ── COPY CHANGE TRACKING ──────────────────────────────────
+      copyChangeTracking: {
+        lastCopyChangeAt: lastCopyChangeAt || null,
+        lastManualCopyEditAt: lastManualCopyEditAt || null,
+        hoursSinceChange: hoursSinceChange !== null ? Math.round(hoursSinceChange * 10) / 10 : null,
+        currentPrimaryText: String(state.currentPrimaryText || '').trim() || null,
+        currentHeadline: String(state.currentHeadline || '').trim() || null,
+        originalPrimaryText: String(state.businessBrief?.originalPrimaryText || state.businessBrief?.originalBody || '').trim().slice(0, 200) || null,
+      },
+
+      // ── ESCALATION GATES ──────────────────────────────────────
+      escalationGates: {
+        safetyNet: { ...safetyNetCheck, wouldFire: safetyNetWouldFire, actionIfFired: 'generate_single_creative_variant', firesBefore: 'AI brain call' },
+        monitoringSignal: { monitoringDecision: monitoringDecision || '(none)', ctrBelowThreshold: ctr < 1.0, standardGatePassed, cooldownActive, wouldFire: monitoringSignalWouldFire, actionIfFired: 'generate_single_creative_variant', firesBefore: 'AI brain call' },
+      },
+
+      // ── BLOCK REASONS ─────────────────────────────────────────
+      blockedReasons: blockedReasons.length ? blockedReasons : [{ code: 'none', detail: 'No blocks detected — escalation should fire.' }],
+
+      // ── AVAILABLE ACTIONS ─────────────────────────────────────
+      availableActionTypes,
+
+      // ── LATEST OPTIMIZER STATE ────────────────────────────────
+      latestDiagnosis: state.latestDiagnosis ? { diagnosis: state.latestDiagnosis.diagnosis, recommendedAction: state.latestDiagnosis.recommendedAction, reason: (state.latestDiagnosis.reason || '').slice(0, 400), generatedAt: state.latestDiagnosis.generatedAt, mode: state.latestDiagnosis.mode } : null,
+      latestDecision: state.latestDecision ? { decision: state.latestDecision.decision, actionType: state.latestDecision.actionType, reason: (state.latestDecision.reason || '').slice(0, 400), generatedAt: state.latestDecision.generatedAt, mode: state.latestDecision.mode } : null,
+      latestMonitoringDecision: state.latestMonitoringDecision ? { monitoringDecision, status: state.latestMonitoringDecision.status, reason: (state.latestMonitoringDecision.reason || '').slice(0, 400), nextRecommendedStep: state.latestMonitoringDecision.nextRecommendedStep, generatedAt: state.latestMonitoringDecision.generatedAt, mode: state.latestMonitoringDecision.mode } : null,
+      latestAction: latestAction ? { actionType: latestActionType, status: latestAction.status, executed: !!latestAction.executed, dryRun: !!latestAction.dryRun, generatedAt: latestAction.generatedAt, mode: latestAction.mode, isNoOp: isNoOpAction } : null,
+      pendingCreativeTest: state.pendingCreativeTest ? { status: state.pendingCreativeTest.status, controlAdCount: (state.pendingCreativeTest.controlAdIds || []).length, candidateAdCount: (state.pendingCreativeTest.candidateAdIds || []).length, startedAt: state.pendingCreativeTest.startedAt, launchedVariantCount: state.pendingCreativeTest.launchedVariantCount || 0 } : null,
+
+      // ── AI BRAIN DRY-RUN CONTEXT (no secrets) ─────────────────
+      aiBrainDryRun: {
+        note: 'AI brain NOT called. This shows what would be sent to gpt-4.1-mini if no escalation fired.',
+        wouldCallAiBrain: !isPaused && !anyEscalationFires,
+        sanitizedInput: aiBrainInput,
+        keyRulesApplied: [
+          'CTR < 0.8% with 500+ impressions + 48h → update_primary_text',
+          'latestAction is update_primary_text or manual_copy_edit → next for weak CTR is generate_single_creative_variant',
+          'lastCopyChangeAt > 6h ago + CTR < 0.8% + 1000+ impressions → generate_single_creative_variant (not another copy rewrite)',
+          '5000+ impressions + CTR < 0.8% + no change in 12h → generate_single_creative_variant',
+        ],
+      },
+
+      // ── AI HISTORY ───────────────────────────────────────────
+      aiHistory: { totalEntries: Array.isArray(state.aiHistory) ? state.aiHistory.length : 0, last10: last10History },
+    });
+
+  } catch (err) {
+    console.error('[optimizer-debug] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Debug route failed.' });
+  }
+});
+
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const { accountId } = req.params;
 

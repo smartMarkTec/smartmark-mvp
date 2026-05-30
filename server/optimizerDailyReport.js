@@ -37,8 +37,11 @@ function buildDailyReport(optimizerState) {
   } else if (impressions === 0) {
     observation = 'No delivery data yet — still gathering early signals.';
   } else if (ctr > 0 && ctr < 0.8) {
-    observation =
-      'CTR is on the lower side — Smartemark is monitoring whether the primary hook needs to be refreshed once more data comes in.';
+    const _lastChange = String(optimizerState?.lastCopyChangeAt || optimizerState?.lastManualCopyEditAt || '').trim();
+    const _hoursSince = _lastChange ? Math.max(0, (Date.now() - new Date(_lastChange).getTime()) / 3600000) : null;
+    observation = (_hoursSince !== null && _hoursSince < 168)
+      ? 'CTR remains below target after the recent copy update — Smartemark is evaluating whether a fresh creative angle is the next strategic test.'
+      : 'CTR is on the lower side — Smartemark is monitoring whether the primary hook needs to be refreshed once more data comes in.';
   } else if (ctr >= 0.8 && ctr < 1.5) {
     observation = 'CTR is building toward a solid range. Delivery and early engagement look acceptable at this stage.';
   } else if (ctr >= 1.5) {

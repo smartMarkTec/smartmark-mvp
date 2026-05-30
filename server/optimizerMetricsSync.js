@@ -168,9 +168,26 @@ async function syncCampaignMetricsToOptimizerState({
     metricsSnapshot: snapshot,
   };
 
-  // Always sync the live Meta campaign status so the guard can detect paused campaigns.
+  // Sync live campaign status from Meta.
+  // If the status fetch failed (liveStatus === null) but the fresh insights snapshot
+  // shows real delivery (spend or impressions), the campaign must be active — don't
+  // leave it stuck as PAUSED in the DB from a previous failed status check.
   if (liveStatus) {
     patch.currentStatus = liveStatus;
+  } else if (!liveStatus) {
+    const existingStatus = String(existing.currentStatus || '').trim().toUpperCase();
+    const hasDelivery = Number(snapshot.spend || 0) > 0 || Number(snapshot.impressions || 0) > 0;
+    if (existingStatus === 'PAUSED' && hasDelivery) {
+      // Delivery is happening → campaign can't actually be PAUSED; status fetch likely failed.
+      // Reset to ACTIVE so the cycle isn't incorrectly skipped.
+      patch.currentStatus = 'ACTIVE';
+      console.warn('[metricsSync] status fetch returned null but delivery data exists — resetting currentStatus to ACTIVE', {
+        campaignId: String(campaignId).trim(),
+        existingStatus,
+        spend: snapshot.spend,
+        impressions: snapshot.impressions,
+      });
+    }
   }
 
   if (!existing.accountId && accountId) {
