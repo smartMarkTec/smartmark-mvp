@@ -4,26 +4,18 @@ import smartmarkLogo from "../assets/smartemark-logo.png";
 import { trackEvent } from "../analytics/gaEvents";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG = "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
-const TEXT = "#101426";
-const TEXT_SOFT = "#66708b";
+const BG = "linear-gradient(160deg, #f5f6ff 0%, #f8f9fc 55%, #f0f2ff 100%)";
+const TEXT = "#111827";
+const TEXT_SOFT = "#6b7280";
 const PURPLE = "#5d59ea";
-const BLUE = "#4c63ff";
-const BLUE_HOVER = "#4058f4";
-const BORDER = "rgba(93, 89, 234, 0.13)";
-const PANEL = "rgba(255,255,255,0.80)";
-const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.12)";
-const SOFT_SHADOW = "0 10px 28px rgba(83, 77, 212, 0.08)";
 
 const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
-
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 750);
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
   return isMobile;
 };
 
@@ -32,46 +24,46 @@ const plans = [
     name: "Base",
     planKey: "base",
     price: "$249",
-    subtitle:
-      "A simple, powerful way to launch and manage ads with real AI help.",
-    badge: "Base",
-    accentGlow: "rgba(76,99,255,0.16)",
-    cta: "Get Started",
+    cardTitle: "AI Campaign Manager",
+    description:
+      "For business owners who want to use Smartemark themselves to create, launch, and monitor Facebook/Instagram ads.",
+    badge: null,
+    featured: false,
+    isDark: false,
+    cta: "Get Base",
     features: [
-      "Up to 3 active campaigns",
-      "1 business",
-      "1 connected ad account",
-      "AI-generated ad copy",
-      "AI-generated creatives",
-      "Fast campaign launch",
-      "AI campaign monitoring",
-      "AI strategizing",
-      "Core AI optimization",
-      "Basic A/B testing",
-      "Standard support",
+      "AI creates ads",
+      "AI writes headlines/captions",
+      "AI launches campaigns",
+      "AI monitors campaigns",
+      "Basic AI optimization",
+      "10 ad regenerations/day",
+      "Upload custom photos/creatives",
+      "Campaign dashboard",
+      "Basic support",
     ],
   },
   {
     name: "Deluxe",
     planKey: "deluxe",
     price: "$495",
-    subtitle:
-      "For businesses that want stronger strategy, more testing, and more active optimization.",
+    cardTitle: "AI Campaign Manager + AI Assistant",
+    description:
+      "For business owners who want the Smartemark platform plus guided AI help with marketing decisions, offers, services, and campaign ideas.",
     badge: "Most Popular",
-    accentGlow: "rgba(123,114,255,0.18)",
     featured: true,
-    cta: "Choose Deluxe",
+    isDark: false,
+    cta: "Get Deluxe",
     features: [
       "Everything in Base",
-      "Up to 6 active campaigns",
-      "2 businesses",
-      "2 connected ad accounts",
-      "More creative variations per campaign",
-      "Enhanced A/B testing",
-      "Advanced AI strategizing",
-      "Deeper campaign research",
-      "Stronger AI optimization",
-      "Automatic creative refresh when needed",
+      "AI Marketing Assistant",
+      "Ask campaign/marketing questions",
+      "AI suggestions for ad angles",
+      "AI help choosing services/specials to promote",
+      "AI help deciding between marketing ideas",
+      "20 ad regenerations/day",
+      "AI Assistant usage refreshes throughout the day",
+      "Advanced dashboard",
       "Priority support",
     ],
   },
@@ -79,24 +71,54 @@ const plans = [
     name: "Premium",
     planKey: "premium",
     price: "$749",
-    subtitle:
-      "For businesses that want the deepest Smartemark automation layer and strongest in-product system.",
-    badge: "Premium",
-    accentGlow: "rgba(93,89,234,0.14)",
-    cta: "Choose Premium",
+    cardTitle: "Done-For-You AI Ad Management",
+    description:
+      "For business owners who want our team to manage the campaign for them through Smartemark.",
+    badge: "Done For You",
+    featured: false,
+    isDark: true,
+    cta: "Get Premium",
     features: [
       "Everything in Deluxe",
-      "Up to 10 active campaigns",
-      "3 businesses",
-      "3 connected ad accounts",
-      "Highest level of creative enhancement",
-      "Advanced A/B testing",
-      "Deepest campaign research",
-      "Operator-grade AI strategizing",
-      "Operator-grade AI optimization",
-      "More frequent creative refreshes",
-      "Highest priority support",
+      "We create campaigns for you",
+      "We launch campaigns through Smartemark",
+      "We monitor campaign performance",
+      "We make campaign adjustments",
+      "Ad variations handled by our team as needed",
+      "Creative/photo assets handled by our team as needed",
+      "Meta Pixel setup",
+      "Google Analytics setup/review",
+      "Call tracking setup",
+      "Conversion tracking setup",
+      "Monthly performance review",
     ],
+  },
+];
+
+const faqs = [
+  {
+    q: "Is Facebook ad spend included?",
+    a: "No. Facebook/Instagram ad spend is separate. Smartemark is the platform and service fee. Most businesses start with around $150–$300/month in ad spend, depending on how aggressive they want to be.",
+  },
+  {
+    q: "Do you guarantee calls?",
+    a: "No marketing platform can guarantee exact call volume because results depend on the market, offer, budget, service area, and competition. Smartemark helps create, launch, monitor, and improve campaigns so the business has a stronger chance of getting results.",
+  },
+  {
+    q: "What does Premium include?",
+    a: "Premium is our done-for-you option. We help create, launch, monitor, and adjust campaigns through Smartemark. It can also include Meta Pixel setup, Google Analytics setup/review, call tracking setup, conversion tracking setup, and a monthly performance review.",
+  },
+  {
+    q: "Do I need to know Facebook ads?",
+    a: "No. Base lets you use the Smartemark AI platform yourself. Deluxe gives you extra AI guidance. Premium is best if you want us to handle most of the campaign work for you.",
+  },
+  {
+    q: "Can I cancel?",
+    a: "Yes. Smartemark is month-to-month with no long-term contract.",
+  },
+  {
+    q: "What happens after I sign up?",
+    a: "After signing up, you will create your account, connect the needed campaign information, and start setting up your first campaign. Premium customers may be guided through additional onboarding so we can collect the information needed to manage the campaign properly.",
   },
 ];
 
@@ -104,21 +126,13 @@ const Pricing = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [loadingPlan, setLoadingPlan] = useState("");
+  const [openFaq, setOpenFaq] = useState(null);
 
   useEffect(() => {
     try {
       trackEvent("view_pricing", { page: "pricing" });
     } catch {}
   }, []);
-
-  const glass = {
-    background:
-      "linear-gradient(180deg, rgba(255,255,255,0.84), rgba(255,255,255,0.74))",
-    border: `1px solid ${BORDER}`,
-    boxShadow: SHADOW,
-    backdropFilter: "blur(10px)",
-    WebkitBackdropFilter: "blur(10px)",
-  };
 
   const startCheckout = async (plan) => {
     if (!plan?.planKey) return;
@@ -165,8 +179,6 @@ const Pricing = () => {
         background: BG,
         color: TEXT,
         fontFamily: FONT,
-        position: "relative",
-        overflowX: "clip",
       }}
     >
       <style>{`
@@ -174,78 +186,57 @@ const Pricing = () => {
           margin: 0;
           padding: 0;
         }
-
         body {
           overscroll-behavior-y: auto;
         }
-
         * {
           box-sizing: border-box;
         }
+        .sm-faq-row {
+          border-bottom: 1px solid rgba(0,0,0,0.08);
+        }
+        .sm-faq-row:first-child {
+          border-top: 1px solid rgba(0,0,0,0.08);
+        }
+        .sm-faq-btn:hover .sm-faq-icon {
+          background: rgba(0,0,0,0.10) !important;
+        }
+        .sm-plan-btn:hover {
+          opacity: 0.88 !important;
+        }
       `}</style>
 
+      {/* Soft background blobs */}
       <div
         aria-hidden
         style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: `
-            linear-gradient(rgba(93, 89, 234, 0.045) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(93, 89, 234, 0.045) 1px, transparent 1px)
-          `,
-          backgroundSize: isMobile ? "36px 36px" : "52px 52px",
-          maskImage:
-            "linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.10))",
-          WebkitMaskImage:
-            "linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.10))",
+          position: "fixed",
+          top: "8%",
+          right: "-6%",
+          width: 480,
+          height: 480,
+          borderRadius: "50%",
+          background:
+            "radial-gradient(circle, rgba(93,89,234,0.07) 0%, transparent 70%)",
+          filter: "blur(48px)",
           pointerEvents: "none",
+          zIndex: 0,
         }}
       />
-
       <div
         aria-hidden
         style={{
-          position: "absolute",
-          top: "-16vh",
-          right: "-8vw",
-          width: isMobile ? 260 : 520,
-          height: isMobile ? 260 : 520,
+          position: "fixed",
+          bottom: "4%",
+          left: "-6%",
+          width: 560,
+          height: 560,
+          borderRadius: "50%",
           background:
-            "radial-gradient(40% 40% at 50% 50%, rgba(123,114,255,0.20), transparent 72%)",
-          filter: "blur(30px)",
+            "radial-gradient(circle, rgba(93,89,234,0.05) 0%, transparent 70%)",
+          filter: "blur(48px)",
           pointerEvents: "none",
-        }}
-      />
-
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          bottom: "-18vh",
-          left: "-10vw",
-          width: isMobile ? 320 : 620,
-          height: isMobile ? 320 : 620,
-          background:
-            "radial-gradient(40% 40% at 50% 50%, rgba(76,99,255,0.16), transparent 72%)",
-          filter: "blur(32px)",
-          pointerEvents: "none",
-        }}
-      />
-
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: "18%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: isMobile ? "88%" : "76%",
-          height: isMobile ? 180 : 240,
-          borderRadius: 999,
-          background:
-            "linear-gradient(90deg, rgba(76,99,255,0.06), rgba(123,114,255,0.10), rgba(76,99,255,0.04))",
-          filter: "blur(38px)",
-          pointerEvents: "none",
+          zIndex: 0,
         }}
       />
 
@@ -253,30 +244,31 @@ const Pricing = () => {
         style={{
           position: "relative",
           zIndex: 2,
-          maxWidth: 1220,
+          maxWidth: 1180,
           margin: "0 auto",
-          padding: isMobile ? "22px 16px 70px" : "28px 28px 100px",
+          padding: isMobile ? "20px 16px 80px" : "28px 32px 100px",
         }}
       >
+        {/* ── Nav ── */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: isMobile ? "flex-start" : "center",
-            flexDirection: isMobile ? "column" : "row",
-            gap: isMobile ? 14 : 18,
-            marginBottom: isMobile ? 34 : 56,
+            alignItems: "center",
+            marginBottom: isMobile ? 40 : 64,
           }}
         >
           <button
             onClick={() => navigate("/")}
             style={{
-              ...glass,
               display: "flex",
               alignItems: "center",
               gap: 10,
-              padding: "0.75rem 1rem",
-              borderRadius: 999,
+              padding: "8px 14px",
+              borderRadius: 10,
+              background: "white",
+              border: "1px solid rgba(0,0,0,0.09)",
+              boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
               color: TEXT,
               cursor: "pointer",
             }}
@@ -287,8 +279,7 @@ const Pricing = () => {
               style={{
                 width: 24,
                 height: 24,
-                borderRadius: 8,
-                opacity: 0.95,
+                borderRadius: 6,
                 flexShrink: 0,
                 backgroundImage: `url(${smartmarkLogo})`,
                 backgroundSize: "256%",
@@ -296,61 +287,45 @@ const Pricing = () => {
                 backgroundRepeat: "no-repeat",
               }}
             />
-            <span style={{ fontWeight: 800, fontSize: 14 }}>Smartemark</span>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>Smartemark</span>
           </button>
 
           <button
             onClick={() => navigate("/login")}
             style={{
-              padding: isMobile ? "0.8rem 1.3rem" : "0.9rem 1.7rem",
-              fontSize: 15,
+              padding: isMobile ? "8px 16px" : "9px 20px",
+              fontSize: 14,
               color: "#fff",
-              background: BLUE,
+              background: "#111827",
               border: "none",
-              borderRadius: 999,
-              fontWeight: 800,
-              boxShadow: "0 10px 26px rgba(76,99,255,0.24)",
+              borderRadius: 8,
+              fontWeight: 600,
               cursor: "pointer",
-              transition:
-                "transform .15s ease, background .2s ease, box-shadow .2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = BLUE_HOVER;
-              e.currentTarget.style.transform = "translateY(-2px)";
-              e.currentTarget.style.boxShadow =
-                "0 14px 36px rgba(76,99,255,0.32)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = BLUE;
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow =
-                "0 10px 26px rgba(76,99,255,0.24)";
             }}
           >
             Login
           </button>
         </div>
 
+        {/* ── Hero ── */}
         <div
           style={{
             textAlign: "center",
-            marginBottom: isMobile ? 28 : 42,
+            marginBottom: isMobile ? 40 : 64,
           }}
         >
           <div
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "0.5rem 0.9rem",
+              display: "inline-block",
+              padding: "5px 14px",
               borderRadius: 999,
               fontSize: 12,
-              fontWeight: 900,
-              letterSpacing: 0.4,
+              fontWeight: 700,
+              letterSpacing: 0.5,
               color: PURPLE,
-              background: "rgba(255,255,255,0.62)",
-              border: `1px solid ${BORDER}`,
-              marginBottom: 18,
+              background: "rgba(93,89,234,0.08)",
+              border: "1px solid rgba(93,89,234,0.15)",
+              marginBottom: 22,
             }}
           >
             Smartemark Pricing
@@ -358,224 +333,301 @@ const Pricing = () => {
 
           <h1
             style={{
-              margin: 0,
-              fontSize: isMobile ? "2.35rem" : "3.55rem",
-              lineHeight: 1.04,
-              fontWeight: 900,
-              letterSpacing: isMobile ? "-0.7px" : "-1.1px",
+              margin: "0 auto",
+              maxWidth: 700,
+              fontSize: isMobile ? "1.95rem" : "2.9rem",
+              lineHeight: 1.13,
+              fontWeight: 800,
+              letterSpacing: isMobile ? "-0.4px" : "-0.8px",
               color: TEXT,
             }}
           >
-            Choose your plan
+            Choose how much help you want with your HVAC ads.
           </h1>
+
+          <p
+            style={{
+              maxWidth: 580,
+              margin: "18px auto 0",
+              color: TEXT_SOFT,
+              fontSize: isMobile ? 15 : 17,
+              lineHeight: 1.65,
+              fontWeight: 400,
+            }}
+          >
+            Use Smartemark yourself, get guided support, or have us manage your
+            ads for you.
+          </p>
 
           <div
             style={{
-              maxWidth: 760,
-              margin: "14px auto 0",
-              color: TEXT_SOFT,
-              fontSize: isMobile ? 15 : 17,
-              lineHeight: 1.7,
-              fontWeight: 500,
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: 10,
+              marginTop: 24,
             }}
           >
-            Simple pricing for businesses that want AI-powered campaign launch
-            and management without agency friction.
+            {[
+              "Ad budget is separate · Most businesses start around $150–$300/month",
+              "Month-to-month · No long-term contract",
+            ].map((note) => (
+              <span
+                key={note}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "6px 14px",
+                  borderRadius: 999,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: TEXT_SOFT,
+                  background: "white",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                }}
+              >
+                <span
+                  style={{ color: "#10b981", fontSize: 8, lineHeight: 1 }}
+                >
+                  ●
+                </span>
+                {note}
+              </span>
+            ))}
           </div>
         </div>
 
+        {/* ── Pricing cards ── */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
-            gap: isMobile ? 18 : 24,
+            gap: isMobile ? 16 : 24,
             alignItems: "stretch",
-            marginTop: isMobile ? 16 : 24,
           }}
         >
           {plans.map((plan) => {
             const isLoading = loadingPlan === plan.planKey;
+            const dark = plan.isDark;
+            const cardText = dark ? "#f1f5f9" : TEXT;
+            const cardTextSoft = dark ? "rgba(241,245,249,0.58)" : TEXT_SOFT;
 
             return (
               <div
-                key={plan.name}
+                key={plan.planKey}
                 style={{
-                  ...glass,
                   position: "relative",
-                  borderRadius: 24,
-                  padding: isMobile ? "1.2rem" : "1.45rem",
-                  overflow: "hidden",
-                  minHeight: "auto",
-                  boxShadow: plan.featured
-                    ? "0 18px 50px rgba(123,114,255,0.14)"
-                    : SOFT_SHADOW,
-                  border: plan.featured
-                    ? "1px solid rgba(123,114,255,0.24)"
-                    : `1px solid ${BORDER}`,
+                  borderRadius: 20,
+                  padding: isMobile ? "28px 22px 32px" : "36px 32px 40px",
+                  background: dark ? "#0f172a" : "white",
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.06)"
+                    : plan.featured
+                    ? "2px solid rgba(93,89,234,0.32)"
+                    : "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: dark
+                    ? "0 12px 56px rgba(0,0,0,0.26)"
+                    : plan.featured
+                    ? "0 8px 44px rgba(93,89,234,0.12)"
+                    : "0 2px 18px rgba(0,0,0,0.06)",
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
-                <div
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    top: -40,
-                    right: -30,
-                    width: 160,
-                    height: 160,
-                    borderRadius: "50%",
-                    background: `radial-gradient(circle, ${plan.accentGlow}, transparent 68%)`,
-                    pointerEvents: "none",
-                  }}
-                />
+                {/* Badge row — always reserves space to align cards */}
+                <div style={{ marginBottom: 20, minHeight: 26 }}>
+                  {plan.badge && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "4px 12px",
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        ...(plan.featured
+                          ? {
+                              background: "rgba(93,89,234,0.10)",
+                              color: PURPLE,
+                              border: "1px solid rgba(93,89,234,0.18)",
+                            }
+                          : {
+                              background: "rgba(234,179,8,0.12)",
+                              color: "#d97706",
+                              border: "1px solid rgba(217,119,6,0.18)",
+                            }),
+                      }}
+                    >
+                      {plan.badge}
+                    </span>
+                  )}
+                </div>
 
+                {/* Plan name */}
                 <div
                   style={{
-                    display: "inline-flex",
-                    padding: "0.45rem 0.8rem",
-                    borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.4,
-                    color: plan.featured ? "#fff" : PURPLE,
-                    background: plan.featured
-                      ? "linear-gradient(90deg, #5f56eb, #786dff)"
-                      : "rgba(93,89,234,0.08)",
-                    border: `1px solid ${BORDER}`,
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: cardText,
+                    letterSpacing: "-0.3px",
+                    marginBottom: 4,
                   }}
                 >
-                  {plan.badge}
+                  {plan.name}
                 </div>
 
-                <div style={{ marginTop: 18 }}>
-                  <div
+                {/* Card title */}
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: cardTextSoft,
+                    marginBottom: 20,
+                  }}
+                >
+                  {plan.cardTitle}
+                </div>
+
+                {/* Price */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: 4,
+                    marginBottom: 16,
+                  }}
+                >
+                  <span
                     style={{
-                      fontSize: 28,
-                      fontWeight: 900,
-                      color: TEXT,
-                      letterSpacing: "-0.6px",
+                      fontSize: isMobile ? 46 : 52,
+                      lineHeight: 1,
+                      fontWeight: 800,
+                      color: cardText,
+                      letterSpacing: "-2px",
                     }}
                   >
-                    {plan.name}
-                  </div>
-
-                  <div
+                    {plan.price}
+                  </span>
+                  <span
                     style={{
-                      marginTop: 12,
-                      display: "flex",
-                      alignItems: "flex-end",
-                      gap: 6,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: isMobile ? 40 : 46,
-                        lineHeight: 1,
-                        fontWeight: 900,
-                        color: TEXT,
-                        letterSpacing: "-1px",
-                      }}
-                    >
-                      {plan.price}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 15,
-                        color: TEXT_SOFT,
-                        fontWeight: 700,
-                        paddingBottom: 7,
-                      }}
-                    >
-                      / month
-                    </span>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 14,
-                      color: TEXT_SOFT,
                       fontSize: 15,
-                      lineHeight: 1.65,
+                      color: cardTextSoft,
                       fontWeight: 500,
-                      minHeight: isMobile ? "auto" : 72,
+                      paddingBottom: 8,
                     }}
                   >
-                    {plan.subtitle}
-                  </div>
+                    /mo
+                  </span>
                 </div>
 
+                {/* Description */}
+                <p
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.65,
+                    color: cardTextSoft,
+                    margin: "0 0 26px",
+                    fontWeight: 400,
+                    minHeight: isMobile ? "auto" : 64,
+                  }}
+                >
+                  {plan.description}
+                </p>
+
+                {/* CTA button */}
                 <button
                   type="button"
+                  className="sm-plan-btn"
                   onClick={() => startCheckout(plan)}
                   disabled={!!loadingPlan}
                   style={{
                     width: "100%",
-                    marginTop: 24,
-                    padding: "0.95rem 1.1rem",
-                    borderRadius: 999,
-                    border: "none",
-                    background: "#4c63ff",
-                    color: "#ffffff",
+                    padding: "13px 16px",
+                    borderRadius: 10,
+                    border: dark
+                      ? "none"
+                      : "1.5px solid rgba(0,0,0,0.16)",
+                    background: dark ? "white" : "#111827",
+                    color: dark ? "#111827" : "white",
                     fontSize: 15,
-                    fontWeight: 900,
+                    fontWeight: 700,
                     cursor: loadingPlan ? "not-allowed" : "pointer",
-                    opacity: loadingPlan && !isLoading ? 0.75 : 1,
-                    boxShadow: "0 12px 28px rgba(76,99,255,0.22)",
+                    opacity: loadingPlan && !isLoading ? 0.6 : 1,
+                    transition: "opacity 0.15s",
+                    marginBottom: 28,
                   }}
                 >
-                  {isLoading ? "Continuing..." : plan.cta}
+                  {isLoading ? "Continuing…" : plan.cta}
                 </button>
 
+                {/* Divider */}
                 <div
                   style={{
-                    marginTop: 24,
-                    borderTop: "1px solid rgba(16,20,38,0.08)",
-                    paddingTop: 18,
+                    borderTop: dark
+                      ? "1px solid rgba(255,255,255,0.09)"
+                      : "1px solid rgba(0,0,0,0.07)",
+                    marginBottom: 20,
                   }}
-                >
+                />
+
+                {/* Features */}
+                <div style={{ flex: 1 }}>
                   <div
                     style={{
-                      marginBottom: 12,
-                      color: TEXT,
-                      fontWeight: 800,
-                      fontSize: 14,
-                      letterSpacing: 0.2,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: cardTextSoft,
+                      letterSpacing: 0.6,
+                      textTransform: "uppercase",
+                      marginBottom: 14,
                     }}
                   >
-                    Included in this plan
+                    What's included
                   </div>
 
-                  <div style={{ display: "grid", gap: 12 }}>
-                    {plan.features.map((feature) => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                    {plan.features.map((feat) => (
                       <div
-                        key={feature}
+                        key={feat}
                         style={{
                           display: "flex",
                           alignItems: "flex-start",
                           gap: 10,
-                          color: TEXT,
-                          lineHeight: 1.55,
-                          fontSize: 14.5,
-                          fontWeight: 500,
                         }}
                       >
                         <div
                           style={{
-                            minWidth: 20,
-                            height: 20,
-                            borderRadius: 999,
-                            marginTop: 1,
+                            flexShrink: 0,
+                            width: 18,
+                            height: 18,
+                            borderRadius: "50%",
+                            marginTop: 2,
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "rgba(93,89,234,0.10)",
-                            color: PURPLE,
-                            fontSize: 12,
+                            background: dark
+                              ? "rgba(255,255,255,0.12)"
+                              : "rgba(93,89,234,0.10)",
+                            color: dark ? "rgba(241,245,249,0.9)" : PURPLE,
+                            fontSize: 10,
                             fontWeight: 900,
                           }}
                         >
                           ✓
                         </div>
-                        <span>{feature}</span>
+                        <span
+                          style={{
+                            fontSize: 14,
+                            color: cardText,
+                            fontWeight: 400,
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {feat}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -585,12 +637,132 @@ const Pricing = () => {
           })}
         </div>
 
+        {/* ── Notes below cards ── */}
         <div
-        
+          style={{
+            textAlign: "center",
+            marginTop: 32,
+            marginLeft: "auto",
+            marginRight: "auto",
+            maxWidth: 660,
+            padding: isMobile ? "18px 18px" : "20px 40px",
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(0,0,0,0.07)",
+            boxShadow: "0 1px 8px rgba(0,0,0,0.04)",
+          }}
         >
-     
-        
-      
+          <p
+            style={{
+              margin: "0 0 6px",
+              fontSize: 14,
+              color: TEXT_SOFT,
+              lineHeight: 1.6,
+            }}
+          >
+            <strong style={{ color: TEXT }}>
+              Facebook/Instagram ad budget is separate.
+            </strong>{" "}
+            Most businesses start around $150–$300/month depending on how
+            aggressive they want to be.
+          </p>
+          <p style={{ margin: 0, fontSize: 14, color: TEXT_SOFT }}>
+            <strong style={{ color: TEXT }}>Month-to-month.</strong> No
+            long-term contract.
+          </p>
+        </div>
+
+        {/* ── FAQ ── */}
+        <div
+          style={{
+            marginTop: isMobile ? 64 : 96,
+            marginLeft: "auto",
+            marginRight: "auto",
+            maxWidth: 720,
+          }}
+        >
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: isMobile ? "1.6rem" : "1.95rem",
+                fontWeight: 800,
+                color: TEXT,
+                letterSpacing: "-0.4px",
+              }}
+            >
+              Frequently Asked Questions
+            </h2>
+          </div>
+
+          <div>
+            {faqs.map((faq, i) => (
+              <div key={i} className="sm-faq-row">
+                <button
+                  className="sm-faq-btn"
+                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "18px 0",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    gap: 14,
+                    fontFamily: FONT,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: isMobile ? 15 : 16,
+                      fontWeight: 600,
+                      color: TEXT,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {faq.q}
+                  </span>
+                  <span
+                    className="sm-faq-icon"
+                    style={{
+                      flexShrink: 0,
+                      width: 26,
+                      height: 26,
+                      borderRadius: "50%",
+                      background: "rgba(0,0,0,0.06)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 16,
+                      lineHeight: 1,
+                      color: TEXT_SOFT,
+                      transition: "transform 0.2s ease",
+                      transform: openFaq === i ? "rotate(45deg)" : "rotate(0deg)",
+                    }}
+                  >
+                    +
+                  </span>
+                </button>
+
+                {openFaq === i && (
+                  <div
+                    style={{
+                      paddingBottom: 20,
+                      fontSize: 15,
+                      color: TEXT_SOFT,
+                      lineHeight: 1.7,
+                      fontWeight: 400,
+                    }}
+                  >
+                    {faq.a}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
