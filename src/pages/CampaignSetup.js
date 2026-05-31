@@ -2907,15 +2907,24 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   });
 
   const state = location.state || {};
-  // adminClientId: prefer route state (set by FormPage navigate), fall back to URL param
+  // adminClientId: route state → URL param → separate localStorage key written by FormPage
   const adminClientId = (() => {
     const fromState = String(state.adminClientId || "").trim();
     if (fromState) return fromState;
     try {
-      return new URLSearchParams(location.search || "").get("adminClientId") || "";
-    } catch { return ""; }
+      const fromUrl = new URLSearchParams(location.search || "").get("adminClientId") || "";
+      if (fromUrl) return fromUrl;
+    } catch {}
+    try { return localStorage.getItem("sm_admin_target_client_id") || ""; } catch {}
+    return "";
   })();
-  const adminClientBusinessName = String(state.adminClientBusinessName || "").trim();
+  // adminClientBusinessName: route state → separate localStorage key
+  const adminClientBusinessName = (() => {
+    const fromState = String(state.adminClientBusinessName || "").trim();
+    if (fromState) return fromState;
+    try { return localStorage.getItem("sm_admin_target_client_label") || ""; } catch {}
+    return "";
+  })();
   const navImageUrls = Array.isArray(state.imageUrls)
     ? state.imageUrls
     : Array.isArray(state.imageVariants)
@@ -3651,8 +3660,9 @@ useEffect(() => {
     } catch {}
   }, [navImageUrls, resolvedUser]);
 
-  // ✅ FB adaccounts/pages/campaigns/metrics now ALL use authFetch (sid + cookies)
+  // ✅ FB adaccounts/pages — normal user path only (not admin-client mode)
  useEffect(() => {
+  if (adminClientId) return; // admin-client mode: accounts come from /api/admin/clients/:id/facebook-info
   if (!fbConnected) return;
   if (adAccounts.length > 0) return;
 
@@ -3673,6 +3683,7 @@ useEffect(() => {
 }, [fbConnected, adAccounts.length]);
 
  useEffect(() => {
+  if (adminClientId) return; // admin-client mode: pages come from /api/admin/clients/:id/facebook-info
   if (!fbConnected) return;
   if (pages.length > 0) return;
 
@@ -3690,6 +3701,35 @@ useEffect(() => {
     .catch(() => {});
   // eslint-disable-next-line
 }, [fbConnected, pages.length]);
+
+  // ✅ Admin-client mode: load the selected client's FB connection, ad accounts, and pages.
+  // Uses the admin wrapper route so no client token is exposed to the frontend.
+  // This runs instead of (not alongside) the normal adaccounts/pages effects above.
+  useEffect(() => {
+  if (!adminClientId) return;
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}/facebook-info`, {
+    credentials: "include",
+    headers: sid ? { "x-sm-sid": sid } : {},
+  })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => {
+      if (!j.ok) return;
+      const accts = Array.isArray(j.adAccounts) ? j.adAccounts : [];
+      const pgs   = Array.isArray(j.pages) ? j.pages : [];
+      setFbConnected(!!j.fbConnected);
+      setAdAccounts(accts);
+      setPages(pgs);
+      if (accts.length) {
+        setSelectedAccount((prev) => prev || String(accts[0].id || "").replace(/^act_/, ""));
+      }
+      if (pgs.length) {
+        setSelectedPageId((prev) => prev || String(pgs[0].id || ""));
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [adminClientId]);
 
 
 

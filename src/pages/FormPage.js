@@ -922,13 +922,22 @@ export default function FormPage() {
 
   useEffect(() => {
     if (!adminClientId) return;
+    // Persist target client id in a separate key so CampaignSetup can recover it
+    // even if route state is lost (page refresh, etc.). Never overwrites normal session keys.
+    try { localStorage.setItem("sm_admin_target_client_id", adminClientId); } catch {}
     const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
     fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}`, {
       credentials: "include",
       headers: sid ? { "x-sm-sid": sid } : {},
     })
       .then((r) => r.json().catch(() => ({})))
-      .then((j) => { if (j.ok && j.client) setAdminClientInfo(j.client); })
+      .then((j) => {
+        if (j.ok && j.client) {
+          setAdminClientInfo(j.client);
+          const label = j.client.premiumIntake?.businessName || j.client.displayName || j.client.email || adminClientId;
+          try { localStorage.setItem("sm_admin_target_client_label", label); } catch {}
+        }
+      })
       .catch(() => {});
   }, [adminClientId]);
 
