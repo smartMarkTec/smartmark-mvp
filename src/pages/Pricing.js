@@ -306,53 +306,20 @@ const Pricing = () => {
         </div>
 
         {/* ── Hero ── */}
-        <div
+        <h1
           style={{
             textAlign: "center",
-            marginBottom: isMobile ? 40 : 64,
+            margin: "0 auto",
+            marginBottom: isMobile ? 40 : 56,
+            fontSize: isMobile ? "2.4rem" : "3.5rem",
+            lineHeight: 1.08,
+            fontWeight: 800,
+            letterSpacing: isMobile ? "-0.6px" : "-1.2px",
+            color: TEXT,
           }}
         >
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 500,
-              color: TEXT_SOFT,
-              letterSpacing: 0.3,
-              marginBottom: 16,
-            }}
-          >
-            Pricing
-          </div>
-
-          <h1
-            style={{
-              margin: "0 auto",
-              maxWidth: 700,
-              fontSize: isMobile ? "1.95rem" : "2.9rem",
-              lineHeight: 1.13,
-              fontWeight: 800,
-              letterSpacing: isMobile ? "-0.4px" : "-0.8px",
-              color: TEXT,
-            }}
-          >
-            Choose how much help you want with your HVAC ads.
-          </h1>
-
-          <p
-            style={{
-              maxWidth: 580,
-              margin: "18px auto 0",
-              color: TEXT_SOFT,
-              fontSize: isMobile ? 15 : 17,
-              lineHeight: 1.65,
-              fontWeight: 400,
-            }}
-          >
-            Use Smartemark yourself, get guided support, or have us manage your
-            ads for you.
-          </p>
-
-        </div>
+          Pricing
+        </h1>
 
         {/* ── Pricing cards ── */}
         <div
