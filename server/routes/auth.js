@@ -49,6 +49,10 @@ function normalizeBillingPlanKey(raw) {
   const s = String(raw || '').trim().toLowerCase();
   if (s === 'standard') return 'starter';
   if (s === 'starter' || s === 'pro' || s === 'operator') return s;
+  // New 2026 plan names — map to equivalent legacy tier for campaign limits.
+  if (s === 'base') return 'starter';
+  if (s === 'deluxe') return 'pro';
+  if (s === 'premium') return 'operator';
   return 'starter';
 }
 

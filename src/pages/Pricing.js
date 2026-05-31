@@ -29,12 +29,12 @@ const useIsMobile = () => {
 
 const plans = [
   {
-    name: "Standard",
-    planKey: "starter",
-    price: "$99.99",
+    name: "Base",
+    planKey: "base",
+    price: "$249",
     subtitle:
       "A simple, powerful way to launch and manage ads with real AI help.",
-    badge: "Standard",
+    badge: "Base",
     accentGlow: "rgba(76,99,255,0.16)",
     cta: "Get Started",
     features: [
@@ -52,17 +52,17 @@ const plans = [
     ],
   },
   {
-    name: "Pro",
-    planKey: "pro",
-    price: "$149.99",
+    name: "Deluxe",
+    planKey: "deluxe",
+    price: "$495",
     subtitle:
       "For businesses that want stronger strategy, more testing, and more active optimization.",
     badge: "Most Popular",
     accentGlow: "rgba(123,114,255,0.18)",
     featured: true,
-    cta: "Choose Pro",
+    cta: "Choose Deluxe",
     features: [
-      "Everything in Standard",
+      "Everything in Base",
       "Up to 6 active campaigns",
       "2 businesses",
       "2 connected ad accounts",
@@ -76,16 +76,16 @@ const plans = [
     ],
   },
   {
-    name: "Operator",
-    planKey: "operator",
-    price: "$249.99",
+    name: "Premium",
+    planKey: "premium",
+    price: "$749",
     subtitle:
       "For businesses that want the deepest Smartemark automation layer and strongest in-product system.",
-    badge: "Advanced",
+    badge: "Premium",
     accentGlow: "rgba(93,89,234,0.14)",
-    cta: "Choose Operator",
+    cta: "Choose Premium",
     features: [
-      "Everything in Pro",
+      "Everything in Deluxe",
       "Up to 10 active campaigns",
       "3 businesses",
       "3 connected ad accounts",

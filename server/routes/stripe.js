@@ -54,15 +54,26 @@ function setSessionCookie(res, sid) {
 }
 
 const PLAN_NAME_MAP = {
+  // Legacy plans — kept for grandfathered customers. Do NOT remove.
   starter: "Starter",
   pro: "Pro",
   operator: "Operator",
+  // New plans for new customers (2026).
+  base: "Base",
+  deluxe: "Deluxe",
+  premium: "Premium",
 };
 
 const PUBLIC_PRICE_MAP = {
+  // Legacy price IDs — kept for grandfathered customers. Do NOT remove.
   starter: process.env.STRIPE_PRICE_STARTER || "",
   pro: process.env.STRIPE_PRICE_PRO || "",
   operator: process.env.STRIPE_PRICE_OPERATOR || "",
+  // New price IDs for new customers. Requires STRIPE_BASE_PRICE_ID,
+  // STRIPE_DELUXE_PRICE_ID, and STRIPE_PREMIUM_PRICE_ID on Render.
+  base: process.env.STRIPE_BASE_PRICE_ID || "",
+  deluxe: process.env.STRIPE_DELUXE_PRICE_ID || "",
+  premium: process.env.STRIPE_PREMIUM_PRICE_ID || "",
 };
 
 const HIDDEN_FOUNDER_PRICE_META = {};
@@ -417,16 +428,15 @@ router.get("/health", (_req, res) => {
     hasWebhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
     clientUrl: process.env.CLIENT_URL || null,
     prices: {
-      public: {
+      newPlans: {
+        base: !!PUBLIC_PRICE_MAP.base,
+        deluxe: !!PUBLIC_PRICE_MAP.deluxe,
+        premium: !!PUBLIC_PRICE_MAP.premium,
+      },
+      legacyPlans: {
         starter: !!PUBLIC_PRICE_MAP.starter,
         pro: !!PUBLIC_PRICE_MAP.pro,
         operator: !!PUBLIC_PRICE_MAP.operator,
-      },
-      founderHidden: {
-        founder_legacy_40: !!HIDDEN_FOUNDER_PRICE_META.founder_legacy_40.priceId,
-        founder_starter_70: !!HIDDEN_FOUNDER_PRICE_META.founder_starter_70.priceId,
-        founder_pro_105: !!HIDDEN_FOUNDER_PRICE_META.founder_pro_105.priceId,
-        founder_operator_175: !!HIDDEN_FOUNDER_PRICE_META.founder_operator_175.priceId,
       },
     },
   });
@@ -484,7 +494,7 @@ router.post("/create-checkout-session", async (req, res) => {
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
-        error: "Invalid plan. Use starter, pro, or operator.",
+        error: "Invalid plan. Valid plans: base, deluxe, premium.",
       });
     }
 
@@ -492,7 +502,7 @@ router.post("/create-checkout-session", async (req, res) => {
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for ${planKey}.`,
+        error: `Missing Stripe price for plan "${planKey}". Set the corresponding env var on the server (e.g. STRIPE_BASE_PRICE_ID for base).`,
       });
     }
 
@@ -635,7 +645,7 @@ router.get("/billing-status", async (req, res) => {
         const liveSub = await stripe.subscriptions.retrieve(_subId);
         const fromMeta = String(liveSub?.metadata?.planKey || "").trim().toLowerCase();
         console.log("[stripe] billing-status: source-B sub.metadata.planKey =", fromMeta || "(empty)");
-        if (["starter", "pro", "operator"].includes(fromMeta)) {
+        if (PLAN_NAME_MAP[fromMeta]) {
           effectivePlanKey = fromMeta;
           effectivePlanName = PLAN_NAME_MAP[fromMeta] || fromMeta;
           effectiveBillingLabel = PLAN_NAME_MAP[fromMeta] || fromMeta;
@@ -687,7 +697,7 @@ router.get("/billing-status", async (req, res) => {
           if (foundSubId) recoveryPatch.stripeSubscriptionId = foundSubId;
           if (foundPriceId) recoveryPatch.stripePriceId = foundPriceId;
 
-          if (["starter", "pro", "operator"].includes(fromMeta)) {
+          if (PLAN_NAME_MAP[fromMeta]) {
             effectivePlanKey = fromMeta;
             effectivePlanName = PLAN_NAME_MAP[fromMeta] || fromMeta;
             effectiveBillingLabel = PLAN_NAME_MAP[fromMeta] || fromMeta;
@@ -772,7 +782,7 @@ router.post("/create-checkout-session-auth", async (req, res) => {
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
         ok: false,
-        error: "Invalid plan. Use starter, pro, or operator.",
+        error: "Invalid plan. Valid plans: base, deluxe, premium.",
       });
     }
 
@@ -780,7 +790,7 @@ router.post("/create-checkout-session-auth", async (req, res) => {
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for ${planKey}.`,
+        error: `Missing Stripe price for plan "${planKey}". Set the corresponding env var on the server (e.g. STRIPE_BASE_PRICE_ID for base).`,
       });
     }
 
@@ -851,30 +861,14 @@ router.post("/admin/assign-plan", async (req, res) => {
     const offerKey = String(req.body?.offerKey || "").trim();
 
     const hiddenMeta = HIDDEN_FOUNDER_PRICE_META[offerKey] || null;
+    // Build public plan meta from PLAN_NAME_MAP so new plans are automatically supported.
+    const publicPlanKey = offerKey.startsWith("public_") ? offerKey.slice("public_".length) : "";
     const publicMeta =
-      offerKey === "public_starter"
+      publicPlanKey && PLAN_NAME_MAP[publicPlanKey]
         ? {
-            planKey: "starter",
-            planName: "Starter",
-            billingLabel: "Starter",
-            founder: false,
-            hidden: false,
-            offerKey,
-          }
-        : offerKey === "public_pro"
-        ? {
-            planKey: "pro",
-            planName: "Pro",
-            billingLabel: "Pro",
-            founder: false,
-            hidden: false,
-            offerKey,
-          }
-        : offerKey === "public_operator"
-        ? {
-            planKey: "operator",
-            planName: "Operator",
-            billingLabel: "Operator",
+            planKey: publicPlanKey,
+            planName: PLAN_NAME_MAP[publicPlanKey],
+            billingLabel: PLAN_NAME_MAP[publicPlanKey],
             founder: false,
             hidden: false,
             offerKey,
@@ -1013,7 +1007,7 @@ router.post("/change-plan", async (req, res) => {
     if (!nextPlanKey || !PLAN_NAME_MAP[nextPlanKey]) {
       return res.status(400).json({
         ok: false,
-        error: "Invalid plan. Use starter, pro, or operator.",
+        error: "Invalid plan. Valid plans: base, deluxe, premium (or legacy: starter, pro, operator).",
       });
     }
 
