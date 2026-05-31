@@ -295,6 +295,48 @@ router.get('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/clients/:id/campaigns
+// Returns the selected client's Smartemark campaign records (from campaign_creatives),
+// scoped to that client's ownerKey. Includes archived campaigns so the admin
+// dashboard can display them correctly. Never returns tokens.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    await ensureDB();
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+
+    const records = (db.data.campaign_creatives || []).filter(
+      (c) => String(c?.ownerKey || '').trim() === ownerKey
+    );
+
+    const campaigns = records
+      .filter((c) => String(c?.campaignId || '').trim())
+      .map((c) => ({
+        id:               String(c.campaignId || '').trim(),
+        name:             c.name || 'Campaign',
+        status:           String(c.status || 'ACTIVE').trim(),
+        effective_status: String(c.status || 'ACTIVE').trim(),
+        start_time:       c.createdAt || c.updatedAt || null,
+        stop_time:        c.endDate || null,
+        smArchived:       !!c.smArchived,
+        archivedAt:       c.archivedAt || null,
+        accountId:        String(c.accountId || '').replace(/^act_/, ''),
+        launchComplete:   !!c.launchComplete,
+        createdAt:        c.createdAt || null,
+      }));
+
+    return res.json({ ok: true, campaigns });
+  } catch (err) {
+    console.error('[Admin] client campaigns error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Failed to load client campaigns.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PATCH /api/admin/clients/:id/onboarding-status
 // ─────────────────────────────────────────────────────────────────────────────
 router.patch('/admin/clients/:id/onboarding-status', limitAdmin, requireAdmin, async (req, res) => {

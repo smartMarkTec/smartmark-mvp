@@ -3842,6 +3842,31 @@ useEffect(() => {
     .then((r) => r.json().catch(() => ({})))
     .then((j) => { if (j.ok && j.client) setAdminClientInfo(j.client); })
     .catch(() => {});
+
+  // Load the selected client's Smartemark campaign records (includes archived campaigns).
+  // This uses the client's ownerKey server-side — no admin campaigns leak in.
+  fetch(`/api/admin/clients/${enc}/campaigns`, { credentials: "include", headers })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => {
+      if (!j.ok || !Array.isArray(j.campaigns)) return;
+      const list = j.campaigns;
+      setCampaigns(list);
+
+      // Set campaign count (active only — archived excluded)
+      const activeCount = list.filter(
+        (c) => !c.smArchived && ["ACTIVE", "PAUSED"].includes(String(c.status || "").toUpperCase())
+      ).length;
+      setCampaignCount(activeCount);
+
+      // Auto-select the first non-archived campaign
+      const firstActive = list.find((c) => !c.smArchived);
+      const firstId = String(firstActive?.id || list[0]?.id || "").trim();
+      if (firstId) {
+        setSelectedCampaignId(firstId);
+        setExpandedId(firstId);
+      }
+    })
+    .catch(() => {});
   // eslint-disable-next-line
 }, [adminClientId]);
 

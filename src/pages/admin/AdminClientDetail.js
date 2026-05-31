@@ -197,7 +197,7 @@ export default function AdminClientDetail() {
               fontFamily: FONT,
             }}
           >
-            Manage Campaign →
+            Manage →
           </button>
         </div>
 
