@@ -15,6 +15,7 @@ import TermsOfService from "./pages/TermsOfService";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import SalesAssistant from "./pages/SalesAssistant";
+import AdAgent from "./pages/AdAgent";
 
 function NotFound() {
   return (
@@ -67,6 +68,7 @@ function App() {
       <Route path="/booked-call" element={<BookedCall />} />
       <Route path="/videos" element={<BookedCall />} />
       <Route path="/sales-assistant" element={<SalesAssistant />} />
+      <Route path="/ad-agent" element={<AdAgent />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

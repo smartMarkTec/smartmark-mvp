@@ -404,6 +404,10 @@ app.use("/api/stripe", stripeRoutes);
 const salesAssistantRoutes = require("./routes/salesAssistant");
 app.use("/api", salesAssistantRoutes);
 
+/* ✅ Ad Agent: AI assistant + Meta Pixel fetch */
+const adAgentRoutes = require("./routes/adAgent");
+app.use("/api", adAgentRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);

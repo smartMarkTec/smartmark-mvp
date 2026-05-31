@@ -14,6 +14,8 @@ import {
   FaShieldAlt,
   FaRegClock,
   FaEllipsisV,
+  FaRobot,
+  FaLock,
 } from "react-icons/fa";
 import { trackEvent } from "../analytics/gaEvents";
 
@@ -5491,6 +5493,98 @@ const selectedCampaignCreatives =
         </button>
       );
     })}
+
+    {/* ── Ad Agent sidebar item ── */}
+    {(() => {
+      const pk = String(billingInfo?.planKey || selectedPlan || "").trim().toLowerCase();
+      const locked = !pk || pk === "base" || pk === "starter" || pk === "standard";
+      return (
+        <button
+          type="button"
+          title={locked ? "Upgrade to use Ad Agent" : "Ad Agent — AI marketing assistant"}
+          onClick={() => navigate("/ad-agent")}
+          style={{
+            flex: isMobile ? 1 : "unset",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: isMobile ? "center" : "flex-start",
+            gap: isMobile ? 0 : 12,
+            width: "100%",
+            textAlign: "left",
+            borderRadius: 14,
+            padding: isMobile ? "10px 4px" : "12px 12px",
+            border: "1px solid transparent",
+            background: "transparent",
+            cursor: "pointer",
+            opacity: locked ? 0.5 : 1,
+            marginTop: isMobile ? 0 : 8,
+            transition: "all 180ms ease",
+          }}
+        >
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              minWidth: 32,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "linear-gradient(135deg, #f1f5f9 0%, #e9ebf2 100%)",
+              color: locked ? "#94a3b8" : "#5d59ea",
+              fontSize: 14,
+              position: "relative",
+            }}
+          >
+            <FaRobot />
+            {locked && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: -3,
+                  right: -3,
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: "#fff",
+                  border: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <FaLock style={{ fontSize: 7, color: "#94a3b8" }} />
+              </div>
+            )}
+          </div>
+          {!isMobile && (
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  color: locked ? "#94a3b8" : "#0f172a",
+                  fontWeight: 900,
+                  fontSize: 14,
+                  lineHeight: 1.2,
+                  marginBottom: 2,
+                }}
+              >
+                Ad Agent
+              </div>
+              <div
+                style={{
+                  color: locked ? "#cbd5e1" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  lineHeight: 1.3,
+                }}
+              >
+                {locked ? "Upgrade to access" : "AI marketing assistant"}
+              </div>
+            </div>
+          )}
+        </button>
+      );
+    })()}
   </div>
 
   <div
