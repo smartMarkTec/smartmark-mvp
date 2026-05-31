@@ -3853,19 +3853,35 @@ useEffect(() => {
       const list = j.campaigns;
       setCampaigns(list);
 
-      // Populate metricsMap and optimizerStateMap from the bundled data so the
-      // dashboard shows the same metrics the client sees — without calling any
-      // per-campaign endpoints (which would 403 because they check ownerKey ownership).
+      // Populate metricsMap, optimizerStateMap, and campaignCreativesMap from the bundled data
+      // so the dashboard shows the same metrics and creatives the client sees — without
+      // calling per-campaign endpoints (which would 403 since they check ownerKey ownership).
       const newMetrics = {};
       const newOptStates = {};
+      const newCreatives = {};
       for (const c of list) {
         if (!c.id) continue;
+
+        // Creative data
+        if (Array.isArray(c.images) || c.meta?.headline || c.meta?.body) {
+          newCreatives[c.id] = {
+            images:         (c.images || []).filter(Boolean),
+            mediaSelection: c.mediaSelection || "image",
+            meta: {
+              headline: String(c.meta?.headline || "").trim(),
+              body:     String(c.meta?.body     || "").trim(),
+              link:     String(c.meta?.link     || "").trim(),
+            },
+          };
+        }
+
+        // Metrics + optimizer state
         const snap = c.optimizerState?.metricsSnapshot;
         if (snap && Object.keys(snap).length > 0) {
           newMetrics[c.id] = {
             impressions: Number(snap.impressions) || 0,
             clicks:      Number(snap.linkClicks || snap.clicks) || 0,
-            ctr:         Number(snap.ctr) || 0,
+            ctr:         Number(snap.ctr)   || 0,
             spend:       Number(snap.spend) || 0,
           };
         }
@@ -3882,8 +3898,9 @@ useEffect(() => {
           };
         }
       }
-      setMetricsMap((prev) => ({ ...prev, ...newMetrics }));
-      setOptimizerStateMap((prev) => ({ ...prev, ...newOptStates }));
+      setCampaignCreativesMap((prev) => ({ ...prev, ...newCreatives }));
+      setMetricsMap((prev)            => ({ ...prev, ...newMetrics  }));
+      setOptimizerStateMap((prev)     => ({ ...prev, ...newOptStates }));
 
       // Campaign count (active / paused only — archived excluded)
       const activeCount = list.filter(
@@ -4417,6 +4434,45 @@ const handleUnarchiveCampaign = async (campaignId) => {
     setShowCampaignMenu(false);
   } catch {
     alert("Could not unarchive campaign.");
+  }
+  setLoading(false);
+};
+
+const handleHideFromHistory = async (campaignId) => {
+  if (!campaignId || campaignId === "__DRAFT__") return;
+  setLoading(true);
+  try {
+    let r;
+    if (adminClientId) {
+      // Admin-client mode: use the admin route which resolves the client's ownerKey server-side
+      const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      r = await fetch(
+        `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${campaignId}/hide-history`,
+        { method: "PATCH", credentials: "include", headers: _sid ? { "x-sm-sid": _sid } : {} }
+      );
+    } else {
+      if (!selectedAccount) { setLoading(false); return; }
+      const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+      r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/hide-history`, {
+        method: "PATCH",
+      });
+    }
+    if (!r.ok) throw new Error("Remove from history failed");
+
+    // Remove immediately from local state (soft-delete — no data is wiped from Meta or DB)
+    setCampaigns((prev) =>
+      Array.isArray(prev) ? prev.filter((c) => c.id !== campaignId) : prev
+    );
+    setShowCampaignMenu(false);
+    setShowArchived(false);
+
+    const remaining = (campaigns || []).filter(
+      (c) => c.id !== campaignId && !c.smArchived && !c.hiddenFromHistory
+    );
+    setSelectedCampaignId(remaining[0]?.id || "");
+    setExpandedId(remaining[0]?.id || null);
+  } catch {
+    alert("Could not remove from history.");
   }
   setLoading(false);
 };
@@ -6775,8 +6831,8 @@ const selectedCampaignCreatives =
         </option>
       )}
       {(showArchived
-        ? campaigns.filter((c) => c.smArchived)
-        : campaigns.filter((c) => !c.smArchived)
+        ? campaigns.filter((c) => c.smArchived && !c.hiddenFromHistory)
+        : campaigns.filter((c) => !c.smArchived && !c.hiddenFromHistory)
       ).map((c) => {
         const ds = getCampaignDisplayStatus(c);
         return (
@@ -6895,6 +6951,13 @@ const selectedCampaignCreatives =
               style={{ background: "#ffffff", color: "#374151", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
             >
               Unarchive campaign
+            </button>
+            <button
+              type="button"
+              onClick={() => handleHideFromHistory(selectedLiveCampaign.id)}
+              style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Remove from history
             </button>
             <button
               type="button"

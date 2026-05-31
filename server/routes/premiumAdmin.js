@@ -346,13 +346,15 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         : null,
     });
 
-    // Build campaign list from creative records, enriched with optimizer state
+    // Build campaign list from creative records, enriched with optimizer state.
+    // Skip campaigns marked hiddenFromHistory — they are soft-deleted from the UI.
     const seen = new Set();
     const campaigns = [];
 
     for (const c of creativeRecords) {
       const cId = String(c?.campaignId || '').trim();
       if (!cId || seen.has(cId)) continue;
+      if (c.hiddenFromHistory) { seen.add(cId); continue; } // soft-deleted
       seen.add(cId);
 
       const opt = optimizerStates.find(
@@ -375,14 +377,20 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         accountId:        String(c.accountId || opt?.accountId || '').replace(/^act_/, ''),
         launchComplete:   !!c.launchComplete,
         createdAt:        c.createdAt || null,
+        // Creative fields so CampaignSetup can show the correct creative per campaign
+        images:           Array.isArray(c.images) ? c.images : [],
+        meta:             { headline: String(c.meta?.headline || ''), body: String(c.meta?.body || ''), link: String(c.meta?.link || '') },
+        mediaSelection:   c.mediaSelection || 'image',
         optimizerState:   opt ? sanitizeOptState(opt) : null,
       });
     }
 
-    // Include campaigns that exist only in optimizer_campaign_state (no creative record)
+    // Include campaigns that exist only in optimizer_campaign_state (no creative record).
+    // Skip hidden ones.
     for (const s of optimizerStates) {
       const cId = String(s?.campaignId || '').trim();
       if (!cId || seen.has(cId)) continue;
+      if (s.hiddenFromHistory) { seen.add(cId); continue; }
       seen.add(cId);
 
       const status = String(s.currentStatus || 'ACTIVE').trim().toUpperCase();
@@ -398,6 +406,9 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         accountId:        String(s.accountId || '').replace(/^act_/, ''),
         launchComplete:   false,
         createdAt:        s.createdAt || null,
+        images:           [],
+        meta:             { headline: '', body: '', link: '' },
+        mediaSelection:   'image',
         optimizerState:   sanitizeOptState(s),
       });
     }
@@ -406,6 +417,50 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
   } catch (err) {
     console.error('[Admin] client campaigns error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Failed to load client campaigns.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/admin/clients/:id/campaign/:campaignId/hide-history
+// Admin-only. Soft-deletes an archived campaign from the client's history UI.
+// Does NOT delete from Meta. Only applies to campaigns with smArchived === true.
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/admin/clients/:id/campaign/:campaignId/hide-history', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    await ensureDB();
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId is required.' });
+
+    const cIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+    );
+    if (cIdx !== -1) {
+      if (!db.data.campaign_creatives[cIdx].smArchived) {
+        return res.status(400).json({ ok: false, error: 'Only archived campaigns can be removed from history.' });
+      }
+      db.data.campaign_creatives[cIdx].hiddenFromHistory = true;
+      db.data.campaign_creatives[cIdx].hiddenAt = new Date().toISOString();
+    }
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const optIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+    );
+    if (optIdx !== -1) {
+      db.data.optimizer_campaign_state[optIdx].hiddenFromHistory = true;
+      db.data.optimizer_campaign_state[optIdx].hiddenAt = new Date().toISOString();
+    }
+
+    await db.write();
+    return res.json({ ok: true, campaignId, hiddenFromHistory: true });
+  } catch (err) {
+    console.error('[Admin] hide-history error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Failed to hide campaign from history.' });
   }
 });
 

@@ -5291,7 +5291,12 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
           String(r.campaignId || '') === String(c.id || '') &&
           _archiveCandidates.has(String(r.ownerKey || ''))
       );
-      return dbRec?.smArchived ? { ...c, smArchived: true } : c;
+      if (!dbRec) return c;
+      return {
+        ...c,
+        ...(dbRec.smArchived         ? { smArchived:         true } : {}),
+        ...(dbRec.hiddenFromHistory  ? { hiddenFromHistory:  true } : {}),
+      };
     });
 
     return res.json({
@@ -5452,6 +5457,47 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/unarchive', as
     return res.json({ ok: true, campaignId: id, smArchived: false });
   } catch (err) {
     return res.status(500).json({ error: err?.message || 'Unarchive failed' });
+  }
+});
+
+// Soft-delete a Smartemark-archived campaign from the local history.
+// Does NOT delete from Meta/Facebook. Only applies to campaigns already marked smArchived.
+router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
+  const { campaignId } = req.params;
+  const id = String(campaignId || '').trim();
+  if (!id) return res.status(400).json({ error: 'campaignId is required' });
+
+  try {
+    await db.read();
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+    const idx = db.data.campaign_creatives.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (idx !== -1) {
+      if (!db.data.campaign_creatives[idx].smArchived) {
+        return res.status(400).json({ error: 'Only archived campaigns can be removed from history.' });
+      }
+      db.data.campaign_creatives[idx].hiddenFromHistory = true;
+      db.data.campaign_creatives[idx].hiddenAt = new Date().toISOString();
+    }
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const optIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (optIdx !== -1) {
+      db.data.optimizer_campaign_state[optIdx].hiddenFromHistory = true;
+      db.data.optimizer_campaign_state[optIdx].hiddenAt = new Date().toISOString();
+    }
+
+    await db.write();
+    return res.json({ ok: true, campaignId: id, hiddenFromHistory: true });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Hide from history failed' });
   }
 });
 
