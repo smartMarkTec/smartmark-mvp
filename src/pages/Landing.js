@@ -338,6 +338,14 @@ export default function Landing() {
                 <button onClick={scrollToFaq} style={navBtn}>
                   FAQ
                 </button>
+                <a
+                  href={BOOKING_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ ...navBtn, textDecoration: "none" }}
+                >
+                  Book a Demo
+                </a>
               </>
             )}
 
@@ -351,6 +359,17 @@ export default function Landing() {
               <button onClick={() => (window.location.href = "/login")} style={navBtnSm}>
                 Login
               </button>
+            )}
+
+            {isMobile && (
+              <a
+                href={BOOKING_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...navBtnSm, textDecoration: "none" }}
+              >
+                Book a Demo
+              </a>
             )}
 
             {isLoggedIn ? (

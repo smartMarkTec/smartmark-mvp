@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import smartmarkLogo from "../assets/smartemark-logo.png";
 import { trackEvent } from "../analytics/gaEvents";
+
+const BOOKING_URL = "https://cal.com/william-knowles-wxottg/30min";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const BG = "linear-gradient(160deg, #f5f6ff 0%, #f8f9fc 55%, #f0f2ff 100%)";
@@ -240,70 +241,91 @@ const Pricing = () => {
         }}
       />
 
+      {/* ── Sticky nav ── */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+          background: "rgba(248,249,252,0.94)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: "1px solid rgba(0,0,0,0.07)",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1180,
+            margin: "0 auto",
+            padding: isMobile ? "0 16px" : "0 32px",
+            height: isMobile ? 54 : 62,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <button
+            onClick={() => navigate("/")}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ fontWeight: 700, fontSize: 15, color: TEXT }}>
+              Smartemark
+            </span>
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              onClick={() => navigate("/login")}
+              style={{
+                padding: "7px 14px",
+                fontSize: 14,
+                color: TEXT_SOFT,
+                background: "none",
+                border: "none",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: FONT,
+              }}
+            >
+              Login
+            </button>
+            <a
+              href={BOOKING_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                padding: "8px 16px",
+                fontSize: 14,
+                color: "#fff",
+                background: "#111827",
+                borderRadius: 8,
+                fontWeight: 600,
+                cursor: "pointer",
+                textDecoration: "none",
+                fontFamily: FONT,
+              }}
+            >
+              Book a Demo
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Content ── */}
       <div
         style={{
           position: "relative",
           zIndex: 2,
           maxWidth: 1180,
           margin: "0 auto",
-          padding: isMobile ? "20px 16px 80px" : "28px 32px 100px",
+          padding: isMobile ? "48px 16px 80px" : "64px 32px 100px",
         }}
       >
-        {/* ── Nav ── */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: isMobile ? 40 : 64,
-          }}
-        >
-          <button
-            onClick={() => navigate("/")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              background: "none",
-              border: "none",
-              padding: 0,
-              color: TEXT,
-              cursor: "pointer",
-            }}
-          >
-            <div
-              role="img"
-              aria-label="Smartemark"
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 6,
-                flexShrink: 0,
-                backgroundImage: `url(${smartmarkLogo})`,
-                backgroundSize: "256%",
-                backgroundPosition: "51% 48%",
-                backgroundRepeat: "no-repeat",
-              }}
-            />
-            <span style={{ fontWeight: 700, fontSize: 15, color: TEXT }}>Smartemark</span>
-          </button>
-
-          <button
-            onClick={() => navigate("/login")}
-            style={{
-              padding: isMobile ? "8px 16px" : "9px 20px",
-              fontSize: 14,
-              color: "#fff",
-              background: "#111827",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Login
-          </button>
-        </div>
 
         {/* ── Hero ── */}
         <h1
@@ -313,8 +335,8 @@ const Pricing = () => {
             marginBottom: isMobile ? 40 : 56,
             fontSize: isMobile ? "2.4rem" : "3.5rem",
             lineHeight: 1.08,
-            fontWeight: 800,
-            letterSpacing: isMobile ? "-0.6px" : "-1.2px",
+            fontWeight: 500,
+            letterSpacing: isMobile ? "-0.3px" : "-0.6px",
             color: TEXT,
           }}
         >
