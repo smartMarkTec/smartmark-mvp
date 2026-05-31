@@ -73,6 +73,7 @@ function isAdminUser(user) {
 }
 
 async function requireAdmin(req, res, next) {
+  await ensureDB(); // load sessions/users before ownerKey lookup
   const ownerKey = ownerKeyFromReq(req);
   const user = await findUserByOwnerKey(ownerKey);
   if (!user || !isAdminUser(user)) {

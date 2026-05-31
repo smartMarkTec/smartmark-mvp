@@ -2165,10 +2165,24 @@ router.get('/whoami', async (req, res) => {
     const s = await requireSession(req);
     if (!s.ok) return res.status(s.status).json({ error: s.error });
 
+    const isAdmin =
+      s.user?.role === 'admin' ||
+      String(s.user?.username || '').trim() === ADMIN_BYPASS_USERNAME;
+
     const planLimits = getLaunchPlanLimits(s.user?.billing?.planKey || 'starter');
     res.json({
       success: true,
-      user: { username: s.user.username, email: s.user.email },
+      user: {
+        username: s.user.username,
+        email: s.user.email,
+        role: s.user.role || null,
+        isAdmin,
+      },
+      billing: {
+        planKey: s.user?.billing?.planKey || null,
+        hasAccess: !!s.user?.billing?.hasAccess,
+        status: s.user?.billing?.status || null,
+      },
       planKey: planLimits.planKey,
       maxImageRegens: planLimits.maxImageRegens,
     });

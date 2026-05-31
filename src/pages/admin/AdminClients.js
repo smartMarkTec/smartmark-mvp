@@ -28,6 +28,11 @@ function Badge({ children, color }) {
   );
 }
 
+function adminHeaders() {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  return sid ? { "x-sm-sid": sid } : {};
+}
+
 export default function AdminClients() {
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
@@ -37,7 +42,7 @@ export default function AdminClients() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/admin/clients", { credentials: "include" });
+        const r = await fetch("/api/admin/clients", { credentials: "include", headers: adminHeaders() });
         const j = await r.json().catch(() => ({}));
         if (r.status === 403 || r.status === 401) {
           setError(`Access denied (${r.status}). You must be logged in as an admin or operator account to view this page.`);

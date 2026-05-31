@@ -43,6 +43,11 @@ function Field({ label, name, value, onChange, placeholder, multiline, type }) {
   );
 }
 
+function adminHeaders(extra) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  return sid ? { "x-sm-sid": sid, ...(extra || {}) } : { ...(extra || {}) };
+}
+
 export default function AdminManageCampaign() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -84,8 +89,8 @@ export default function AdminManageCampaign() {
     (async () => {
       try {
         const [clientRes, fbRes] = await Promise.all([
-          fetch(`/api/admin/clients/${id}`, { credentials: "include" }),
-          fetch(`/api/admin/clients/${id}/facebook-info`, { credentials: "include" }),
+          fetch(`/api/admin/clients/${id}`, { credentials: "include", headers: adminHeaders() }),
+          fetch(`/api/admin/clients/${id}/facebook-info`, { credentials: "include", headers: adminHeaders() }),
         ]);
 
         if (clientRes.status === 403) { navigate("/setup"); return; }
@@ -145,7 +150,7 @@ export default function AdminManageCampaign() {
       const r = await fetch("/api/ad-agent/chat", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: adminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ message: prompt }),
       });
       const j = await r.json().catch(() => ({}));
@@ -195,7 +200,7 @@ export default function AdminManageCampaign() {
       const r = await fetch(`/api/admin/clients/${id}/launch-campaign`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: adminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           adAccountId: form.adAccountId,
           pageId: form.pageId,

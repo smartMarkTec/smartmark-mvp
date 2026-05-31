@@ -10,8 +10,9 @@ const TEXT_SOFT = "#6b7280";
 const BORDER = "rgba(0,0,0,0.09)";
 const PURPLE = "#5d59ea";
 
-// Local access check — mirrors backend logic, does not affect global plan limits
-function adAgentAccess(planKey) {
+// Local access check — admin always gets full pixel access
+function adAgentAccess(planKey, isAdmin) {
+  if (isAdmin) return "pixel";
   const s = String(planKey || "").trim().toLowerCase();
   if (s === "premium" || s === "operator") return "pixel"; // chat + pixel
   if (s === "deluxe" || s === "pro") return "chat";        // chat only
@@ -21,6 +22,7 @@ function adAgentAccess(planKey) {
 export default function AdAgent() {
   const navigate = useNavigate();
   const [planKey, setPlanKey] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [planLoading, setPlanLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -28,13 +30,16 @@ export default function AdAgent() {
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // Load plan from existing billing-status endpoint
+  // Load user/plan from /auth/whoami — reads from DB, works for admin accounts
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/stripe/billing-status", { credentials: "include" });
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        const headers = sid ? { "x-sm-sid": sid } : {};
+        const r = await fetch("/auth/whoami", { credentials: "include", headers });
         const j = await r.json().catch(() => ({}));
-        setPlanKey(String(j?.billing?.planKey || "").trim());
+        setPlanKey(String(j?.billing?.planKey || j?.planKey || "").trim());
+        setIsAdmin(!!j?.user?.isAdmin);
       } catch {
         setPlanKey("");
       } finally {
@@ -48,7 +53,7 @@ export default function AdAgent() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const access = adAgentAccess(planKey);
+  const access = adAgentAccess(planKey, isAdmin);
 
   const send = async () => {
     const msg = input.trim();

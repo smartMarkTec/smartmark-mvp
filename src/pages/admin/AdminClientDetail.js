@@ -62,6 +62,11 @@ function InfoRow({ label, value }) {
   );
 }
 
+function adminHeaders(extra) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  return sid ? { "x-sm-sid": sid, ...(extra || {}) } : { ...(extra || {}) };
+}
+
 export default function AdminClientDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -74,7 +79,7 @@ export default function AdminClientDetail() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`/api/admin/clients/${id}`, { credentials: "include" });
+        const r = await fetch(`/api/admin/clients/${id}`, { credentials: "include", headers: adminHeaders() });
         if (r.status === 403) { navigate("/setup"); return; }
         const j = await r.json().catch(() => ({}));
         if (!j.ok) throw new Error(j.error || "Failed to load client.");
@@ -96,7 +101,7 @@ export default function AdminClientDetail() {
       const r = await fetch(`/api/admin/clients/${id}/onboarding-status`, {
         method: "PATCH",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: adminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ [field]: newVal }),
       });
       const j = await r.json().catch(() => ({}));
