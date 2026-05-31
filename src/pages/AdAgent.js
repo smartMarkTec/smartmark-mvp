@@ -40,8 +40,14 @@ export default function AdAgent() {
         const j = await r.json().catch(() => ({}));
         setPlanKey(String(j?.billing?.planKey || j?.planKey || "").trim());
         setIsAdmin(!!j?.user?.isAdmin);
-        // Load persisted chat history
-        const hr = await fetch("/api/ad-agent/history", { credentials: "include", headers });
+        // Load persisted chat history — scoped to the effective account (admin-client mode
+        // passes adminClientId so the server loads the selected client's history, not TheBoss's)
+        const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+        const historyUrl = _adminClientId
+          ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(_adminClientId)}`
+          : "/api/ad-agent/history";
+        setMessages([]); // clear any stale messages from a previous account before loading
+        const hr = await fetch(historyUrl, { credentials: "include", headers });
         if (hr.ok) {
           const hj = await hr.json().catch(() => ({}));
           if (Array.isArray(hj?.history) && hj.history.length > 0) {
@@ -58,6 +64,7 @@ export default function AdAgent() {
 
   const saveHistory = (msgs) => {
     const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
     fetch("/api/ad-agent/history", {
       method: "POST",
       credentials: "include",
@@ -65,14 +72,21 @@ export default function AdAgent() {
         "Content-Type": "application/json",
         ...(_sid ? { "x-sm-sid": _sid } : {}),
       },
-      body: JSON.stringify({ messages: msgs }),
+      body: JSON.stringify({
+        messages: msgs,
+        ...(_adminClientId ? { adminClientId: _adminClientId } : {}),
+      }),
     }).catch(() => {});
   };
 
   const clearChat = () => {
     setMessages([]);
     const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-    fetch("/api/ad-agent/history", {
+    const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+    const deleteUrl = _adminClientId
+      ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(_adminClientId)}`
+      : "/api/ad-agent/history";
+    fetch(deleteUrl, {
       method: "DELETE",
       credentials: "include",
       headers: { ...(_sid ? { "x-sm-sid": _sid } : {}) },

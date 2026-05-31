@@ -540,9 +540,10 @@ function buildPixelDiagnosticsReply(result) {
   }
 
   lines.push(
-    '\nNote: For a full live event stream, open Meta Events Manager directly. ' +
-    'I can confirm the Pixel exists and show the last-fired time if Meta provides it, ' +
-    'but cannot stream live Events Manager data from here.'
+    '\nNote: I can confirm the Pixel exists and show the last-event timestamp Meta exposes through the Marketing API. ' +
+    'This is the actual last-fired time Meta reports — not a live event stream. ' +
+    'For real-time event verification, open Meta Events Manager → Test Events, ' +
+    'visit the website, and events will appear live in that interface.'
   );
   return lines.join('\n');
 }
@@ -1031,7 +1032,9 @@ router.get('/ad-agent/meta-ads-summary', limitPixel, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/ad-agent/history  — load saved chat history for the current user
+// GET /api/ad-agent/history
+// History is scoped to the effective user — admin-client mode reads the client's
+// history, not TheBoss's. Pass ?adminClientId=<username> when in client mode.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/ad-agent/history', limitChat, async (req, res) => {
   try {
@@ -1040,8 +1043,14 @@ router.get('/ad-agent/history', limitChat, async (req, res) => {
     const user = await findUserByOwnerKey(ownerKey);
     if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
 
-    const history = Array.isArray(user.adAgentHistory) ? user.adAgentHistory : [];
-    return res.json({ ok: true, history });
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const historyUser = effectiveOwnerKey !== ownerKey
+      ? (await findUserByOwnerKey(effectiveOwnerKey) || user)
+      : user;
+
+    const history = Array.isArray(historyUser.adAgentHistory) ? historyUser.adAgentHistory : [];
+    console.log('[AdAgent] history GET — owner:', historyUser.username, '| admin:', user.username !== historyUser.username ? user.username : null);
+    return res.json({ ok: true, history, historyOwner: historyUser.username });
   } catch (err) {
     console.error('[AdAgent] history GET error:', err?.message);
     return res.status(500).json({ ok: false, error: 'Could not load history.' });
@@ -1049,7 +1058,9 @@ router.get('/ad-agent/history', limitChat, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/ad-agent/history  — save (replace) chat history for the current user
+// POST /api/ad-agent/history
+// Saves to the effective user's history record. In admin-client mode the client's
+// record is updated, not TheBoss's.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/ad-agent/history', limitChat, async (req, res) => {
   try {
@@ -1063,14 +1074,18 @@ router.post('/ad-agent/history', limitChat, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'messages must be an array.' });
     }
 
-    // Sanitize: only keep user/assistant turns, truncate content, cap at 50 messages
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const historyUser = effectiveOwnerKey !== ownerKey
+      ? (await findUserByOwnerKey(effectiveOwnerKey) || user)
+      : user;
+
     const sanitized = messages
       .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
       .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }))
       .slice(-50);
 
     const idx = (db.data.users || []).findIndex(
-      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+      (u) => String(u?.username || '').trim() === String(historyUser.username || '').trim()
     );
     if (idx !== -1) {
       db.data.users[idx].adAgentHistory = sanitized;
@@ -1085,7 +1100,9 @@ router.post('/ad-agent/history', limitChat, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /api/ad-agent/history  — clear chat history for the current user
+// DELETE /api/ad-agent/history
+// Clears the effective user's history. In admin-client mode clears the client's
+// history, not TheBoss's.
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/ad-agent/history', limitChat, async (req, res) => {
   try {
@@ -1094,8 +1111,13 @@ router.delete('/ad-agent/history', limitChat, async (req, res) => {
     const user = await findUserByOwnerKey(ownerKey);
     if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
 
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const historyUser = effectiveOwnerKey !== ownerKey
+      ? (await findUserByOwnerKey(effectiveOwnerKey) || user)
+      : user;
+
     const idx = (db.data.users || []).findIndex(
-      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+      (u) => String(u?.username || '').trim() === String(historyUser.username || '').trim()
     );
     if (idx !== -1) {
       db.data.users[idx].adAgentHistory = [];
