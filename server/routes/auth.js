@@ -1990,6 +1990,17 @@ router.post('/login', async (req, res) => {
           (x) => String(x?.username || '').trim() === ADMIN_BYPASS_USERNAME
         ) || null;
 
+      const adminBilling = {
+        provider: '',
+        planKey: 'premium',
+        planName: 'Premium',
+        billingLabel: 'Premium',
+        founder: false,
+        status: 'active',
+        hasAccess: true,
+        currentPeriodEnd: null,
+      };
+
       if (!adminUser) {
         adminUser = {
           username: ADMIN_BYPASS_USERNAME,
@@ -1997,19 +2008,13 @@ router.post('/login', async (req, res) => {
           passwordHash: bcrypt.hashSync(rawPassword, 10),
           role: 'admin',
           createdAt: new Date().toISOString(),
-          billing: {
-            provider: '',
-            planKey: 'operator',
-            planName: 'Operator',
-            founder: false,
-            status: 'active',
-            hasAccess: true,
-            currentPeriodEnd: null,
-          },
+          billing: adminBilling,
         };
         db.data.users.push(adminUser);
-      } else if (adminUser.role !== 'admin') {
+      } else {
+        // Refresh role and billing to premium on every admin login
         adminUser.role = 'admin';
+        adminUser.billing = { ...(adminUser.billing || {}), ...adminBilling };
       }
 
       const sid = ensureSid(req, res);

@@ -69,11 +69,7 @@ async function findUserByUsername(username) {
 // ── Admin check (local to this feature) ──────────────────────────────────────
 function isAdminUser(user) {
   if (!user) return false;
-  return (
-    user.role === 'admin' ||
-    String(user.username || '').trim() === ADMIN_USERNAME ||
-    String(user?.billing?.planKey || '').trim().toLowerCase() === 'operator'
-  );
+  return user.role === 'admin' || String(user.username || '').trim() === ADMIN_USERNAME;
 }
 
 async function requireAdmin(req, res, next) {

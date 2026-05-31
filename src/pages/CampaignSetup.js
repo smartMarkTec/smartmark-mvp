@@ -5587,10 +5587,9 @@ const selectedCampaignCreatives =
       );
     })()}
 
-    {/* ── Clients sidebar item (operator/admin only) ── */}
+    {/* ── Clients sidebar item (TheBoss/admin only) ── */}
     {(() => {
-      const pk = String(billingInfo?.planKey || selectedPlan || "").trim().toLowerCase();
-      if (pk !== "operator") return null;
+      if (billingInfo?.username !== "TheBoss") return null;
       return (
         <button
           type="button"

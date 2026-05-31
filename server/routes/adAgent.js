@@ -60,13 +60,19 @@ async function findUserByOwnerKey(ownerKey) {
   );
 }
 
+const ADMIN_USERNAME_AGENT = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+
 // ── Ad Agent access — local to this feature only ──────────────────────────────
 // Returns: 'locked' | 'chat' | 'pixel'
-function adAgentAccess(planKey) {
-  const s = String(planKey || '').trim().toLowerCase();
+function adAgentAccess(user) {
+  // Admin role always gets full pixel access regardless of planKey
+  if (user?.role === 'admin' || String(user?.username || '').trim() === ADMIN_USERNAME_AGENT) {
+    return 'pixel';
+  }
+  const s = String(user?.billing?.planKey || '').trim().toLowerCase();
   if (s === 'premium' || s === 'operator') return 'pixel';
   if (s === 'deluxe' || s === 'pro') return 'chat';
-  return 'locked'; // base, starter, standard, '', unknown
+  return 'locked';
 }
 
 // ── Pixel intent detection ────────────────────────────────────────────────────
@@ -204,8 +210,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Not authenticated. Please log in.' });
     }
 
-    const planKey = String(user?.billing?.planKey || '').trim();
-    const access = adAgentAccess(planKey);
+    const access = adAgentAccess(user);
 
     if (access === 'locked') {
       return res.status(403).json({
@@ -280,8 +285,7 @@ router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Not authenticated.' });
     }
 
-    const planKey = String(user?.billing?.planKey || '').trim();
-    const access = adAgentAccess(planKey);
+    const access = adAgentAccess(user);
 
     if (access !== 'pixel') {
       return res.status(403).json({ ok: false, error: 'Meta Pixel fetch is available on Premium only.' });

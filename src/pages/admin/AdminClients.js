@@ -38,15 +38,15 @@ export default function AdminClients() {
     (async () => {
       try {
         const r = await fetch("/api/admin/clients", { credentials: "include" });
-        if (r.status === 403) {
-          navigate("/setup");
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 403 || r.status === 401) {
+          setError(`Access denied (${r.status}). You must be logged in as an admin or operator account to view this page.`);
           return;
         }
-        const j = await r.json().catch(() => ({}));
-        if (!j.ok) throw new Error(j.error || "Failed to load clients.");
+        if (!j.ok) throw new Error(j.error || `Server returned ${r.status}.`);
         setClients(j.clients || []);
       } catch (err) {
-        setError(err.message);
+        setError(err.message || "Failed to load clients. Check that you are logged in.");
       } finally {
         setLoading(false);
       }
