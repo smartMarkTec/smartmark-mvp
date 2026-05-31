@@ -5269,11 +5269,28 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
 
     const list = Array.isArray(response.data?.data) ? response.data.data : [];
 
-    // Enrich each campaign with its Smartemark archive flag from our DB
+    // Enrich each campaign with its Smartemark archive flag from our DB.
+    // Scope by ownerKey candidates (session ID + username) to prevent cross-user
+    // smArchived flag leakage when two records share the same Meta campaign ID.
     await db.read();
     const _dbCampaigns = db.data?.campaign_creatives || [];
+    const _archiveSid = getSidFromReq(req);
+    const _archiveCandidates = new Set([String(ownerKey || ''), String(_archiveSid || '')]);
+    try {
+      const _archiveSess = (db.data.sessions || []).find(
+        (s) => String(s.sid) === String(_archiveSid)
+      );
+      if (_archiveSess?.username) {
+        _archiveCandidates.add(`user:${String(_archiveSess.username).trim()}`);
+      }
+    } catch {}
+
     const enriched = list.map((c) => {
-      const dbRec = _dbCampaigns.find((r) => String(r.campaignId || '') === String(c.id || ''));
+      const dbRec = _dbCampaigns.find(
+        (r) =>
+          String(r.campaignId || '') === String(c.id || '') &&
+          _archiveCandidates.has(String(r.ownerKey || ''))
+      );
       return dbRec?.smArchived ? { ...c, smArchived: true } : c;
     });
 

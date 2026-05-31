@@ -1477,6 +1477,8 @@ function MetricsRow({ metrics, optimizerState, showConversions }) {
 
   const normalized = useMemo(() => {
     const m = metrics || {};
+    // Full snapshot from optimizer state (has CPM, linkClicks, conversions, etc.)
+    const snap = optimizerState?.metricsSnapshot || {};
 
     const impressions = safeNum(m.impressions, 0);
     const clicks = safeNum(m.clicks, 0);
@@ -1487,48 +1489,73 @@ function MetricsRow({ metrics, optimizerState, showConversions }) {
         : impressions > 0
         ? (clicks / impressions) * 100
         : 0;
-
-    const cpcNum = clicks > 0 ? spend / clicks : 0;
+    const cpcNum = clicks > 0 ? spend / clicks : safeNum(snap.cpc, 0);
+    const cpmNum = safeNum(snap.cpm, impressions > 0 ? (spend * 1000) / impressions : 0);
+    const linkClicks = safeNum(snap.linkClicks, clicks);
     const hasDelivery = impressions > 0 || clicks > 0 || spend > 0;
 
-    // Conversions come from the optimizer state's metricsSnapshot (synced from Meta insights actions)
-    const snap = optimizerState?.metricsSnapshot || {};
     const conversions = safeNum(snap.conversions, 0);
-    const costPerConv = conversions > 0 ? safeNum(snap.costPerConversion, 0) : 0;
+    const conversionRate = conversions > 0 && linkClicks > 0
+      ? (conversions / linkClicks) * 100
+      : safeNum(snap.conversionRate, 0);
+    const costPerConv = conversions > 0 && spend > 0
+      ? spend / conversions
+      : safeNum(snap.costPerConversion, 0);
 
     return {
+      spend: spend > 0 ? `$${spend.toFixed(2)}` : "$0.00",
       impressions: impressions.toLocaleString(),
-      clicks: clicks.toLocaleString(),
+      clicks: linkClicks > 0 ? linkClicks.toLocaleString() : clicks.toLocaleString(),
       ctr: `${ctrNum.toFixed(2)}%`,
       cpc: `$${cpcNum.toFixed(2)}`,
+      cpm: cpmNum > 0 ? `$${cpmNum.toFixed(2)}` : "$0.00",
       hasDelivery,
       conversions,
+      conversionRate,
       costPerConv,
     };
   }, [metrics, optimizerState]);
 
   const baseCards = [
+    { key: "spend",       label: "Spend",      value: normalized.spend },
     { key: "impressions", label: "Impressions", value: normalized.impressions },
-    { key: "clicks", label: "Clicks", value: normalized.clicks },
-    { key: "ctr", label: "CTR", value: normalized.ctr },
-    { key: "cpc", label: "CPC", value: normalized.cpc },
+    { key: "clicks",      label: "Link Clicks", value: normalized.clicks },
+    { key: "ctr",         label: "CTR",         value: normalized.ctr },
+    { key: "cpc",         label: "CPC",         value: normalized.cpc },
+    { key: "cpm",         label: "CPM",         value: normalized.cpm },
   ];
 
-  const conversionCard = showConversions
-    ? [{
-        key: "conversions",
-        label: "Conversions",
-        value: normalized.conversions > 0
-          ? String(normalized.conversions)
-          : "0",
-        sub: normalized.conversions > 0 && normalized.costPerConv > 0
-          ? `$${normalized.costPerConv.toFixed(2)}/conv`
-          : "From Meta Pixel/actions",
-        isPremium: true,
-      }]
+  const conversionCards = showConversions
+    ? [
+        {
+          key: "conversions",
+          label: "Conversions",
+          value: normalized.conversions > 0 ? String(normalized.conversions) : "0",
+          sub: normalized.conversions === 0 ? "No conversions yet" : undefined,
+          isPremium: true,
+        },
+        {
+          key: "conv-rate",
+          label: "Conv Rate",
+          value: normalized.conversions > 0 && normalized.conversionRate > 0
+            ? `${Number(normalized.conversionRate).toFixed(2)}%`
+            : "—",
+          sub: "Conversions / link clicks",
+          isPremium: true,
+        },
+        {
+          key: "cost-per-conv",
+          label: "Cost / Conv",
+          value: normalized.conversions > 0 && normalized.costPerConv > 0
+            ? `$${Number(normalized.costPerConv).toFixed(2)}`
+            : "—",
+          sub: normalized.conversions === 0 ? "No conversions yet" : "Spend / conversions",
+          isPremium: true,
+        },
+      ]
     : [];
 
-  const cards = [...baseCards, ...conversionCard];
+  const cards = [...baseCards, ...conversionCards];
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
@@ -1565,11 +1592,7 @@ function MetricsRow({ metrics, optimizerState, showConversions }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isMobile
-            ? "repeat(2, 1fr)"
-            : cards.length === 5
-            ? "repeat(5, minmax(0, 1fr))"
-            : "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, minmax(0, 1fr))",
           gap: 10,
         }}
       >

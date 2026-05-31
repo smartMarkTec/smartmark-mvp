@@ -422,6 +422,131 @@ function buildPixelCreateReply(result) {
   );
 }
 
+// ── Pixel diagnostics / event activity ───────────────────────────────────────
+// Matches questions about whether the Pixel is working/receiving events.
+// MUST be checked before isPixelIntent so diagnostic phrases don't fall through
+// to the install-code path.
+function isPixelDiagnosticsIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /pixel.*receiv/i.test(s) ||
+    /pixel.*event/i.test(s) ||
+    /pixel.*activ/i.test(s) ||
+    /pixel.*work/i.test(s) ||
+    /pixel.*fir/i.test(s) ||
+    /pixel.*send/i.test(s) ||
+    /pixel.*status/i.test(s) ||
+    /pixel.*diagnos/i.test(s) ||
+    /pixel.*test/i.test(s) ||
+    /pixel.*verif/i.test(s) ||
+    /check.*pixel/i.test(s) ||
+    /event.*pixel/i.test(s) ||
+    /events?\s*manager/i.test(s) ||
+    /pagev?iew.*fire/i.test(s) ||
+    /lead.*event/i.test(s) ||
+    /track.*event/i.test(s) ||
+    /did.*pixel/i.test(s) ||
+    /is.*pixel/i.test(s)
+  );
+}
+
+async function checkPixelEventActivity(ownerKey) {
+  const token = getFbUserToken(ownerKey);
+  if (!token) return { notConnected: true };
+
+  try {
+    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+      params: { fields: 'id,name', access_token: token },
+      timeout: 10000,
+    });
+    const accounts = acctRes.data?.data || [];
+    if (!accounts.length) return { noAccount: true };
+
+    const actId = accounts[0].id;
+
+    const pixelRes = await axios.get(
+      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      {
+        params: { fields: 'id,name,last_fired_time,is_unavailable', access_token: token },
+        timeout: 10000,
+      }
+    );
+    const pixels = pixelRes.data?.data || [];
+    if (!pixels.length) return { noPixel: true, adAccountId: actId };
+
+    return {
+      adAccountId: actId,
+      pixels: pixels.map((p) => ({
+        id: p.id,
+        name: p.name || 'Unnamed Pixel',
+        lastFiredTime: p.last_fired_time || null,
+        isUnavailable: !!p.is_unavailable,
+      })),
+    };
+  } catch (err) {
+    const fbError = err?.response?.data?.error;
+    if (fbError) {
+      const code = fbError.code;
+      if (code === 190 || code === 102) {
+        return { error: 'Your Facebook session has expired. Please reconnect your Facebook account.' };
+      }
+      return { error: fbError.message || 'Meta API error.' };
+    }
+    console.error('[AdAgent] checkPixelEventActivity error:', err?.message || err);
+    return { error: 'Could not reach Meta API. Please try again.' };
+  }
+}
+
+function buildPixelDiagnosticsReply(result) {
+  if (result.notConnected) {
+    return 'Facebook is not connected yet. Connect your Facebook ad account first in the Connect Facebook step.';
+  }
+  if (result.noAccount) {
+    return 'No connected Facebook ad account was found. Connect or select an ad account first.';
+  }
+  if (result.error) {
+    return 'There was an issue checking Pixel event activity: ' + result.error;
+  }
+  if (result.noPixel) {
+    return (
+      'No Meta Pixel was found for your connected ad account. ' +
+      'You\'ll need to create one first — say "create a pixel" and I\'ll set one up for you.'
+    );
+  }
+
+  const lines = [];
+  for (const p of result.pixels) {
+    lines.push('Pixel: "' + p.name + '" (ID: ' + p.id + ')');
+    if (p.isUnavailable) {
+      lines.push('  Status: Unavailable — Meta may have restricted access to this Pixel.');
+    } else if (p.lastFiredTime) {
+      const last = new Date(p.lastFiredTime);
+      const diffMs = Date.now() - last.getTime();
+      const diffHrs = Math.round(diffMs / 3600000);
+      const diffDays = Math.round(diffMs / 86400000);
+      const ago = diffHrs < 1 ? 'less than an hour ago'
+        : diffHrs < 24 ? `~${diffHrs} hour${diffHrs === 1 ? '' : 's'} ago`
+        : `~${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+      lines.push(`  Last event received: ${ago} (${last.toLocaleDateString()})`);
+      lines.push('  The Pixel appears to be receiving events. ✓');
+    } else {
+      lines.push(
+        '  No recent event activity is visible via the current API access. ' +
+        'This does not mean the Pixel is broken — Meta limits what the API can report.\n\n' +
+        '  To verify in real time: go to Meta Events Manager (business.facebook.com → Events Manager → your Pixel → Test Events), ' +
+        'then visit the website and click the Lead button. You should see PageView and Lead events appear immediately.'
+      );
+    }
+  }
+
+  lines.push(
+    '\nNote: For a full live event stream, open Meta Events Manager directly. ' +
+    'I can confirm the Pixel exists and show the last-fired time if Meta provides it, ' +
+    'but cannot stream live Events Manager data from here.'
+  );
+  return lines.join('\n');
+}
+
 // ── Meta Ads Manager read-only helpers ───────────────────────────────────────
 
 function extractConversions(actions) {
@@ -655,6 +780,19 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.json({ ok: true, reply: buildPixelCreateReply(createResult) });
     }
 
+    // Pixel DIAGNOSTICS intent — check BEFORE fetch intent so "check my pixel / is it active"
+    // doesn't fall through to the install-code path
+    if (isPixelDiagnosticsIntent(trimmed)) {
+      if (access !== 'pixel') {
+        return res.json({
+          ok: true,
+          reply: 'Meta Pixel diagnostics are available on the Premium plan. Upgrade to Premium to check Pixel event activity.',
+        });
+      }
+      const diagResult = await checkPixelEventActivity(effectiveOwnerKey);
+      return res.json({ ok: true, reply: buildPixelDiagnosticsReply(diagResult) });
+    }
+
     // Meta Ads Manager read-only check
     if (isMetaAdsManagerIntent(trimmed)) {
       if (access !== 'pixel') {
@@ -822,6 +960,38 @@ router.post('/ad-agent/meta-pixel/create', limitPixel, async (req, res) => {
   } catch (err) {
     console.error('[AdAgent] meta-pixel/create error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong creating Meta Pixel.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ad-agent/meta-pixel/events
+// Premium/admin only — read-only Pixel event activity check
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/ad-agent/meta-pixel/events', limitPixel, async (req, res) => {
+  try {
+    try { await db.read(); } catch {}
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+
+    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+    if (adAgentAccess(user) !== 'pixel') {
+      return res.status(403).json({ ok: false, error: 'Pixel diagnostics are available on Premium only.' });
+    }
+
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const result = await checkPixelEventActivity(effectiveOwnerKey);
+
+    if (result.notConnected) {
+      return res.json({ ok: false, notConnected: true, error: 'Facebook is not connected yet.' });
+    }
+    if (result.error) {
+      return res.status(500).json({ ok: false, error: result.error });
+    }
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[AdAgent] meta-pixel/events error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Something went wrong checking Pixel events.' });
   }
 });
 
