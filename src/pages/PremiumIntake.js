@@ -34,6 +34,7 @@ const EMPTY = {
   bestContactName: "",
   bestContactEmail: "",
   bestContactPhone: "",
+  callForwardingNumber: "",
   additionalNotes: "",
 };
 
@@ -182,6 +183,7 @@ export default function PremiumIntake() {
               <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_SOFT, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 14 }}>Optional</div>
               <Field label="Current Special or Offer" name="currentSpecialOrOffer" value={form.currentSpecialOrOffer} onChange={set("currentSpecialOrOffer")} placeholder="e.g. $89 AC tune-up, free estimate" multiline />
               <Field label="Preferred Monthly Ad Budget" name="preferredAdBudget" value={form.preferredAdBudget} onChange={set("preferredAdBudget")} placeholder="e.g. $200/month, $500/month" hint="Facebook/Instagram ad spend is separate from Smartemark's fee." />
+              <Field label="What phone number should ad calls forward to?" name="callForwardingNumber" value={form.callForwardingNumber} onChange={set("callForwardingNumber")} placeholder="e.g. (832) 555-0100" hint="This is the real number callers will be connected to when they dial your tracking number." />
             </div>
 
             <button

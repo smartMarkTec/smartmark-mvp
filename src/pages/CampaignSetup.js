@@ -6962,19 +6962,66 @@ const selectedCampaignCreatives =
             padding: "2px 0",
           }}
         >
-          <MetricsRow
-            metrics={metricsMap[selectedCampaignId]}
-            optimizerState={selectedOptimizerState}
-            showConversions={(() => {
-              const pk = String(
-                adminClientId
-                  ? adminClientInfo?.planKey || ""
-                  : billingInfo?.planKey || ""
-              ).trim().toLowerCase();
-              const isAdminUser = String(billingInfo?.username || "").trim() === ADMIN_BYPASS_USERNAME;
-              return pk === "premium" || pk === "operator" || isAdminUser;
-            })()}
-          />
+          {(() => {
+            const pk = String(
+              adminClientId
+                ? adminClientInfo?.planKey || ""
+                : billingInfo?.planKey || ""
+            ).trim().toLowerCase();
+            const isAdminUser = String(billingInfo?.username || "").trim() === ADMIN_BYPASS_USERNAME;
+            const showPremium = pk === "premium" || pk === "operator" || isAdminUser;
+            return (
+              <>
+                <MetricsRow
+                  metrics={metricsMap[selectedCampaignId]}
+                  optimizerState={selectedOptimizerState}
+                  showConversions={showPremium}
+                />
+                {showPremium && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      background: "linear-gradient(145deg, #f5f3ff 0%, #ede9fe 100%)",
+                      border: "1px solid rgba(109,40,217,0.14)",
+                      borderRadius: 14,
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#7c3aed",
+                        letterSpacing: "0.07em",
+                        textTransform: "uppercase",
+                        marginBottom: 10,
+                      }}
+                    >
+                      Call Tracking
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 8 }}>
+                      {[
+                        { label: "Status",            value: "Not set up" },
+                        { label: "Tracked Calls",     value: "0" },
+                        { label: "Tracking Number",   value: "Not assigned yet" },
+                        { label: "Forwarding Number", value: "Not added yet" },
+                      ].map((row) => (
+                        <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "#7c3aed", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                            {row.label}
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{row.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 11, color: "#7c3aed", lineHeight: 1.45 }}>
+                      Call tracking uses a dedicated number that forwards to the business's real phone. Setup coming soon.
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </>
     ) : (

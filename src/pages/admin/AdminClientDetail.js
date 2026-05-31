@@ -149,6 +149,7 @@ export default function AdminClientDetail() {
   const intake = client?.premiumIntake;
   const onboarding = client?.onboarding || {};
   const metaPixel = client?.metaPixel || null;
+  const callTracking = client?.callTracking || null;
   const campaigns = client?.campaigns || [];
 
   return (
@@ -353,6 +354,21 @@ export default function AdminClientDetail() {
                 />
               </div>
             </>
+          )}
+        </Card>
+
+        {/* Call Tracking */}
+        <Card title="Call Tracking">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+            <InfoRow label="Setup Status"      value={callTracking?.setupStatus || "Not set up"} />
+            <InfoRow label="Tracked Calls"     value={callTracking?.trackedCalls != null ? String(callTracking.trackedCalls) : "0"} />
+            <InfoRow label="Tracking Number"   value={callTracking?.trackingNumber || "Not assigned yet"} />
+            <InfoRow label="Forwarding Number" value={callTracking?.forwardingNumber || intake?.callForwardingNumber || "Not added yet"} />
+          </div>
+          {!callTracking && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: TEXT_SOFT, lineHeight: 1.5 }}>
+              Call tracking setup is pending. A dedicated tracking number will forward to the client's real phone number.
+            </p>
           )}
         </Card>
 
