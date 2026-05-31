@@ -2907,7 +2907,14 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   });
 
   const state = location.state || {};
-  const adminClientId = String(state.adminClientId || "").trim();
+  // adminClientId: prefer route state (set by FormPage navigate), fall back to URL param
+  const adminClientId = (() => {
+    const fromState = String(state.adminClientId || "").trim();
+    if (fromState) return fromState;
+    try {
+      return new URLSearchParams(location.search || "").get("adminClientId") || "";
+    } catch { return ""; }
+  })();
   const adminClientBusinessName = String(state.adminClientBusinessName || "").trim();
   const navImageUrls = Array.isArray(state.imageUrls)
     ? state.imageUrls
@@ -4839,11 +4846,23 @@ console.log("[LAUNCH][creative-payload]", {
   answersHasIndustry: !!(answers?.industry || answers?.businessType),
 });
 
-      const res = await authFetch(`/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const isAdminLaunch = !!adminClientId;
+      const adminSid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const res = isAdminLaunch
+        ? await fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}/launch-campaign`, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              ...(adminSid ? { "x-sm-sid": adminSid } : {}),
+            },
+            body: JSON.stringify({ adAccountId: acctId, ...payload }),
+          })
+        : await authFetch(`/facebook/adaccount/${acctId}/launch-campaign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
 
       const rawText = await res.text().catch(() => "");
       let json = null;
@@ -5310,6 +5329,26 @@ const selectedCampaignCreatives =
           >
             ← Back
           </button>
+
+          {adminClientId && (
+            <button
+              onClick={() => navigate("/admin/clients")}
+              style={{
+                background: "#5d59ea",
+                color: WHITE,
+                border: "1px solid rgba(93,89,234,0.5)",
+                borderRadius: "1.1rem",
+                padding: "10px 18px",
+                fontWeight: 800,
+                fontSize: "1rem",
+                letterSpacing: "0.6px",
+                cursor: "pointer",
+                boxShadow: "0 2px 10px rgba(93,89,234,0.3)",
+              }}
+            >
+              Admin Dashboard
+            </button>
+          )}
 
           <button
             onClick={() => navigate("/")}

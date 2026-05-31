@@ -932,19 +932,6 @@ export default function FormPage() {
       .catch(() => {});
   }, [adminClientId]);
 
-  useEffect(() => {
-    if (!adminClientInfo) return;
-    const intake = adminClientInfo.premiumIntake || {};
-    setAnswers((prev) => ({
-      ...(prev || {}),
-      ...(intake.businessName ? { businessName: intake.businessName } : {}),
-      ...(intake.websiteUrl ? { url: intake.websiteUrl } : {}),
-      ...(intake.mainServices ? { services: intake.mainServices } : {}),
-      ...(intake.currentSpecialOrOffer ? { offer: intake.currentSpecialOrOffer } : {}),
-      ...(intake.serviceArea ? { location: intake.serviceArea } : {}),
-    }));
-  }, [adminClientInfo]);
-
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
