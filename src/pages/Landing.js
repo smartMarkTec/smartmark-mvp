@@ -237,6 +237,9 @@ export default function Landing() {
 
   // Get Started → /pricing for new visitors; → /setup for logged-in users
   const handleCTA = () => {
+    if (typeof window.fbq === "function") {
+      window.fbq("track", "Lead");
+    }
     window.location.href = isLoggedIn ? "/setup" : "/pricing";
   };
 

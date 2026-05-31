@@ -422,6 +422,182 @@ function buildPixelCreateReply(result) {
   );
 }
 
+// ── Meta Ads Manager read-only helpers ───────────────────────────────────────
+
+function extractConversions(actions) {
+  if (!Array.isArray(actions)) return 0;
+  const convTypes = new Set([
+    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
+    'omni_lead', 'purchase', 'offsite_conversion.fb_pixel_purchase',
+  ]);
+  return actions.reduce((sum, row) => {
+    if (convTypes.has(String(row?.action_type || '').trim().toLowerCase())) {
+      return sum + Number(row?.value || 0);
+    }
+    return sum;
+  }, 0);
+}
+
+function isMetaAdsManagerIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /ads?\s*manager/i.test(s) ||
+    /check.*meta\s*ads/i.test(s) ||
+    /check.*facebook\s*ads/i.test(s) ||
+    /check.*fb\s*ads/i.test(s) ||
+    /meta\s*ads?\s*report/i.test(s) ||
+    /facebook\s*ads?\s*report/i.test(s) ||
+    /ad\s*account\s*performance/i.test(s) ||
+    /show.*meta.*campaigns?/i.test(s) ||
+    /what.*going.*on.*in.*(?:my\s+)?ads/i.test(s) ||
+    /give.*me.*(?:a\s+)?(?:meta|facebook)\s*ads?\s*(report|summary|update)/i.test(s) ||
+    /report.*(?:meta|facebook)\s*ads/i.test(s)
+  );
+}
+
+async function fetchMetaAdsSummary(ownerKey) {
+  const token = getFbUserToken(ownerKey);
+  if (!token) return { notConnected: true };
+
+  try {
+    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+      params: { fields: 'id,name', access_token: token },
+      timeout: 10000,
+    });
+    const accounts = acctRes.data?.data || [];
+    if (!accounts.length) return { noAccount: true };
+
+    const actId = accounts[0].id;
+    const actName = accounts[0].name || actId;
+
+    const campRes = await axios.get(
+      'https://graph.facebook.com/v18.0/' + actId + '/campaigns',
+      {
+        params: { fields: 'id,name,status,effective_status,objective', access_token: token, limit: 10 },
+        timeout: 10000,
+      }
+    );
+    const campaigns = campRes.data?.data || [];
+    if (!campaigns.length) {
+      return { noCampaigns: true, adAccountId: actId, adAccountName: actName };
+    }
+
+    const campaignData = await Promise.all(
+      campaigns.slice(0, 6).map(async (c) => {
+        try {
+          const insRes = await axios.get(
+            'https://graph.facebook.com/v18.0/' + c.id + '/insights',
+            {
+              params: {
+                fields: 'impressions,clicks,spend,ctr,cpc,cpm,reach,actions',
+                date_preset: 'last_7d',
+                access_token: token,
+              },
+              timeout: 10000,
+            }
+          );
+          const row = insRes.data?.data?.[0] || {};
+          const actions = Array.isArray(row.actions) ? row.actions : [];
+          const conversions = extractConversions(actions);
+          const imp = Number(row.impressions || 0);
+          const spd = Number(row.spend || 0);
+          return {
+            id: c.id,
+            name: c.name,
+            status: String(c.effective_status || c.status || '').toUpperCase(),
+            objective: c.objective || null,
+            impressions: imp,
+            reach: Number(row.reach || 0),
+            clicks: Number(row.clicks || 0),
+            spend: spd,
+            ctr: Number(row.ctr || 0),
+            cpc: Number(row.cpc || 0),
+            cpm: Number(row.cpm || 0),
+            conversions,
+            hasData: imp > 0 || spd > 0,
+          };
+        } catch {
+          return {
+            id: c.id,
+            name: c.name,
+            status: String(c.effective_status || c.status || '').toUpperCase(),
+            hasData: false,
+          };
+        }
+      })
+    );
+
+    return { adAccountId: actId, adAccountName: actName, campaigns: campaignData };
+  } catch (err) {
+    const fbError = err?.response?.data?.error;
+    if (fbError) {
+      const code = fbError.code;
+      if (code === 190 || code === 102) {
+        return { error: 'Your Facebook session has expired. Please reconnect your Facebook account.' };
+      }
+      return { error: fbError.message || 'Meta API error.' };
+    }
+    console.error('[AdAgent] fetchMetaAdsSummary error:', err?.message || err);
+    return { error: 'Could not reach Meta API. Please try again.' };
+  }
+}
+
+function buildMetaAdsSummaryReply(result) {
+  if (result.notConnected) {
+    return 'Facebook is not connected yet. Connect your Facebook ad account first in the Connect Facebook step.';
+  }
+  if (result.noAccount) {
+    return 'No connected Facebook ad account was found. Connect or select an ad account first.';
+  }
+  if (result.error) {
+    return 'There was an issue checking Meta Ads Manager: ' + result.error;
+  }
+  if (result.noCampaigns) {
+    return (
+      'I connected to your ad account (' + result.adAccountId + ') but don\'t see any campaigns yet. ' +
+      'Launch a campaign to start seeing performance data here.'
+    );
+  }
+
+  const { adAccountId, adAccountName, campaigns } = result;
+  const lines = [
+    "Here's what I'm seeing in Meta Ads Manager (last 7 days):\n",
+    'Ad Account: ' + adAccountName + ' (' + adAccountId + ')\n',
+  ];
+
+  for (const c of campaigns) {
+    lines.push('Campaign: "' + c.name + '" — ' + (c.status || 'UNKNOWN'));
+
+    if (!c.hasData) {
+      lines.push('  No delivery data in the last 7 days.');
+    } else {
+      const parts = [];
+      if (c.spend > 0)       parts.push('Spend: $' + Number(c.spend).toFixed(2));
+      if (c.impressions > 0) parts.push('Impressions: ' + Number(c.impressions).toLocaleString());
+      if (c.reach > 0)       parts.push('Reach: ' + Number(c.reach).toLocaleString());
+      if (c.clicks > 0)      parts.push('Clicks: ' + c.clicks);
+      if (c.ctr > 0)         parts.push('CTR: ' + Number(c.ctr).toFixed(2) + '%');
+      if (c.cpc > 0)         parts.push('CPC: $' + Number(c.cpc).toFixed(2));
+      if (c.cpm > 0)         parts.push('CPM: $' + Number(c.cpm).toFixed(2));
+      if (c.conversions > 0) parts.push('Conversions: ' + c.conversions);
+      if (parts.length) lines.push('  ' + parts.join(' · '));
+
+      // Plain-language read on performance
+      const ctr = Number(c.ctr || 0);
+      if (c.status === 'ACTIVE' && c.impressions > 500) {
+        if (ctr >= 2.0)       lines.push('  Looks good — CTR is strong.');
+        else if (ctr >= 1.0)  lines.push('  Decent CTR, some room to improve creative or copy.');
+        else if (c.impressions > 1000) lines.push('  CTR below 1% — worth testing a fresh creative or tightening the headline.');
+      } else if (c.status !== 'ACTIVE') {
+        lines.push('  Campaign is ' + c.status.toLowerCase() + ' — not currently delivering.');
+      }
+    }
+  }
+
+  lines.push('\nNote: This is a read-only summary. To make changes, go to Meta Ads Manager directly.');
+  return lines.join('\n');
+}
+
 // ── Rate limits ───────────────────────────────────────────────────────────────
 const limitChat = basicRateLimit({ windowMs: 60 * 1000, max: 30 });
 const limitPixel = basicRateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -477,6 +653,18 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         savePixelInfo(effectiveOwnerKey, p.id, p.name, createResult.adAccountId, st);
       }
       return res.json({ ok: true, reply: buildPixelCreateReply(createResult) });
+    }
+
+    // Meta Ads Manager read-only check
+    if (isMetaAdsManagerIntent(trimmed)) {
+      if (access !== 'pixel') {
+        return res.json({
+          ok: true,
+          reply: 'Live Meta Ads Manager checks are available on Premium. Upgrade to Premium to check your ad account performance directly from Ad Agent.',
+        });
+      }
+      const adsSummary = await fetchMetaAdsSummary(effectiveOwnerKey);
+      return res.json({ ok: true, reply: buildMetaAdsSummaryReply(adsSummary) });
     }
 
     // Pixel FETCH intent on non-pixel plan
@@ -634,6 +822,41 @@ router.post('/ad-agent/meta-pixel/create', limitPixel, async (req, res) => {
   } catch (err) {
     console.error('[AdAgent] meta-pixel/create error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong creating Meta Pixel.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ad-agent/meta-ads-summary
+// Premium/admin only — read-only Meta campaign performance summary
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/ad-agent/meta-ads-summary', limitPixel, async (req, res) => {
+  try {
+    try { await db.read(); } catch {}
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+    }
+    if (adAgentAccess(user) !== 'pixel') {
+      return res.status(403).json({ ok: false, error: 'Live ad account checks are available on Premium only.' });
+    }
+
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const result = await fetchMetaAdsSummary(effectiveOwnerKey);
+
+    if (result.notConnected) {
+      return res.json({ ok: false, notConnected: true, error: 'Facebook is not connected yet. Connect your ad account first.' });
+    }
+    if (result.error) {
+      return res.status(500).json({ ok: false, error: result.error });
+    }
+
+    // Return safe structured data — no tokens
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[AdAgent] meta-ads-summary error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Something went wrong fetching Meta ads summary.' });
   }
 });
 
