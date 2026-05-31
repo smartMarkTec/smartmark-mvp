@@ -5363,6 +5363,16 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/archive', asyn
         smArchived: true,
         archivedAt: new Date().toISOString(),
       };
+    } else {
+      // No existing record — create a stub so the archive flag persists across reloads.
+      // Without this, campaigns launched externally (on Meta directly) would un-archive
+      // on next page load because the campaigns list endpoint only reads smArchived from this table.
+      db.data.campaign_creatives.push({
+        campaignId: id,
+        ownerKey,
+        smArchived: true,
+        archivedAt: new Date().toISOString(),
+      });
     }
 
     db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];

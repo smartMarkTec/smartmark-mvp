@@ -30,7 +30,7 @@ export default function AdAgent() {
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // Load user/plan from /auth/whoami — reads from DB, works for admin accounts
+  // Load user/plan from /auth/whoami, then load saved chat history
   useEffect(() => {
     (async () => {
       try {
@@ -40,6 +40,14 @@ export default function AdAgent() {
         const j = await r.json().catch(() => ({}));
         setPlanKey(String(j?.billing?.planKey || j?.planKey || "").trim());
         setIsAdmin(!!j?.user?.isAdmin);
+        // Load persisted chat history
+        const hr = await fetch("/api/ad-agent/history", { credentials: "include", headers });
+        if (hr.ok) {
+          const hj = await hr.json().catch(() => ({}));
+          if (Array.isArray(hj?.history) && hj.history.length > 0) {
+            setMessages(hj.history);
+          }
+        }
       } catch {
         setPlanKey("");
       } finally {
@@ -47,6 +55,29 @@ export default function AdAgent() {
       }
     })();
   }, []);
+
+  const saveHistory = (msgs) => {
+    const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    fetch("/api/ad-agent/history", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(_sid ? { "x-sm-sid": _sid } : {}),
+      },
+      body: JSON.stringify({ messages: msgs }),
+    }).catch(() => {});
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    fetch("/api/ad-agent/history", {
+      method: "DELETE",
+      credentials: "include",
+      headers: { ...(_sid ? { "x-sm-sid": _sid } : {}) },
+    }).catch(() => {});
+  };
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -84,7 +115,9 @@ export default function AdAgent() {
       });
       const j = await r.json().catch(() => ({}));
       const reply = j?.reply || "Sorry, something went wrong. Please try again.";
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      const finalMessages = [...updatedMessages, { role: "assistant", content: reply }];
+      setMessages(finalMessages);
+      saveHistory(finalMessages);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -247,7 +280,7 @@ export default function AdAgent() {
         >
           <FaRobot style={{ color: PURPLE, fontSize: 16 }} />
         </div>
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: TEXT, lineHeight: 1.2 }}>
             Ad Agent
           </div>
@@ -257,6 +290,24 @@ export default function AdAgent() {
               : "AI marketing assistant"}
           </div>
         </div>
+        {hasMessages && (
+          <button
+            onClick={clearChat}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: TEXT_SOFT,
+              fontSize: 13,
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontFamily: FONT,
+              flexShrink: 0,
+            }}
+          >
+            Clear chat
+          </button>
+        )}
       </div>
 
       {/* Message area */}

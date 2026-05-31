@@ -27,11 +27,16 @@ async function getCampaignContext(ownerKey) {
     await db.read();
     const allStates = db.data?.optimizer_campaign_state || [];
     const userStates = allStates.filter(
-      (s) => String(s?.ownerKey || '').trim() === String(ownerKey || '').trim()
+      (s) =>
+        String(s?.ownerKey || '').trim() === String(ownerKey || '').trim() &&
+        !s?.smArchived
     );
-    if (!userStates.length) return null;
 
-    // Prefer active/paused, take up to 3
+    if (!userStates.length) {
+      return 'No active campaign metrics are available. If the user asks about campaign performance, say exactly: "I don\'t see active campaign metrics connected yet."';
+    }
+
+    // Prefer active campaigns first, take up to 3
     const sorted = [
       ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() === 'ACTIVE'),
       ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() !== 'ACTIVE'),
@@ -57,7 +62,7 @@ async function getCampaignContext(ownerKey) {
       if (m.impressions) parts.push(`Impressions: ${Math.round(Number(m.impressions)).toLocaleString()}`);
       if (m.reach)       parts.push(`Reach: ${Math.round(Number(m.reach)).toLocaleString()}`);
       if (m.clicks != null && m.clicks !== '') parts.push(`Clicks: ${m.clicks}`);
-      if (m.link_clicks) parts.push(`Link clicks: ${m.link_clicks}`);
+      if (m.linkClicks)  parts.push(`Link clicks: ${m.linkClicks}`);
       if (m.spend)       parts.push(`Spend: $${Number(m.spend).toFixed(2)}`);
       if (m.ctr)         parts.push(`CTR: ${Number(m.ctr).toFixed(2)}%`);
       if (m.cpc)         parts.push(`CPC: $${Number(m.cpc).toFixed(2)}`);
@@ -69,7 +74,7 @@ async function getCampaignContext(ownerKey) {
       if (summary) lines.push(`  AI note: ${String(summary).slice(0, 200)}`);
     }
 
-    return lines.length > 1 ? lines.join('\n') : null;
+    return lines.join('\n');
   } catch {
     return null;
   }
@@ -379,6 +384,85 @@ router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
   } catch (err) {
     console.error('[AdAgent] meta-pixel error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong fetching Meta Pixel.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/ad-agent/history  — load saved chat history for the current user
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/ad-agent/history', limitChat, async (req, res) => {
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const history = Array.isArray(user.adAgentHistory) ? user.adAgentHistory : [];
+    return res.json({ ok: true, history });
+  } catch (err) {
+    console.error('[AdAgent] history GET error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Could not load history.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ad-agent/history  — save (replace) chat history for the current user
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/ad-agent/history', limitChat, async (req, res) => {
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { messages } = req.body || {};
+    if (!Array.isArray(messages)) {
+      return res.status(400).json({ ok: false, error: 'messages must be an array.' });
+    }
+
+    // Sanitize: only keep user/assistant turns, truncate content, cap at 50 messages
+    const sanitized = messages
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }))
+      .slice(-50);
+
+    const idx = (db.data.users || []).findIndex(
+      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+    );
+    if (idx !== -1) {
+      db.data.users[idx].adAgentHistory = sanitized;
+      await db.write();
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[AdAgent] history POST error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Could not save history.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/ad-agent/history  — clear chat history for the current user
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/ad-agent/history', limitChat, async (req, res) => {
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const idx = (db.data.users || []).findIndex(
+      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+    );
+    if (idx !== -1) {
+      db.data.users[idx].adAgentHistory = [];
+      await db.write();
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[AdAgent] history DELETE error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Could not clear history.' });
   }
 });
 
