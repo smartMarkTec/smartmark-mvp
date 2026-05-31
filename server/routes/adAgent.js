@@ -455,15 +455,16 @@ async function checkPixelEventActivity(ownerKey) {
   if (!token) return { notConnected: true };
 
   try {
+    // Resolve ad account
     const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
       params: { fields: 'id,name', access_token: token },
       timeout: 10000,
     });
     const accounts = acctRes.data?.data || [];
     if (!accounts.length) return { noAccount: true };
-
     const actId = accounts[0].id;
 
+    // Fetch pixels with basic diagnostic fields
     const pixelRes = await axios.get(
       'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
       {
@@ -474,15 +475,68 @@ async function checkPixelEventActivity(ownerKey) {
     const pixels = pixelRes.data?.data || [];
     if (!pixels.length) return { noPixel: true, adAccountId: actId };
 
-    return {
-      adAccountId: actId,
-      pixels: pixels.map((p) => ({
-        id: p.id,
-        name: p.name || 'Unnamed Pixel',
-        lastFiredTime: p.last_fired_time || null,
-        isUnavailable: !!p.is_unavailable,
-      })),
-    };
+    // For each pixel, try to fetch event-level stats from /{pixel-id}/stats.
+    // Meta exposes aggregate event counts (PageView, Lead, etc.) for the last N days
+    // when the token has sufficient permissions. Failure is non-fatal: we fall back
+    // to last_fired_time only.
+    const pixelData = await Promise.all(
+      pixels.slice(0, 2).map(async (p) => {
+        const base = {
+          id: p.id,
+          name: p.name || 'Unnamed Pixel',
+          lastFiredTime: p.last_fired_time || null,
+          isUnavailable: !!p.is_unavailable,
+          eventStats: null,       // { PageView: N, Lead: N, ... } if available
+          statsUnavailable: false, // true if the stats endpoint failed or returned nothing
+        };
+
+        try {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const sevenDaysAgo = nowSec - 7 * 24 * 3600;
+          const statsRes = await axios.get(
+            'https://graph.facebook.com/v18.0/' + p.id + '/stats',
+            {
+              params: {
+                start_time: sevenDaysAgo,
+                end_time: nowSec,
+                aggregation: 'total',
+                access_token: token,
+              },
+              timeout: 10000,
+            }
+          );
+
+          // Response may be { data: [{ PageView: N, Lead: N, ... }] } or similar
+          const raw = statsRes.data?.data;
+          const row = Array.isArray(raw) ? raw[0] : (raw && typeof raw === 'object' ? raw : null);
+
+          if (row && typeof row === 'object') {
+            const skip = new Set(['start_time', 'end_time', 'pixel_id', 'object_type']);
+            const events = {};
+            for (const [k, v] of Object.entries(row)) {
+              if (!skip.has(k)) {
+                const n = Number(v);
+                if (Number.isFinite(n)) events[k] = n;
+              }
+            }
+            if (Object.keys(events).length > 0) {
+              base.eventStats = events;
+            } else {
+              base.statsUnavailable = true;
+            }
+          } else {
+            base.statsUnavailable = true;
+          }
+        } catch {
+          // Stats endpoint not accessible with current permissions — fall back gracefully
+          base.statsUnavailable = true;
+        }
+
+        return base;
+      })
+    );
+
+    return { adAccountId: actId, pixels: pixelData };
   } catch (err) {
     const fbError = err?.response?.data?.error;
     if (fbError) {
@@ -517,9 +571,14 @@ function buildPixelDiagnosticsReply(result) {
   const lines = [];
   for (const p of result.pixels) {
     lines.push('Pixel: "' + p.name + '" (ID: ' + p.id + ')');
+
     if (p.isUnavailable) {
       lines.push('  Status: Unavailable — Meta may have restricted access to this Pixel.');
-    } else if (p.lastFiredTime) {
+      continue;
+    }
+
+    // Last-fired timestamp (always shown when present)
+    if (p.lastFiredTime) {
       const last = new Date(p.lastFiredTime);
       const diffMs = Date.now() - last.getTime();
       const diffHrs = Math.round(diffMs / 3600000);
@@ -527,23 +586,56 @@ function buildPixelDiagnosticsReply(result) {
       const ago = diffHrs < 1 ? 'less than an hour ago'
         : diffHrs < 24 ? `~${diffHrs} hour${diffHrs === 1 ? '' : 's'} ago`
         : `~${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
-      lines.push(`  Last event received: ${ago} (${last.toLocaleDateString()})`);
-      lines.push('  The Pixel appears to be receiving events. ✓');
+      lines.push('  Last event received: ' + ago + ' (' + last.toLocaleDateString() + ') ✓');
     } else {
+      lines.push('  Last event received: no timestamp available from Meta API.');
+    }
+
+    // Event-level stats (last 7 days)
+    if (p.eventStats && Object.keys(p.eventStats).length > 0) {
+      lines.push('  Event counts (last 7 days):');
+
+      // Show high-priority events first
+      const priority = ['PageView', 'Lead', 'ViewContent', 'Purchase', 'Contact',
+        'CompleteRegistration', 'SubmitApplication', 'Schedule'];
+      const shown = new Set();
+      for (const evt of priority) {
+        if (evt in p.eventStats) {
+          const count = p.eventStats[evt];
+          lines.push('    ' + evt + ': ' + count.toLocaleString() + (count > 0 ? ' ✓' : ' — not seen'));
+          shown.add(evt);
+        }
+      }
+      // Any remaining events
+      for (const [k, v] of Object.entries(p.eventStats)) {
+        if (!shown.has(k) && v > 0) {
+          lines.push('    ' + k + ': ' + v.toLocaleString());
+        }
+      }
+
+      // Plain-language PageView / Lead read
+      const pageView = p.eventStats['PageView'] || 0;
+      const lead = p.eventStats['Lead'] || 0;
+      if (pageView === 0 && lead === 0) {
+        lines.push('  PageView and Lead have not been reported by Meta in the last 7 days.');
+      }
+    } else if (p.statsUnavailable) {
+      // Meta returned nothing useful from /{pixel-id}/stats — be honest
       lines.push(
-        '  No recent event activity is visible via the current API access. ' +
-        'This does not mean the Pixel is broken — Meta limits what the API can report.\n\n' +
-        '  To verify in real time: go to Meta Events Manager (business.facebook.com → Events Manager → your Pixel → Test Events), ' +
-        'then visit the website and click the Lead button. You should see PageView and Lead events appear immediately.'
+        '  Event-level counts (PageView, Lead, etc.) are not available through the current API permissions.\n' +
+        '  Meta reports the Pixel exists' + (p.lastFiredTime ? ' and has recent activity' : '') +
+        ', but does not expose per-event breakdown at this permission level.\n' +
+        '  For exact event names in real time, open Meta Events Manager → Test Events, ' +
+        'visit the website, and events appear live in that interface.'
       );
     }
   }
 
   lines.push(
-    '\nNote: I can confirm the Pixel exists and show the last-event timestamp Meta exposes through the Marketing API. ' +
-    'This is the actual last-fired time Meta reports — not a live event stream. ' +
-    'For real-time event verification, open Meta Events Manager → Test Events, ' +
-    'visit the website, and events will appear live in that interface.'
+    '\nNote: Event counts come from Meta\'s Marketing API (' +
+    (result.pixels.some((p) => p.eventStats) ? '/{pixel-id}/stats endpoint' : 'last_fired_time only') +
+    '). This is real data from Meta — not a live stream. ' +
+    'For real-time verification, open Meta Events Manager → Test Events.'
   );
   return lines.join('\n');
 }

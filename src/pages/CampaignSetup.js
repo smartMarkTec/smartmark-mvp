@@ -2987,12 +2987,40 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   })();
 
   // Clears admin client session mode and returns to the admin client list.
+  // Also scrubs localStorage keys that may have been written with client data while in client mode,
+  // and resets React state so the TheBoss dashboard is clean on next render.
   // Never touches sm_sid_v1 or any normal user session key.
   const exitClientMode = React.useCallback(() => {
+    // Remove admin mode markers
     try { localStorage.removeItem("sm_admin_target_client_id"); } catch {}
     try { localStorage.removeItem("sm_admin_target_client_label"); } catch {}
+
+    // Remove localStorage keys that may carry client's ad account / page data.
+    // Clears both the global (legacy) and TheBoss's user-scoped variants so the
+    // TheBoss dashboard doesn't re-hydrate with the last client's account on next mount.
+    try {
+      localStorage.removeItem("smartmark_last_selected_account");
+      localStorage.removeItem("smartmark_last_selected_pageId");
+      localStorage.removeItem(FB_CONN_KEY);
+      if (resolvedUser) {
+        localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_account"));
+        localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_pageId"));
+      }
+    } catch {}
+
+    // Reset React state immediately so the current render is clean before navigation
+    setFbConnected(false);
+    setAdAccounts([]);
+    setPages([]);
+    setSelectedAccount("");
+    setSelectedPageId("");
+    setCampaigns([]);
+    setSelectedCampaignId("");
+    setExpandedId(null);
+    setAdminClientInfo(null);
+
     navigate("/admin/clients");
-  }, [navigate]);
+  }, [navigate, resolvedUser]);
 
   // Full client detail record fetched server-side for the Account tab and badge label.
   const [adminClientInfo, setAdminClientInfo] = React.useState(null);
@@ -4200,6 +4228,11 @@ useEffect(() => {
 
 
 useEffect(() => {
+  // Never persist client account data to the admin/TheBoss localStorage keys.
+  // Without this guard, Joe's ad account would be written to u:TheBoss:smartmark_last_selected_account
+  // while in client mode, causing TheBoss's dashboard to show Joe's account after exiting.
+  if (adminClientId) return;
+
   const normalizedSelectedAccount = String(selectedAccount || "").replace(/^act_/, "").trim();
   const availableAccountIds = (adAccounts || [])
     .map((a) => String(a?.id || "").replace(/^act_/, "").trim())
@@ -4219,9 +4252,12 @@ useEffect(() => {
     localStorage.removeItem("smartmark_last_selected_account");
     if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_account"));
   } catch {}
-}, [selectedAccount, adAccounts, fbConnected, resolvedUser]);
+}, [adminClientId, selectedAccount, adAccounts, fbConnected, resolvedUser]);
 
 useEffect(() => {
+  // Same guard as the account effect — never write client's page to admin localStorage keys.
+  if (adminClientId) return;
+
   const normalizedSelectedPageId = String(selectedPageId || "").trim();
   const availablePageIds = (pages || [])
     .map((p) => String(p?.id || "").trim())
@@ -4241,7 +4277,7 @@ useEffect(() => {
     localStorage.removeItem("smartmark_last_selected_pageId");
     if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_pageId"));
   } catch {}
-}, [selectedPageId, pages, fbConnected, resolvedUser]);
+}, [adminClientId, selectedPageId, pages, fbConnected, resolvedUser]);
 
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
