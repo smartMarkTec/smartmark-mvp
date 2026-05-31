@@ -39,6 +39,22 @@ export default function AdminClients() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const removeClient = async (client) => {
+    if (!window.confirm(`Remove this client from the admin list? This should only be used for test accounts.\n\n${client.email}`)) return;
+    try {
+      const r = await fetch(`/api/admin/clients/${client.id}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: adminHeaders(),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.error || "Delete failed.");
+      setClients((prev) => prev.filter((c) => c.id !== client.id));
+    } catch (err) {
+      alert("Could not remove client: " + err.message);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -105,7 +121,7 @@ export default function AdminClients() {
             {/* Table header */}
             <div style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 100px",
+              gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 156px",
               padding: "12px 18px",
               background: "#f8f9fc",
               borderBottom: `1px solid ${BORDER}`,
@@ -121,7 +137,7 @@ export default function AdminClients() {
               <div>Facebook</div>
               <div>Campaigns</div>
               <div>Checklist</div>
-              <div></div>
+              <div>Actions</div>
             </div>
 
             {/* Rows */}
@@ -130,7 +146,7 @@ export default function AdminClients() {
                 key={c.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 100px",
+                  gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 156px",
                   padding: "14px 18px",
                   borderBottom: i < clients.length - 1 ? `1px solid ${BORDER}` : "none",
                   alignItems: "center",
@@ -191,22 +207,38 @@ export default function AdminClients() {
                   </div>
                 </div>
 
-                <div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <button
                     onClick={() => navigate(`/admin/clients/${c.id}`)}
                     style={{
-                      padding: "6px 14px",
+                      padding: "6px 12px",
                       background: "#111827",
                       color: "#fff",
                       border: "none",
                       borderRadius: 7,
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: 600,
                       cursor: "pointer",
                       fontFamily: FONT,
                     }}
                   >
                     View
+                  </button>
+                  <button
+                    onClick={() => removeClient(c)}
+                    style={{
+                      padding: "6px 10px",
+                      background: "none",
+                      color: "#dc2626",
+                      border: "1px solid #fca5a5",
+                      borderRadius: 7,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: FONT,
+                    }}
+                  >
+                    Remove
                   </button>
                 </div>
               </div>

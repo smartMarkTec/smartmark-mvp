@@ -203,6 +203,7 @@ router.use(basicAuth());
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/ad-agent/chat', limitChat, async (req, res) => {
   try {
+    try { await db.read(); } catch {}
     const ownerKey = ownerKeyFromReq(req);
     const user = await findUserByOwnerKey(ownerKey);
 
@@ -278,6 +279,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
   try {
+    try { await db.read(); } catch {}
     const ownerKey = ownerKeyFromReq(req);
     const user = await findUserByOwnerKey(ownerKey);
 

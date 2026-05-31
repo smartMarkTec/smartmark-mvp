@@ -67,13 +67,16 @@ export default function AdAgent() {
     setSending(true);
 
     try {
+      const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
       const r = await fetch("/api/ad-agent/chat", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(_sid ? { "x-sm-sid": _sid } : {}),
+        },
         body: JSON.stringify({
           message: msg,
-          // Pass last 8 prior messages for in-session context (no DB storage)
           history: updatedMessages
             .slice(-9, -1)
             .map((m) => ({ role: m.role, content: m.content })),

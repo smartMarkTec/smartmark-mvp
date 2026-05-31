@@ -443,4 +443,30 @@ router.post('/admin/clients/:id/launch-campaign', limitAdmin, requireAdmin, asyn
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/admin/clients/:id
+// Admin-only. Removes the user/client row only. Does not touch campaigns or tokens.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    await ensureDB();
+
+    const before = db.data.users.length;
+    db.data.users = db.data.users.filter(
+      (u) => String(u?.username || '').trim() !== username
+    );
+
+    if (db.data.users.length === before) {
+      return res.status(404).json({ ok: false, error: 'Client not found.' });
+    }
+
+    await db.write();
+    return res.json({ ok: true, removed: username });
+  } catch (err) {
+    console.error('[Admin] delete client error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Failed to remove client.' });
+  }
+});
+
 module.exports = router;
