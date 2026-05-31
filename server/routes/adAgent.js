@@ -179,8 +179,7 @@ function buildPixelReply(result) {
   if (result.noPixel || !result.pixels?.length) {
     return (
       'No Meta Pixel was found for your connected ad account. ' +
-      'You may need to create one first — go to Meta Events Manager ' +
-      '(business.facebook.com) → Data Sources → Connect → Web.'
+      'If you\'d like, I can create one for you — just say "create a pixel" or "create one".'
     );
   }
 
@@ -251,6 +250,125 @@ async function fetchMetaPixels(ownerKey) {
   }
 }
 
+// ── Pixel create intent detection ─────────────────────────────────────────────
+// Must be checked BEFORE isPixelIntent because "create a meta pixel" also
+// matches the (meta|facebook|fb)\s*pixel pattern in the fetch detector.
+function isPixelCreateIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /create\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /make\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /set\s*up\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /generate\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /build\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /create\s+one\b/i.test(s) ||
+    /create\s+my\s+(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
+    /that\s+is\s+fine.*create/i.test(s) ||
+    /fine.*create\s+one/i.test(s)
+  );
+}
+
+// ── Create-or-fetch Meta Pixel (deduplicated) ─────────────────────────────────
+async function createOrFetchMetaPixel(ownerKey) {
+  const token = getFbUserToken(ownerKey);
+  if (!token) return { notConnected: true };
+
+  try {
+    // Resolve ad account
+    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+      params: { fields: 'id,name', access_token: token },
+      timeout: 10000,
+    });
+    const accounts = acctRes.data?.data || [];
+    if (!accounts.length) return { noAccount: true };
+
+    const actId = accounts[0].id;
+    const actName = String(accounts[0].name || '').replace(/[^a-zA-Z0-9 \-_]/g, '').trim().slice(0, 60);
+
+    // Check for existing pixel first — never create a duplicate
+    const pixelRes = await axios.get(
+      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      { params: { fields: 'id,name', access_token: token }, timeout: 10000 }
+    );
+    const existing = pixelRes.data?.data || [];
+    if (existing.length > 0) {
+      return { pixels: existing, adAccountId: actId, alreadyExisted: true };
+    }
+
+    // No existing pixel — create one
+    const pixelName = actName ? 'Smartemark Pixel - ' + actName : 'Smartemark Pixel';
+    const createRes = await axios.post(
+      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      null,
+      { params: { name: pixelName, access_token: token }, timeout: 15000 }
+    );
+    const newId = createRes.data?.id;
+    if (!newId) {
+      return { error: 'Pixel was submitted but no Pixel ID was returned. Check Meta Events Manager to confirm.' };
+    }
+
+    return { pixels: [{ id: newId, name: pixelName }], adAccountId: actId, created: true };
+  } catch (err) {
+    const fbError = err?.response?.data?.error;
+    if (fbError) {
+      const code = fbError.code;
+      if (code === 190 || code === 102) {
+        return { error: 'Your Facebook session has expired. Please reconnect your Facebook account.' };
+      }
+      if (code === 10 || code === 200 || code === 273 || code === 100) {
+        return { permissionDenied: true, errorDetail: fbError.message || 'Permission denied.' };
+      }
+      return { permissionDenied: true, errorDetail: fbError.message || 'Meta API error.' };
+    }
+    console.error('[AdAgent] createOrFetchMetaPixel error:', err?.message || err);
+    return { error: 'Could not reach Meta API. Please try again.' };
+  }
+}
+
+// ── Reply builder for pixel create/fetch-or-create ───────────────────────────
+function buildPixelCreateReply(result) {
+  if (result.notConnected) {
+    return 'Facebook is not connected yet. Connect your Facebook ad account first in the Connect Facebook step.';
+  }
+  if (result.noAccount) {
+    return 'No connected ad account was found. Connect or select a Facebook ad account first.';
+  }
+  if (result.permissionDenied) {
+    return (
+      'Meta did not allow Smartemark to create a Pixel for this ad account. ' +
+      'The account may need Business Manager ownership, Events Manager access, or additional API permissions.\n\n' +
+      'You can create it manually:\n' +
+      '1. Go to business.facebook.com → Events Manager\n' +
+      '2. Click Connect Data Sources → Web → Meta Pixel → Connect\n' +
+      '3. Name your Pixel and save\n\n' +
+      'Once created, ask me to "fetch my pixel" and I\'ll retrieve the install code for you.' +
+      (result.errorDetail ? '\n\nMeta said: ' + result.errorDetail : '')
+    );
+  }
+  if (result.error) {
+    return 'There was an issue with Meta Pixel creation: ' + result.error;
+  }
+
+  const p = result.pixels[0];
+  const snippet = buildPixelSnippet(p.id);
+  const label = result.created ? 'created' : 'found (already existed — no duplicate was created)';
+
+  return (
+    'Your Meta Pixel was ' + label + ':\n\n' +
+    'Pixel ID: ' + p.id + '\n' +
+    'Pixel Name: ' + (p.name || 'Smartemark Pixel') + '\n' +
+    'Ad Account: ' + result.adAccountId + '\n\n' +
+    'Install code — paste into your website <head> section:\n\n' +
+    snippet + '\n\n' +
+    'How to install:\n' +
+    '• WordPress: use the "Insert Headers and Footers" plugin\n' +
+    '• Wix: Settings → Custom Code → Head section\n' +
+    '• Shopify: Online Store → Themes → Edit code → theme.liquid (before </head>)\n' +
+    '• Other: paste just before the closing </head> tag\n\n' +
+    'Note: Smartemark does not install the Pixel automatically. You must paste this code into your website manually.'
+  );
+}
+
 // ── Rate limits ───────────────────────────────────────────────────────────────
 const limitChat = basicRateLimit({ windowMs: 60 * 1000, max: 30 });
 const limitPixel = basicRateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -288,7 +406,19 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
     const trimmed = message.trim().slice(0, 2000);
 
-    // Pixel intent on non-pixel plan
+    // Pixel CREATE intent — must be checked before general pixel intent
+    if (isPixelCreateIntent(trimmed)) {
+      if (access !== 'pixel') {
+        return res.json({
+          ok: true,
+          reply: 'Meta Pixel setup is available on the Premium plan. Upgrade to Premium to create or fetch your Meta Pixel.',
+        });
+      }
+      const createResult = await createOrFetchMetaPixel(ownerKey);
+      return res.json({ ok: true, reply: buildPixelCreateReply(createResult) });
+    }
+
+    // Pixel FETCH intent on non-pixel plan
     if (isPixelIntent(trimmed) && access !== 'pixel') {
       return res.json({
         ok: true,
@@ -298,7 +428,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       });
     }
 
-    // Pixel intent on premium/operator — fetch inline
+    // Pixel FETCH intent on premium/operator — fetch inline
     if (isPixelIntent(trimmed) && access === 'pixel') {
       const pixelResult = await fetchMetaPixels(ownerKey);
       return res.json({ ok: true, reply: buildPixelReply(pixelResult) });
@@ -384,6 +514,52 @@ router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
   } catch (err) {
     console.error('[AdAgent] meta-pixel error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong fetching Meta Pixel.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ad-agent/meta-pixel/create
+// Premium/admin only — creates a pixel if none exists, returns existing if one does
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/ad-agent/meta-pixel/create', limitPixel, async (req, res) => {
+  try {
+    try { await db.read(); } catch {}
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+    }
+    if (adAgentAccess(user) !== 'pixel') {
+      return res.status(403).json({ ok: false, error: 'Meta Pixel creation is available on Premium only.' });
+    }
+
+    const result = await createOrFetchMetaPixel(ownerKey);
+
+    if (result.notConnected) {
+      return res.json({ ok: false, notConnected: true, error: 'Facebook is not connected yet.' });
+    }
+    if (result.noAccount) {
+      return res.json({ ok: false, error: 'No connected ad account found.' });
+    }
+    if (result.permissionDenied) {
+      return res.status(403).json({ ok: false, permissionDenied: true, error: result.errorDetail || 'Meta permission denied.' });
+    }
+    if (result.error) {
+      return res.status(500).json({ ok: false, error: result.error });
+    }
+
+    const p = result.pixels[0];
+    return res.json({
+      ok: true,
+      created: !!result.created,
+      alreadyExisted: !!result.alreadyExisted,
+      adAccountId: result.adAccountId,
+      pixel: { id: p.id, name: p.name || 'Smartemark Pixel', snippet: buildPixelSnippet(p.id) },
+    });
+  } catch (err) {
+    console.error('[AdAgent] meta-pixel/create error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Something went wrong creating Meta Pixel.' });
   }
 });
 
