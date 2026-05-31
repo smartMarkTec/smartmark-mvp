@@ -17,8 +17,63 @@ const AD_AGENT_SYSTEM =
   "You are Smartemark's Ad Agent. Help HVAC and local service businesses understand their campaign, " +
   "choose services/specials to promote, improve ad angles, and understand setup steps. " +
   "Be concise, practical, and action-focused. Do not guarantee leads or calls. " +
-  "Position Smartemark as helping with branding, local visibility, promoting specials, " +
-  "and getting more eyes on the business.";
+  "Position Smartemark as helping with branding, local visibility, promoting specials, and getting more eyes on the business. " +
+  "If campaign metrics context is provided, use it to answer performance questions simply and clearly — explain metrics in plain language a business owner would understand. " +
+  "If metrics data is limited or missing, say so honestly rather than guessing.";
+
+// ── Campaign metrics context builder (read-only) ──────────────────────────────
+async function getCampaignContext(ownerKey) {
+  try {
+    await db.read();
+    const allStates = db.data?.optimizer_campaign_state || [];
+    const userStates = allStates.filter(
+      (s) => String(s?.ownerKey || '').trim() === String(ownerKey || '').trim()
+    );
+    if (!userStates.length) return null;
+
+    // Prefer active/paused, take up to 3
+    const sorted = [
+      ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() === 'ACTIVE'),
+      ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() !== 'ACTIVE'),
+    ].slice(0, 3);
+
+    const lines = ['Current campaign data:'];
+    for (const s of sorted) {
+      const m = s.metricsSnapshot || {};
+      const name = s.campaignName || s.campaignId || 'Unnamed campaign';
+      const status = String(s.currentStatus || '').toUpperCase() || 'UNKNOWN';
+
+      const hasMetrics =
+        Number(m.impressions || 0) > 0 ||
+        Number(m.spend || 0) > 0 ||
+        Number(m.clicks || 0) > 0;
+
+      if (!hasMetrics) {
+        lines.push(`- "${name}" (${status}): No metrics data yet.`);
+        continue;
+      }
+
+      const parts = [`"${name}" | Status: ${status}`];
+      if (m.impressions) parts.push(`Impressions: ${Math.round(Number(m.impressions)).toLocaleString()}`);
+      if (m.reach)       parts.push(`Reach: ${Math.round(Number(m.reach)).toLocaleString()}`);
+      if (m.clicks != null && m.clicks !== '') parts.push(`Clicks: ${m.clicks}`);
+      if (m.link_clicks) parts.push(`Link clicks: ${m.link_clicks}`);
+      if (m.spend)       parts.push(`Spend: $${Number(m.spend).toFixed(2)}`);
+      if (m.ctr)         parts.push(`CTR: ${Number(m.ctr).toFixed(2)}%`);
+      if (m.cpc)         parts.push(`CPC: $${Number(m.cpc).toFixed(2)}`);
+      if (m.cpm)         parts.push(`CPM: $${Number(m.cpm).toFixed(2)}`);
+      lines.push('- ' + parts.join(' | '));
+
+      // Include AI optimizer summary if available
+      const summary = s.publicSummary?.summary || s.publicSummary?.headline || s.latestDiagnosis?.summary;
+      if (summary) lines.push(`  AI note: ${String(summary).slice(0, 200)}`);
+    }
+
+    return lines.length > 1 ? lines.join('\n') : null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Session helpers (same read-only pattern as auth.js) ──────────────────────
 const COOKIE_NAME = 'sm_sid';
@@ -244,7 +299,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.json({ ok: true, reply: buildPixelReply(pixelResult) });
     }
 
-    // Normal chat — with in-session history for context
+    // Normal chat — with in-session history + read-only campaign metrics context
     const normalizedHistory = Array.isArray(history)
       ? history
           .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
@@ -252,10 +307,13 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           .slice(-8)
       : [];
 
+    const campaignContext = await getCampaignContext(ownerKey);
+
     const completion = await openaiClient.chat.completions.create({
       model: MODEL,
       messages: [
         { role: 'system', content: AD_AGENT_SYSTEM },
+        ...(campaignContext ? [{ role: 'system', content: campaignContext }] : []),
         ...normalizedHistory,
         { role: 'user', content: trimmed },
       ],

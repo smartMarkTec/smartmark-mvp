@@ -68,7 +68,7 @@ export default function PostCheckout() {
   // After register/login: sync the Stripe session to this account, then go to /setup.
   // Only called when the current browser session belongs to the checkout email account.
   const syncAndRedirect = useCallback(
-    async (sid) => {
+    async (sid, targetPlanKey) => {
       try {
         const res = await stripeFetch("/sync-checkout-session", {
           method: "POST",
@@ -85,6 +85,23 @@ export default function PostCheckout() {
       } catch (e) {
         console.warn("[post-checkout] sync failed:", e?.message);
       }
+
+      // Premium customers who have not completed intake go to /premium-intake first
+      if (String(targetPlanKey || "").toLowerCase() === "premium") {
+        try {
+          const smSid = (localStorage.getItem(SM_SID_LS_KEY) || "").trim();
+          const intakeRes = await fetch("/api/premium-intake/status", {
+            credentials: "include",
+            headers: smSid ? { "x-sm-sid": smSid } : {},
+          });
+          const intakeJson = await intakeRes.json().catch(() => ({}));
+          if (intakeJson?.ok && !intakeJson?.submitted) {
+            navigate("/premium-intake", { replace: true });
+            return;
+          }
+        } catch {}
+      }
+
       navigate("/setup", { replace: true });
     },
     [navigate]
@@ -139,7 +156,7 @@ export default function PostCheckout() {
         // CASE B — logged-in account email matches Stripe checkout email.
         // Safe to activate automatically.
         setStatusMsg("Activating your subscription…");
-        await syncAndRedirect(sid);
+        await syncAndRedirect(sid, plan);
         return;
       }
 
@@ -224,7 +241,7 @@ export default function PostCheckout() {
         localStorage.setItem("smartmark_login_username", cleanEmail);
       } catch {}
 
-      await syncAndRedirect(sessionId);
+      await syncAndRedirect(sessionId, planKey);
     } catch (error) {
       setErr(error?.message || "Something went wrong. Please try again.");
       setPhase("form");
@@ -267,7 +284,7 @@ export default function PostCheckout() {
         localStorage.setItem("smartmark_login_username", cleanEmail);
       } catch {}
 
-      await syncAndRedirect(sessionId);
+      await syncAndRedirect(sessionId, planKey);
     } catch (error) {
       setErr(error?.message || "Login failed.");
       setPhase("form");
