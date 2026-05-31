@@ -296,9 +296,11 @@ router.get('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/clients/:id/campaigns
-// Returns the selected client's Smartemark campaign records (from campaign_creatives),
-// scoped to that client's ownerKey. Includes archived campaigns so the admin
-// dashboard can display them correctly. Never returns tokens.
+// Returns the selected client's complete campaign history, bundled with metrics
+// and optimizer state from the DB so CampaignSetup can display exactly what the
+// client sees when logged in directly.
+// Joins campaign_creatives + optimizer_campaign_state, both scoped to the
+// client's ownerKey. Never returns tokens or raw AI content.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req, res) => {
   try {
@@ -309,27 +311,98 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
     await ensureDB();
     const ownerKey = `user:${String(user.username || '').trim()}`;
 
-    const records = (db.data.campaign_creatives || []).filter(
+    const creativeRecords = (db.data.campaign_creatives || []).filter(
       (c) => String(c?.ownerKey || '').trim() === ownerKey
     );
+    const optimizerStates = (db.data.optimizer_campaign_state || []).filter(
+      (s) => String(s?.ownerKey || '').trim() === ownerKey
+    );
 
-    const campaigns = records
-      .filter((c) => String(c?.campaignId || '').trim())
-      .map((c) => ({
-        id:               String(c.campaignId || '').trim(),
-        name:             c.name || 'Campaign',
-        status:           String(c.status || 'ACTIVE').trim(),
-        effective_status: String(c.status || 'ACTIVE').trim(),
+    // Helper: sanitize an optimizer state row into what the frontend needs.
+    // Never exposes raw AI history, decision chains, or full action logs.
+    const sanitizeOptState = (s) => ({
+      campaignId:      String(s?.campaignId || ''),
+      campaignName:    s?.campaignName || '',
+      currentStatus:   String(s?.currentStatus || '').toUpperCase(),
+      smArchived:      !!s?.smArchived,
+      metricsSnapshot: s?.metricsSnapshot && Object.keys(s.metricsSnapshot).length > 0
+        ? s.metricsSnapshot
+        : null,
+      publicSummary:   s?.publicSummary || null,
+      latestDiagnosis: s?.latestDiagnosis
+        ? {
+            diagnosis:         s.latestDiagnosis.diagnosis,
+            likelyProblem:     s.latestDiagnosis.likelyProblem,
+            recommendedAction: s.latestDiagnosis.recommendedAction,
+            generatedAt:       s.latestDiagnosis.generatedAt,
+          }
+        : null,
+      latestAction: s?.latestAction
+        ? {
+            actionType:  s.latestAction.actionType,
+            executed:    !!s.latestAction.executed,
+            generatedAt: s.latestAction.generatedAt,
+          }
+        : null,
+    });
+
+    // Build campaign list from creative records, enriched with optimizer state
+    const seen = new Set();
+    const campaigns = [];
+
+    for (const c of creativeRecords) {
+      const cId = String(c?.campaignId || '').trim();
+      if (!cId || seen.has(cId)) continue;
+      seen.add(cId);
+
+      const opt = optimizerStates.find(
+        (s) => String(s?.campaignId || '').trim() === cId
+      ) || null;
+
+      const status = String(
+        c.status || opt?.currentStatus || 'ACTIVE'
+      ).trim().toUpperCase();
+
+      campaigns.push({
+        id:               cId,
+        name:             c.name || opt?.campaignName || 'Campaign',
+        status,
+        effective_status: status,
         start_time:       c.createdAt || c.updatedAt || null,
         stop_time:        c.endDate || null,
-        smArchived:       !!c.smArchived,
+        smArchived:       !!(c.smArchived || opt?.smArchived),
         archivedAt:       c.archivedAt || null,
-        accountId:        String(c.accountId || '').replace(/^act_/, ''),
+        accountId:        String(c.accountId || opt?.accountId || '').replace(/^act_/, ''),
         launchComplete:   !!c.launchComplete,
         createdAt:        c.createdAt || null,
-      }));
+        optimizerState:   opt ? sanitizeOptState(opt) : null,
+      });
+    }
 
-    return res.json({ ok: true, campaigns });
+    // Include campaigns that exist only in optimizer_campaign_state (no creative record)
+    for (const s of optimizerStates) {
+      const cId = String(s?.campaignId || '').trim();
+      if (!cId || seen.has(cId)) continue;
+      seen.add(cId);
+
+      const status = String(s.currentStatus || 'ACTIVE').trim().toUpperCase();
+      campaigns.push({
+        id:               cId,
+        name:             s.campaignName || 'Campaign',
+        status,
+        effective_status: status,
+        start_time:       s.createdAt || null,
+        stop_time:        null,
+        smArchived:       !!s.smArchived,
+        archivedAt:       s.archivedAt || null,
+        accountId:        String(s.accountId || '').replace(/^act_/, ''),
+        launchComplete:   false,
+        createdAt:        s.createdAt || null,
+        optimizerState:   sanitizeOptState(s),
+      });
+    }
+
+    return res.json({ ok: true, campaigns, ownerKey });
   } catch (err) {
     console.error('[Admin] client campaigns error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Failed to load client campaigns.' });

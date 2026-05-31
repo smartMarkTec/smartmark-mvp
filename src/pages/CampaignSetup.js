@@ -3843,8 +3843,9 @@ useEffect(() => {
     .then((j) => { if (j.ok && j.client) setAdminClientInfo(j.client); })
     .catch(() => {});
 
-  // Load the selected client's Smartemark campaign records (includes archived campaigns).
-  // This uses the client's ownerKey server-side — no admin campaigns leak in.
+  // Load the selected client's complete campaign history, including stored metrics
+  // and optimizer state. The server bundles everything from campaign_creatives +
+  // optimizer_campaign_state scoped to the client's ownerKey — no admin data leaks.
   fetch(`/api/admin/clients/${enc}/campaigns`, { credentials: "include", headers })
     .then((r) => r.json().catch(() => ({})))
     .then((j) => {
@@ -3852,13 +3853,45 @@ useEffect(() => {
       const list = j.campaigns;
       setCampaigns(list);
 
-      // Set campaign count (active only — archived excluded)
+      // Populate metricsMap and optimizerStateMap from the bundled data so the
+      // dashboard shows the same metrics the client sees — without calling any
+      // per-campaign endpoints (which would 403 because they check ownerKey ownership).
+      const newMetrics = {};
+      const newOptStates = {};
+      for (const c of list) {
+        if (!c.id) continue;
+        const snap = c.optimizerState?.metricsSnapshot;
+        if (snap && Object.keys(snap).length > 0) {
+          newMetrics[c.id] = {
+            impressions: Number(snap.impressions) || 0,
+            clicks:      Number(snap.linkClicks || snap.clicks) || 0,
+            ctr:         Number(snap.ctr) || 0,
+            spend:       Number(snap.spend) || 0,
+          };
+        }
+        if (c.optimizerState) {
+          newOptStates[c.id] = {
+            campaignId:      c.id,
+            campaignName:    c.name,
+            currentStatus:   c.status,
+            smArchived:      !!c.smArchived,
+            metricsSnapshot: snap || {},
+            publicSummary:   c.optimizerState.publicSummary   || null,
+            latestDiagnosis: c.optimizerState.latestDiagnosis || null,
+            latestAction:    c.optimizerState.latestAction    || null,
+          };
+        }
+      }
+      setMetricsMap((prev) => ({ ...prev, ...newMetrics }));
+      setOptimizerStateMap((prev) => ({ ...prev, ...newOptStates }));
+
+      // Campaign count (active / paused only — archived excluded)
       const activeCount = list.filter(
         (c) => !c.smArchived && ["ACTIVE", "PAUSED"].includes(String(c.status || "").toUpperCase())
       ).length;
       setCampaignCount(activeCount);
 
-      // Auto-select the first non-archived campaign
+      // Auto-select first non-archived campaign
       const firstActive = list.find((c) => !c.smArchived);
       const firstId = String(firstActive?.id || list[0]?.id || "").trim();
       if (firstId) {
