@@ -275,14 +275,14 @@ export default function Landing() {
           50%       { transform: translateY(-10px); }
         }
         @keyframes smHeroBlob1 {
-          0%, 100% { transform: translate(0px, 0px) scale(1); }
-          35%       { transform: translate(-38px, 24px) scale(1.08); }
-          70%       { transform: translate(28px, -28px) scale(0.95); }
+          0%, 100% { transform: translate(0px,   0px)  scale(1)    rotate(0deg);  }
+          30%       { transform: translate(-68px,  40px) scale(1.15) rotate(12deg); }
+          65%       { transform: translate(50px,  -50px) scale(0.90) rotate(-8deg); }
         }
         @keyframes smHeroBlob2 {
-          0%, 100% { transform: translate(0px, 0px) scale(1); }
-          45%       { transform: translate(44px, -22px) scale(1.06); }
-          72%       { transform: translate(-18px, 32px) scale(0.97); }
+          0%, 100% { transform: translate(0px,   0px)  scale(1)    rotate(0deg);  }
+          40%       { transform: translate(72px,  -40px) scale(1.12) rotate(-10deg); }
+          75%       { transform: translate(-34px,  60px) scale(0.93) rotate(7deg);  }
         }
         @keyframes smHeroBlob3 {
           0%, 100% { transform: translate(0px, 0px) scale(1); }
@@ -476,16 +476,16 @@ export default function Landing() {
             }}
           >
             {/* Panel base gradient — the colored ground */}
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(155deg, #eef0ff 0%, #e5eaff 32%, #dde5ff 62%, #d5deff 100%)" }} />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(145deg, #e4e6ff 0%, #cecfff 28%, #bfc4ff 56%, #b5beff 100%)" }} />
 
             {/* Left-edge white fade — smooth transition from white text area into panel */}
             <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: "30%", background: "linear-gradient(to right, #ffffff 0%, transparent 100%)", zIndex: 3 }} />
 
             {/* Primary glow — top-right */}
-            <div style={{ position: "absolute", top: "-22%", right: "-14%", width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(120,140,255,0.44) 0%, rgba(140,160,255,0.17) 42%, transparent 68%)", filter: "blur(44px)", animation: "smHeroBlob1 22s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
+            <div style={{ position: "absolute", top: "-28%", right: "-18%", width: 660, height: 660, borderRadius: "50%", background: "radial-gradient(circle, rgba(108,100,255,0.68) 0%, rgba(130,118,255,0.32) 40%, transparent 68%)", filter: "blur(36px)", animation: "smHeroBlob1 15s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
 
             {/* Secondary glow — bottom */}
-            <div style={{ position: "absolute", bottom: "-18%", left: "4%", width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(100,88,255,0.38) 0%, transparent 60%)", filter: "blur(56px)", animation: "smHeroBlob2 26s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
+            <div style={{ position: "absolute", bottom: "-24%", left: "0%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(93,89,234,0.62) 0%, transparent 62%)", filter: "blur(46px)", animation: "smHeroBlob2 20s ease-in-out infinite", pointerEvents: "none", zIndex: 1 }} />
 
             {/* Diagonal ribbon 1 — wide, translucent white streak */}
             <div style={{ position: "absolute", top: "-20%", left: "20%", width: 130, height: "140%", background: "linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.54) 22%, rgba(255,255,255,0.46) 56%, transparent 100%)", transform: "rotate(-20deg)", filter: "blur(10px)", animation: "smHeroBlob2 24s ease-in-out infinite", pointerEvents: "none", zIndex: 2 }} />
