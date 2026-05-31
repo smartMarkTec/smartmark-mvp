@@ -183,6 +183,8 @@ const Pricing = () => {
       }}
     >
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Lora:wght@400&display=swap');
+
         html, body, #root {
           margin: 0;
           padding: 0;
@@ -273,7 +275,7 @@ const Pricing = () => {
               cursor: "pointer",
             }}
           >
-            <span style={{ fontWeight: 700, fontSize: 15, color: TEXT }}>
+            <span style={{ fontWeight: 700, fontSize: 20, color: TEXT, letterSpacing: -0.5 }}>
               Smartemark
             </span>
           </button>
@@ -310,7 +312,7 @@ const Pricing = () => {
                 fontFamily: FONT,
               }}
             >
-              Book a Demo
+              Book a Call
             </a>
           </div>
         </div>
@@ -333,10 +335,11 @@ const Pricing = () => {
             textAlign: "center",
             margin: "0 auto",
             marginBottom: isMobile ? 40 : 56,
-            fontSize: isMobile ? "2.4rem" : "3.5rem",
+            fontFamily: "'Lora', Georgia, serif",
+            fontSize: isMobile ? "2.6rem" : "4rem",
             lineHeight: 1.08,
-            fontWeight: 500,
-            letterSpacing: isMobile ? "-0.3px" : "-0.6px",
+            fontWeight: 400,
+            letterSpacing: "0px",
             color: TEXT,
           }}
         >

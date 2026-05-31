@@ -344,7 +344,7 @@ export default function Landing() {
                   rel="noopener noreferrer"
                   style={{ ...navBtn, textDecoration: "none" }}
                 >
-                  Book a Demo
+                  Book a Call
                 </a>
               </>
             )}
@@ -368,7 +368,7 @@ export default function Landing() {
                 rel="noopener noreferrer"
                 style={{ ...navBtnSm, textDecoration: "none" }}
               >
-                Book a Demo
+                Book a Call
               </a>
             )}
 
