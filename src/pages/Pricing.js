@@ -263,12 +263,10 @@ const Pricing = () => {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 10,
-              padding: "8px 14px",
-              borderRadius: 10,
-              background: "white",
-              border: "1px solid rgba(0,0,0,0.09)",
-              boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
+              gap: 9,
+              background: "none",
+              border: "none",
+              padding: 0,
               color: TEXT,
               cursor: "pointer",
             }}
@@ -277,8 +275,8 @@ const Pricing = () => {
               role="img"
               aria-label="Smartemark"
               style={{
-                width: 24,
-                height: 24,
+                width: 22,
+                height: 22,
                 borderRadius: 6,
                 flexShrink: 0,
                 backgroundImage: `url(${smartmarkLogo})`,
@@ -287,7 +285,7 @@ const Pricing = () => {
                 backgroundRepeat: "no-repeat",
               }}
             />
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Smartemark</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: TEXT }}>Smartemark</span>
           </button>
 
           <button
@@ -316,19 +314,14 @@ const Pricing = () => {
         >
           <div
             style={{
-              display: "inline-block",
-              padding: "5px 14px",
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              color: PURPLE,
-              background: "rgba(93,89,234,0.08)",
-              border: "1px solid rgba(93,89,234,0.15)",
-              marginBottom: 22,
+              fontSize: 13,
+              fontWeight: 500,
+              color: TEXT_SOFT,
+              letterSpacing: 0.3,
+              marginBottom: 16,
             }}
           >
-            Smartemark Pricing
+            Pricing
           </div>
 
           <h1
@@ -359,44 +352,6 @@ const Pricing = () => {
             ads for you.
           </p>
 
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              gap: 10,
-              marginTop: 24,
-            }}
-          >
-            {[
-              "Ad budget is separate · Most businesses start around $150–$300/month",
-              "Month-to-month · No long-term contract",
-            ].map((note) => (
-              <span
-                key={note}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "6px 14px",
-                  borderRadius: 999,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: TEXT_SOFT,
-                  background: "white",
-                  border: "1px solid rgba(0,0,0,0.08)",
-                  boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                }}
-              >
-                <span
-                  style={{ color: "#10b981", fontSize: 8, lineHeight: 1 }}
-                >
-                  ●
-                </span>
-                {note}
-              </span>
-            ))}
-          </div>
         </div>
 
         {/* ── Pricing cards ── */}
@@ -635,41 +590,6 @@ const Pricing = () => {
               </div>
             );
           })}
-        </div>
-
-        {/* ── Notes below cards ── */}
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: 32,
-            marginLeft: "auto",
-            marginRight: "auto",
-            maxWidth: 660,
-            padding: isMobile ? "18px 18px" : "20px 40px",
-            borderRadius: 14,
-            background: "rgba(255,255,255,0.72)",
-            border: "1px solid rgba(0,0,0,0.07)",
-            boxShadow: "0 1px 8px rgba(0,0,0,0.04)",
-          }}
-        >
-          <p
-            style={{
-              margin: "0 0 6px",
-              fontSize: 14,
-              color: TEXT_SOFT,
-              lineHeight: 1.6,
-            }}
-          >
-            <strong style={{ color: TEXT }}>
-              Facebook/Instagram ad budget is separate.
-            </strong>{" "}
-            Most businesses start around $150–$300/month depending on how
-            aggressive they want to be.
-          </p>
-          <p style={{ margin: 0, fontSize: 14, color: TEXT_SOFT }}>
-            <strong style={{ color: TEXT }}>Month-to-month.</strong> No
-            long-term contract.
-          </p>
         </div>
 
         {/* ── FAQ ── */}
