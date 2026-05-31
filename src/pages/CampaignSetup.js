@@ -3008,7 +3008,8 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
       }
     } catch {}
 
-    // Reset React state immediately so the current render is clean before navigation
+    // Reset ALL React state so the current render is clean before navigation.
+    // Covers direct state AND every derived data map populated by admin-client mode.
     setFbConnected(false);
     setAdAccounts([]);
     setPages([]);
@@ -3018,7 +3019,15 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     setSelectedCampaignId("");
     setExpandedId(null);
     setAdminClientInfo(null);
+    // Derived maps — must be cleared so TheBoss dashboard never shows client metrics/creatives
+    setMetricsMap({});
+    setOptimizerStateMap({});
+    setCampaignCreativesMap({});
+    setPublicSummaryMap({});
+    setOptimizerCreativeMap({});
+    setCampaignCount(0);
 
+    console.debug('[CampaignSetup] exitClientMode — all client-derived state cleared');
     navigate("/admin/clients");
   }, [navigate, resolvedUser]);
 
@@ -3920,6 +3929,32 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [adminClientId]);
 
+// ── Admin-client exit guard: wipe ALL client-derived maps the instant adminClientId
+// transitions from a non-empty value to "". This fires even if exitClientMode had
+// batching issues, and provides a second line of defence against the 403.
+const _prevAdminClientIdRef = React.useRef(adminClientId);
+useEffect(() => {
+  const prev = _prevAdminClientIdRef.current;
+  _prevAdminClientIdRef.current = adminClientId;
+  if (prev && !adminClientId) {
+    console.debug('[CampaignSetup] adminClientId cleared — wiping all client-derived maps');
+    setMetricsMap({});
+    setOptimizerStateMap({});
+    setCampaignCreativesMap({});
+    setPublicSummaryMap({});
+    setOptimizerCreativeMap({});
+    setAdAccounts([]);
+    setPages([]);
+    setSelectedAccount("");
+    setSelectedPageId("");
+    setCampaigns([]);
+    setSelectedCampaignId("");
+    setExpandedId(null);
+    setFbConnected(false);
+    setCampaignCount(0);
+  }
+}, [adminClientId]);
+
 
 
 useEffect(() => {
@@ -4103,8 +4138,26 @@ useEffect(() => {
   ]);
 
 useEffect(() => {
-  if (adminClientId) return; // admin-client mode: metrics use admin session — skip to avoid wrong data
+  // Hard guards — never call normal user optimizer/metrics endpoints in admin-client mode.
+  // adminClientId IS in the dep array so this re-evaluates on every admin-mode transition.
+  if (adminClientId) {
+    console.debug('[CampaignSetup] metrics effect skipped — admin-client mode active', { adminClientId, expandedId });
+    return;
+  }
   if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
+
+  // Safety net: if we have loaded adAccounts but selectedAccount doesn't match any of them,
+  // this account belongs to a different session (e.g. stale localStorage from client mode).
+  // Skip rather than calling endpoints that would 403.
+  if (
+    adAccounts.length > 0 &&
+    !adAccounts.some(
+      (a) => String(a?.id || "").replace(/^act_/, "") === String(selectedAccount || "")
+    )
+  ) {
+    console.debug('[CampaignSetup] metrics effect skipped — selectedAccount not in adAccounts (stale?)', { selectedAccount });
+    return;
+  }
 
   const acctId = String(selectedAccount).trim();
   const campaignId = String(expandedId).trim();
@@ -4280,6 +4333,8 @@ if (
     clearInterval(interval);
   };
 }, [
+  adminClientId,       // re-check guard on every admin-mode transition
+  adAccounts.length,   // re-check account-validation safety net
   expandedId,
   selectedAccount,
   resolvedUser,
