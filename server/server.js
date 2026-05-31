@@ -408,6 +408,10 @@ app.use("/api", salesAssistantRoutes);
 const adAgentRoutes = require("./routes/adAgent");
 app.use("/api", adAgentRoutes);
 
+/* ✅ Premium intake + admin client management */
+const premiumAdminRoutes = require("./routes/premiumAdmin");
+app.use("/api", premiumAdminRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);

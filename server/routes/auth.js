@@ -42,8 +42,8 @@ const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
-const ADMIN_BYPASS_USERNAME = 'TheBoss';
-const ADMIN_BYPASS_PASSWORD = 'knowwilltech@gmail.com';
+const ADMIN_BYPASS_USERNAME = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+const ADMIN_BYPASS_PASSWORD = process.env.ADMIN_BYPASS_PASSWORD || null; // must be set via env var
 
 function normalizeBillingPlanKey(raw) {
   const s = String(raw || '').trim().toLowerCase();
@@ -1984,19 +1984,17 @@ router.post('/login', async (req, res) => {
 
     const lookup = rawUsername.toLowerCase();
 
-    if (rawUsername === ADMIN_BYPASS_USERNAME && rawPassword === ADMIN_BYPASS_PASSWORD) {
+    if (ADMIN_BYPASS_PASSWORD && rawUsername === ADMIN_BYPASS_USERNAME && rawPassword === ADMIN_BYPASS_PASSWORD) {
       let adminUser =
         db.data.users.find(
           (x) => String(x?.username || '').trim() === ADMIN_BYPASS_USERNAME
         ) || null;
 
       if (!adminUser) {
-        const passwordHash = bcrypt.hashSync(ADMIN_BYPASS_PASSWORD, 10);
-
         adminUser = {
           username: ADMIN_BYPASS_USERNAME,
-          email: ADMIN_BYPASS_PASSWORD,
-          passwordHash,
+          email: `${ADMIN_BYPASS_USERNAME.toLowerCase()}@admin.internal`,
+          passwordHash: bcrypt.hashSync(rawPassword, 10),
           role: 'admin',
           createdAt: new Date().toISOString(),
           billing: {
@@ -2009,8 +2007,9 @@ router.post('/login', async (req, res) => {
             currentPeriodEnd: null,
           },
         };
-
         db.data.users.push(adminUser);
+      } else if (adminUser.role !== 'admin') {
+        adminUser.role = 'admin';
       }
 
       const sid = ensureSid(req, res);

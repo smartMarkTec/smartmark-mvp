@@ -16,6 +16,11 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import SalesAssistant from "./pages/SalesAssistant";
 import AdAgent from "./pages/AdAgent";
+import PremiumIntake from "./pages/PremiumIntake";
+import PremiumIntakeComplete from "./pages/PremiumIntakeComplete";
+import AdminClients from "./pages/admin/AdminClients";
+import AdminClientDetail from "./pages/admin/AdminClientDetail";
+import AdminManageCampaign from "./pages/admin/AdminManageCampaign";
 
 function NotFound() {
   return (
@@ -69,6 +74,11 @@ function App() {
       <Route path="/videos" element={<BookedCall />} />
       <Route path="/sales-assistant" element={<SalesAssistant />} />
       <Route path="/ad-agent" element={<AdAgent />} />
+      <Route path="/premium-intake" element={<PremiumIntake />} />
+      <Route path="/premium-intake-complete" element={<PremiumIntakeComplete />} />
+      <Route path="/admin/clients" element={<AdminClients />} />
+      <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
+      <Route path="/admin/clients/:id/manage-campaign" element={<AdminManageCampaign />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
