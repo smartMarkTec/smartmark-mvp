@@ -2319,30 +2319,37 @@ async function generatePosterBPair(runToken) {
             {adminClientId ? "Admin Dashboard" : "Back"}
           </button>
 
-          {!adminClientId && (
-            <button
-              onClick={() => navigate("/setup")}
-              style={{
-                background: "rgba(255,255,255,0.74)",
-                color: "#4c63ff",
-                border: "1px solid rgba(76,99,255,0.18)",
-                borderRadius: "1.2rem",
-                padding: "11px 18px",
-                fontWeight: 800,
-                fontSize: "1rem",
-                cursor: "pointer",
-                boxShadow: "0 8px 24px rgba(66,54,120,0.08)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                backdropFilter: "blur(10px)",
-                WebkitBackdropFilter: "blur(10px)",
-              }}
-              aria-label="Dashboard"
-            >
-              Dashboard
-            </button>
-          )}
+          <button
+            onClick={() => {
+              if (adminClientId) {
+                navigate("/setup", {
+                  state: {
+                    adminClientId,
+                    adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
+                  },
+                });
+              } else {
+                navigate("/setup");
+              }
+            }}
+            style={{
+              background: "#1a1a22",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "1.2rem",
+              padding: "11px 18px",
+              fontWeight: 800,
+              fontSize: "1rem",
+              cursor: "pointer",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            aria-label="Dashboard"
+          >
+            Dashboard
+          </button>
         </div>
 
         {adminClientId && (

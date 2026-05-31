@@ -330,11 +330,9 @@ export default function Landing() {
                 <button onClick={() => (window.location.href = "/pricing")} style={navBtn}>
                   Pricing
                 </button>
-                {!isLoggedIn && (
-                  <button onClick={() => (window.location.href = "/login")} style={navBtn}>
-                    Login
-                  </button>
-                )}
+                <button onClick={() => (window.location.href = "/login")} style={navBtn}>
+                  Login
+                </button>
                 <button onClick={scrollToFaq} style={navBtn}>
                   FAQ
                 </button>
@@ -355,7 +353,7 @@ export default function Landing() {
               </button>
             )}
 
-            {isMobile && !isLoggedIn && (
+            {isMobile && (
               <button onClick={() => (window.location.href = "/login")} style={navBtnSm}>
                 Login
               </button>
