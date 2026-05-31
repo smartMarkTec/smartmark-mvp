@@ -2907,6 +2907,8 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   });
 
   const state = location.state || {};
+  const adminClientId = String(state.adminClientId || "").trim();
+  const adminClientBusinessName = String(state.adminClientBusinessName || "").trim();
   const navImageUrls = Array.isArray(state.imageUrls)
     ? state.imageUrls
     : Array.isArray(state.imageVariants)
@@ -5327,6 +5329,29 @@ const selectedCampaignCreatives =
             Home
           </button>
         </div>
+
+        {adminClientId && (
+          <div style={{
+            margin: "14px auto 0",
+            maxWidth: 1180,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "rgba(93,89,234,0.14)",
+            border: "1px solid rgba(93,89,234,0.28)",
+            borderRadius: 10,
+            padding: "9px 16px",
+            fontSize: 13,
+            fontWeight: 700,
+            color: "#c7c5ff",
+          }}>
+            <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, marginRight: 4 }}>Admin Access</span>
+            Managing campaign for:{" "}
+            <span style={{ fontWeight: 800 }}>
+              {adminClientBusinessName || adminClientId}
+            </span>
+          </div>
+        )}
 
         <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
           <h1

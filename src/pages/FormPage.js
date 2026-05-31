@@ -912,6 +912,39 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
+  /* ---- Admin-client mode ---- */
+  const adminClientId = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).get("adminClientId") || "";
+    } catch { return ""; }
+  }, [location.search]);
+  const [adminClientInfo, setAdminClientInfo] = useState(null);
+
+  useEffect(() => {
+    if (!adminClientId) return;
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}`, {
+      credentials: "include",
+      headers: sid ? { "x-sm-sid": sid } : {},
+    })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => { if (j.ok && j.client) setAdminClientInfo(j.client); })
+      .catch(() => {});
+  }, [adminClientId]);
+
+  useEffect(() => {
+    if (!adminClientInfo) return;
+    const intake = adminClientInfo.premiumIntake || {};
+    setAnswers((prev) => ({
+      ...(prev || {}),
+      ...(intake.businessName ? { businessName: intake.businessName } : {}),
+      ...(intake.websiteUrl ? { url: intake.websiteUrl } : {}),
+      ...(intake.mainServices ? { services: intake.mainServices } : {}),
+      ...(intake.currentSpecialOrOffer ? { offer: intake.currentSpecialOrOffer } : {}),
+      ...(intake.serviceArea ? { location: intake.serviceArea } : {}),
+    }));
+  }, [adminClientInfo]);
+
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
@@ -2306,6 +2339,29 @@ async function generatePosterBPair(runToken) {
           </button>
         </div>
 
+        {adminClientId && (
+          <div style={{
+            margin: "14px auto 0",
+            maxWidth: 980,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "rgba(93,89,234,0.10)",
+            border: "1px solid rgba(93,89,234,0.22)",
+            borderRadius: 10,
+            padding: "9px 16px",
+            fontSize: 13,
+            fontWeight: 700,
+            color: "#3d3a8a",
+          }}>
+            <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, marginRight: 4 }}>Admin Access</span>
+            Creating campaign for:{" "}
+            <span style={{ fontWeight: 800 }}>
+              {adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || adminClientId}
+            </span>
+          </div>
+        )}
+
         <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
           <h1
             style={{
@@ -3026,6 +3082,10 @@ async function generatePosterBPair(runToken) {
                 imageOverlayCTA: mergedCTA,
                 answers,
                 mediaSelection: "image",
+                ...(adminClientId ? {
+                  adminClientId,
+                  adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
+                } : {}),
               },
             });
           }}

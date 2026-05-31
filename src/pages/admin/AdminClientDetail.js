@@ -174,7 +174,7 @@ export default function AdminClientDetail() {
             </div>
           </div>
           <button
-            onClick={() => navigate(`/admin/clients/${id}/manage-campaign`)}
+            onClick={() => navigate(`/form?adminClientId=${encodeURIComponent(id)}`)}
             style={{
               padding: "10px 22px",
               background: PURPLE,
