@@ -67,6 +67,12 @@ async function getCampaignContext(ownerKey) {
       if (m.ctr)         parts.push(`CTR: ${Number(m.ctr).toFixed(2)}%`);
       if (m.cpc)         parts.push(`CPC: $${Number(m.cpc).toFixed(2)}`);
       if (m.cpm)         parts.push(`CPM: $${Number(m.cpm).toFixed(2)}`);
+      const conv = Number(m.conversions || 0);
+      parts.push(`Conversions: ${conv}`);
+      if (conv > 0) {
+        if (m.costPerConversion) parts.push(`Cost/Conv: $${Number(m.costPerConversion).toFixed(2)}`);
+        if (m.conversionRate)    parts.push(`Conv Rate: ${Number(m.conversionRate).toFixed(2)}%`);
+      }
       lines.push('- ' + parts.join(' | '));
 
       // Include AI optimizer summary if available
@@ -121,6 +127,53 @@ async function findUserByOwnerKey(ownerKey) {
 }
 
 const ADMIN_USERNAME_AGENT = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+
+// ── Admin-client mode: resolve who we're acting on behalf of ─────────────────
+// If the current user is admin and the request carries an adminClientId,
+// swap the ownerKey to that client so all token/metrics lookups use their data.
+// Non-admin users always get their own ownerKey.
+function resolveEffectiveOwnerKey(req, user, selfOwnerKey) {
+  if (
+    user?.role === 'admin' ||
+    String(user?.username || '').trim() === ADMIN_USERNAME_AGENT
+  ) {
+    const clientId = String(
+      req.body?.adminClientId || req.query?.adminClientId || ''
+    ).trim();
+    if (clientId) return `user:${clientId}`;
+  }
+  return selfOwnerKey;
+}
+
+// ── Persist pixel info + mark onboarding checklist ───────────────────────────
+async function savePixelInfo(effectiveOwnerKey, pixelId, pixelName, adAccountId, status) {
+  try {
+    const key = String(effectiveOwnerKey || '').trim();
+    if (!key.startsWith('user:')) return;
+    const username = key.slice(5);
+    await db.read();
+    const idx = (db.data.users || []).findIndex(
+      (u) => String(u?.username || '').trim() === username
+    );
+    if (idx === -1) return;
+    db.data.users[idx].metaPixel = {
+      pixelId: String(pixelId || ''),
+      pixelName: String(pixelName || 'Smartemark Pixel'),
+      adAccountId: String(adAccountId || ''),
+      status,
+      installStatus: 'needs_website_install',
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    db.data.users[idx].onboarding = {
+      ...(db.data.users[idx].onboarding || {}),
+      meta_pixel_setup: true,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.write();
+  } catch (err) {
+    console.error('[AdAgent] savePixelInfo error:', err?.message);
+  }
+}
 
 // ── Ad Agent access — local to this feature only ──────────────────────────────
 // Returns: 'locked' | 'chat' | 'pixel'
@@ -404,6 +457,9 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Please provide a message.' });
     }
 
+    // In admin-client mode the effective target is the selected client, not TheBoss
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+
     const trimmed = message.trim().slice(0, 2000);
 
     // Pixel CREATE intent — must be checked before general pixel intent
@@ -414,7 +470,12 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           reply: 'Meta Pixel setup is available on the Premium plan. Upgrade to Premium to create or fetch your Meta Pixel.',
         });
       }
-      const createResult = await createOrFetchMetaPixel(ownerKey);
+      const createResult = await createOrFetchMetaPixel(effectiveOwnerKey);
+      if (createResult.pixels?.length && createResult.adAccountId) {
+        const p = createResult.pixels[0];
+        const st = createResult.created ? 'created' : 'found_existing';
+        savePixelInfo(effectiveOwnerKey, p.id, p.name, createResult.adAccountId, st);
+      }
       return res.json({ ok: true, reply: buildPixelCreateReply(createResult) });
     }
 
@@ -430,7 +491,11 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
     // Pixel FETCH intent on premium/operator — fetch inline
     if (isPixelIntent(trimmed) && access === 'pixel') {
-      const pixelResult = await fetchMetaPixels(ownerKey);
+      const pixelResult = await fetchMetaPixels(effectiveOwnerKey);
+      if (pixelResult.pixels?.length && pixelResult.adAccountId) {
+        const p = pixelResult.pixels[0];
+        savePixelInfo(effectiveOwnerKey, p.id, p.name, pixelResult.adAccountId, 'found_existing');
+      }
       return res.json({ ok: true, reply: buildPixelReply(pixelResult) });
     }
 
@@ -442,7 +507,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           .slice(-8)
       : [];
 
-    const campaignContext = await getCampaignContext(ownerKey);
+    const campaignContext = await getCampaignContext(effectiveOwnerKey);
 
     const completion = await openaiClient.chat.completions.create({
       model: MODEL,
@@ -486,7 +551,8 @@ router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Meta Pixel fetch is available on Premium only.' });
     }
 
-    const result = await fetchMetaPixels(ownerKey);
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const result = await fetchMetaPixels(effectiveOwnerKey);
 
     if (result.notConnected) {
       return res.json({ ok: false, notConnected: true, error: 'Facebook is not connected yet. Connect your Facebook ad account first.' });
@@ -500,6 +566,11 @@ router.get('/ad-agent/meta-pixel', limitPixel, async (req, res) => {
         noPixel: true,
         message: 'No Meta Pixel was found for this connected ad account. You may need to create one in Meta Events Manager first.',
       });
+    }
+
+    if (result.pixels?.length && result.adAccountId) {
+      const p = result.pixels[0];
+      savePixelInfo(effectiveOwnerKey, p.id, p.name, result.adAccountId, 'found_existing');
     }
 
     return res.json({
@@ -534,7 +605,8 @@ router.post('/ad-agent/meta-pixel/create', limitPixel, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Meta Pixel creation is available on Premium only.' });
     }
 
-    const result = await createOrFetchMetaPixel(ownerKey);
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const result = await createOrFetchMetaPixel(effectiveOwnerKey);
 
     if (result.notConnected) {
       return res.json({ ok: false, notConnected: true, error: 'Facebook is not connected yet.' });
@@ -550,6 +622,8 @@ router.post('/ad-agent/meta-pixel/create', limitPixel, async (req, res) => {
     }
 
     const p = result.pixels[0];
+    const st = result.created ? 'created' : 'found_existing';
+    savePixelInfo(effectiveOwnerKey, p.id, p.name, result.adAccountId, st);
     return res.json({
       ok: true,
       created: !!result.created,

@@ -148,6 +148,7 @@ export default function AdminClientDetail() {
 
   const intake = client?.premiumIntake;
   const onboarding = client?.onboarding || {};
+  const metaPixel = client?.metaPixel || null;
   const campaigns = client?.campaigns || [];
 
   return (
@@ -307,6 +308,49 @@ export default function AdminClientDetail() {
                     {p.name || "Unnamed"} <span style={{ color: TEXT_SOFT }}>({p.id})</span>
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+        </Card>
+
+        {/* Meta Pixel */}
+        <Card title="Meta Pixel">
+          {!metaPixel ? (
+            <p style={{ color: TEXT_SOFT, fontSize: 14, margin: 0 }}>No Meta Pixel saved yet.</p>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                <InfoRow label="Pixel ID" value={metaPixel.pixelId} />
+                <InfoRow label="Pixel Name" value={metaPixel.pixelName} />
+                <InfoRow label="Ad Account" value={metaPixel.adAccountId} />
+                <InfoRow
+                  label="Status"
+                  value={
+                    metaPixel.status === "created"
+                      ? "Created via Ad Agent"
+                      : metaPixel.status === "found_existing"
+                      ? "Found (existing)"
+                      : metaPixel.status || "—"
+                  }
+                />
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <InfoRow
+                  label="Install Status"
+                  value={
+                    metaPixel.installStatus === "needs_website_install"
+                      ? "⚠ Website install still needed"
+                      : metaPixel.installStatus || "—"
+                  }
+                />
+                <InfoRow
+                  label="Last Updated"
+                  value={
+                    metaPixel.lastUpdatedAt
+                      ? new Date(metaPixel.lastUpdatedAt).toLocaleString()
+                      : "—"
+                  }
+                />
               </div>
             </>
           )}

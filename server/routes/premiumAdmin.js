@@ -284,6 +284,7 @@ router.get('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
         fbConnected,
         premiumIntake: user.premiumIntake || null,
         onboarding: user.onboarding || defaultOnboarding(),
+        metaPixel: user.metaPixel || null,
         campaigns,
       },
     });

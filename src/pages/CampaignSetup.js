@@ -1468,7 +1468,7 @@ function CreativeThumbGrid({ items = [], labels = [], onOpen, height = 170 }) {
 
 
 /* ---------- Minimal metrics row ---------- */
-function MetricsRow({ metrics }) {
+function MetricsRow({ metrics, optimizerState, showConversions }) {
   const isMobile = useIsMobile();
   const safeNum = (v, fallback = 0) => {
     const n = Number(v);
@@ -1491,21 +1491,44 @@ function MetricsRow({ metrics }) {
     const cpcNum = clicks > 0 ? spend / clicks : 0;
     const hasDelivery = impressions > 0 || clicks > 0 || spend > 0;
 
+    // Conversions come from the optimizer state's metricsSnapshot (synced from Meta insights actions)
+    const snap = optimizerState?.metricsSnapshot || {};
+    const conversions = safeNum(snap.conversions, 0);
+    const costPerConv = conversions > 0 ? safeNum(snap.costPerConversion, 0) : 0;
+
     return {
       impressions: impressions.toLocaleString(),
       clicks: clicks.toLocaleString(),
       ctr: `${ctrNum.toFixed(2)}%`,
       cpc: `$${cpcNum.toFixed(2)}`,
       hasDelivery,
+      conversions,
+      costPerConv,
     };
-  }, [metrics]);
+  }, [metrics, optimizerState]);
 
-  const cards = [
+  const baseCards = [
     { key: "impressions", label: "Impressions", value: normalized.impressions },
     { key: "clicks", label: "Clicks", value: normalized.clicks },
     { key: "ctr", label: "CTR", value: normalized.ctr },
     { key: "cpc", label: "CPC", value: normalized.cpc },
   ];
+
+  const conversionCard = showConversions
+    ? [{
+        key: "conversions",
+        label: "Conversions",
+        value: normalized.conversions > 0
+          ? String(normalized.conversions)
+          : "0",
+        sub: normalized.conversions > 0 && normalized.costPerConv > 0
+          ? `$${normalized.costPerConv.toFixed(2)}/conv`
+          : "From Meta Pixel/actions",
+        isPremium: true,
+      }]
+    : [];
+
+  const cards = [...baseCards, ...conversionCard];
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
@@ -1542,7 +1565,11 @@ function MetricsRow({ metrics }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: isMobile
+            ? "repeat(2, 1fr)"
+            : cards.length === 5
+            ? "repeat(5, minmax(0, 1fr))"
+            : "repeat(4, minmax(0, 1fr))",
           gap: 10,
         }}
       >
@@ -1550,20 +1577,24 @@ function MetricsRow({ metrics }) {
           <div
             key={c.key}
             style={{
-              background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
-              border: "1px solid rgba(93,89,234,0.12)",
+              background: c.isPremium
+                ? "linear-gradient(145deg, #f5f3ff 0%, #ede9fe 100%)"
+                : "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+              border: c.isPremium
+                ? "1px solid rgba(109,40,217,0.18)"
+                : "1px solid rgba(93,89,234,0.12)",
               borderRadius: 14,
               padding: "14px 16px",
               display: "flex",
               flexDirection: "column",
-              gap: 10,
+              gap: 6,
               boxShadow: "0 4px 14px rgba(91,87,232,0.07)",
             }}
           >
             <div
               style={{
                 fontSize: 10,
-                color: "#94a3b8",
+                color: c.isPremium ? "#7c3aed" : "#94a3b8",
                 fontWeight: 600,
                 letterSpacing: "0.07em",
                 textTransform: "uppercase",
@@ -1582,6 +1613,12 @@ function MetricsRow({ metrics }) {
             >
               {c.value}
             </div>
+
+            {c.sub && (
+              <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.3 }}>
+                {c.sub}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -6866,7 +6903,19 @@ const selectedCampaignCreatives =
             padding: "2px 0",
           }}
         >
-          <MetricsRow metrics={metricsMap[selectedCampaignId]} />
+          <MetricsRow
+            metrics={metricsMap[selectedCampaignId]}
+            optimizerState={selectedOptimizerState}
+            showConversions={(() => {
+              const pk = String(
+                adminClientId
+                  ? adminClientInfo?.planKey || ""
+                  : billingInfo?.planKey || ""
+              ).trim().toLowerCase();
+              const isAdminUser = String(billingInfo?.username || "").trim() === ADMIN_BYPASS_USERNAME;
+              return pk === "premium" || pk === "operator" || isAdminUser;
+            })()}
+          />
         </div>
       </>
     ) : (

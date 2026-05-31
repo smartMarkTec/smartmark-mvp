@@ -99,6 +99,7 @@ export default function AdAgent() {
 
     try {
       const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
       const r = await fetch("/api/ad-agent/chat", {
         method: "POST",
         credentials: "include",
@@ -111,6 +112,7 @@ export default function AdAgent() {
           history: updatedMessages
             .slice(-9, -1)
             .map((m) => ({ role: m.role, content: m.content })),
+          ...(_adminClientId ? { adminClientId: _adminClientId } : {}),
         }),
       });
       const j = await r.json().catch(() => ({}));
