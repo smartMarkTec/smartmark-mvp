@@ -2288,11 +2288,19 @@ async function generatePosterBPair(runToken) {
        <div style={{ width: "100%", maxWidth: 980, padding: "28px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <button
-            onClick={() => navigate("/")}
+            onClick={() => {
+              if (adminClientId) {
+                try { localStorage.removeItem("sm_admin_target_client_id"); } catch {}
+                try { localStorage.removeItem("sm_admin_target_client_label"); } catch {}
+                navigate("/admin/clients");
+              } else {
+                navigate("/");
+              }
+            }}
             style={{
               background: "rgba(255,255,255,0.74)",
-              color: "#4d4a5d",
-              border: "1px solid rgba(80,72,120,0.10)",
+              color: adminClientId ? "#5d59ea" : "#4d4a5d",
+              border: adminClientId ? "1px solid rgba(93,89,234,0.22)" : "1px solid rgba(80,72,120,0.10)",
               borderRadius: "1.2rem",
               padding: "11px 18px",
               fontWeight: 700,
@@ -2305,34 +2313,36 @@ async function generatePosterBPair(runToken) {
               backdropFilter: "blur(10px)",
               WebkitBackdropFilter: "blur(10px)",
             }}
-            aria-label="Back"
+            aria-label={adminClientId ? "Exit Client Mode" : "Back"}
           >
             <FaArrowLeft />
-            Back
+            {adminClientId ? "Admin Dashboard" : "Back"}
           </button>
 
-          <button
-            onClick={() => navigate("/setup")}
-            style={{
-              background: "rgba(255,255,255,0.74)",
-              color: "#4c63ff",
-              border: "1px solid rgba(76,99,255,0.18)",
-              borderRadius: "1.2rem",
-              padding: "11px 18px",
-              fontWeight: 800,
-              fontSize: "1rem",
-              cursor: "pointer",
-              boxShadow: "0 8px 24px rgba(66,54,120,0.08)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
-            }}
-            aria-label="Dashboard"
-          >
-            Dashboard
-          </button>
+          {!adminClientId && (
+            <button
+              onClick={() => navigate("/setup")}
+              style={{
+                background: "rgba(255,255,255,0.74)",
+                color: "#4c63ff",
+                border: "1px solid rgba(76,99,255,0.18)",
+                borderRadius: "1.2rem",
+                padding: "11px 18px",
+                fontWeight: 800,
+                fontSize: "1rem",
+                cursor: "pointer",
+                boxShadow: "0 8px 24px rgba(66,54,120,0.08)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
+              }}
+              aria-label="Dashboard"
+            >
+              Dashboard
+            </button>
+          )}
         </div>
 
         {adminClientId && (
@@ -2341,6 +2351,8 @@ async function generatePosterBPair(runToken) {
             maxWidth: 980,
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
             gap: 10,
             background: "rgba(93,89,234,0.10)",
             border: "1px solid rgba(93,89,234,0.22)",
@@ -2350,11 +2362,13 @@ async function generatePosterBPair(runToken) {
             fontWeight: 700,
             color: "#3d3a8a",
           }}>
-            <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, marginRight: 4 }}>Admin Access</span>
-            Creating campaign for:{" "}
-            <span style={{ fontWeight: 800 }}>
-              {adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || adminClientId}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>Client Mode</span>
+              <span>Creating ad for:</span>
+              <span style={{ fontWeight: 800 }}>
+                {adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || adminClientId}
+              </span>
+            </div>
           </div>
         )}
 

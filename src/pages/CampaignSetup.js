@@ -2925,6 +2925,15 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     try { return localStorage.getItem("sm_admin_target_client_label") || ""; } catch {}
     return "";
   })();
+
+  // Clears admin client session mode and returns to the admin client list.
+  // Never touches sm_sid_v1 or any normal user session key.
+  const exitClientMode = React.useCallback(() => {
+    try { localStorage.removeItem("sm_admin_target_client_id"); } catch {}
+    try { localStorage.removeItem("sm_admin_target_client_label"); } catch {}
+    navigate("/admin/clients");
+  }, [navigate]);
+
   const navImageUrls = Array.isArray(state.imageUrls)
     ? state.imageUrls
     : Array.isArray(state.imageVariants)
@@ -5372,7 +5381,7 @@ const selectedCampaignCreatives =
 
           {adminClientId && (
             <button
-              onClick={() => navigate("/admin/clients")}
+              onClick={exitClientMode}
               style={{
                 background: "#5d59ea",
                 color: WHITE,
@@ -5415,6 +5424,8 @@ const selectedCampaignCreatives =
             maxWidth: 1180,
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
             gap: 10,
             background: "rgba(93,89,234,0.14)",
             border: "1px solid rgba(93,89,234,0.28)",
@@ -5424,11 +5435,29 @@ const selectedCampaignCreatives =
             fontWeight: 700,
             color: "#c7c5ff",
           }}>
-            <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, marginRight: 4 }}>Admin Access</span>
-            Managing campaign for:{" "}
-            <span style={{ fontWeight: 800 }}>
-              {adminClientBusinessName || adminClientId}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ background: "#5d59ea", color: "#fff", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>Client Mode</span>
+              <span>Managing:</span>
+              <span style={{ fontWeight: 800, color: "#fff" }}>
+                {adminClientBusinessName || adminClientId}
+              </span>
+            </div>
+            <button
+              onClick={exitClientMode}
+              style={{
+                background: "rgba(255,255,255,0.10)",
+                border: "1px solid rgba(255,255,255,0.22)",
+                borderRadius: 7,
+                padding: "4px 12px",
+                color: "#c7c5ff",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                letterSpacing: 0.3,
+              }}
+            >
+              Exit Client Mode
+            </button>
           </div>
         )}
 
@@ -5691,9 +5720,10 @@ const selectedCampaignCreatives =
       );
     })()}
 
-    {/* ── Clients sidebar item (TheBoss/admin only) ── */}
+    {/* ── Clients sidebar item (TheBoss/admin only, hidden while managing a client) ── */}
     {(() => {
       if (billingInfo?.username !== "TheBoss") return null;
+      if (adminClientId) return null; // in client session mode, hide admin nav
       return (
         <button
           type="button"
