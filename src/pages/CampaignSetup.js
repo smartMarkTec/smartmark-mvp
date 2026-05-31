@@ -16,6 +16,7 @@ import {
   FaEllipsisV,
   FaRobot,
   FaLock,
+  FaUsers,
 } from "react-icons/fa";
 import { trackEvent } from "../analytics/gaEvents";
 
@@ -5579,6 +5580,62 @@ const selectedCampaignCreatives =
                 }}
               >
                 {locked ? "Upgrade to access" : "AI marketing assistant"}
+              </div>
+            </div>
+          )}
+        </button>
+      );
+    })()}
+
+    {/* ── Clients sidebar item (operator/admin only) ── */}
+    {(() => {
+      const pk = String(billingInfo?.planKey || selectedPlan || "").trim().toLowerCase();
+      if (pk !== "operator") return null;
+      return (
+        <button
+          type="button"
+          title="Admin — Client Management"
+          onClick={() => navigate("/admin/clients")}
+          style={{
+            flex: isMobile ? 1 : "unset",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: isMobile ? "center" : "flex-start",
+            gap: isMobile ? 0 : 12,
+            width: "100%",
+            textAlign: "left",
+            borderRadius: 14,
+            padding: isMobile ? "10px 4px" : "12px 12px",
+            border: "1px solid transparent",
+            background: "transparent",
+            cursor: "pointer",
+            marginTop: isMobile ? 0 : 6,
+            transition: "all 180ms ease",
+          }}
+        >
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              minWidth: 32,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "linear-gradient(135deg, #f1f5f9 0%, #e9ebf2 100%)",
+              color: "#5d59ea",
+              fontSize: 14,
+            }}
+          >
+            <FaUsers />
+          </div>
+          {!isMobile && (
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 14, lineHeight: 1.2, marginBottom: 2 }}>
+                Clients
+              </div>
+              <div style={{ color: "#64748b", fontWeight: 700, fontSize: 11, lineHeight: 1.3 }}>
+                Admin · Client management
               </div>
             </div>
           )}
