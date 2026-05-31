@@ -75,6 +75,7 @@ export default function AdminClientDetail() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [fbInfo, setFbInfo] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -90,6 +91,13 @@ export default function AdminClientDetail() {
         setLoading(false);
       }
     })();
+  }, [id]);
+
+  useEffect(() => {
+    fetch(`/api/admin/clients/${id}/facebook-info`, { credentials: "include", headers: adminHeaders() })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => { if (j.ok) setFbInfo(j); })
+      .catch(() => {});
   }, [id]);
 
   const toggleChecklist = async (field, currentVal) => {
@@ -269,6 +277,40 @@ export default function AdminClientDetail() {
             </p>
           </Card>
         )}
+
+        {/* Facebook / Ad Account Info */}
+        <Card title="Facebook & Ad Account">
+          {!fbInfo ? (
+            <p style={{ color: TEXT_SOFT, fontSize: 14, margin: 0 }}>Loading…</p>
+          ) : !fbInfo.fbConnected ? (
+            <p style={{ color: "#d97706", fontSize: 14, margin: 0 }}>Facebook not connected — client must connect their account.</p>
+          ) : (
+            <>
+              <div style={{ marginBottom: 10, fontSize: 13, color: "#15803d", fontWeight: 700 }}>● Facebook connected</div>
+              {fbInfo.fbError && <p style={{ color: "#b91c1c", fontSize: 13, marginBottom: 10 }}>FB API error: {fbInfo.fbError}</p>}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SOFT, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Ad Accounts</div>
+                {(fbInfo.adAccounts || []).length === 0 ? (
+                  <div style={{ fontSize: 13, color: TEXT_SOFT }}>No ad accounts found.</div>
+                ) : (fbInfo.adAccounts || []).map((a) => (
+                  <div key={a.id} style={{ fontSize: 13, color: TEXT, marginBottom: 2 }}>
+                    {a.name || "Unnamed"} <span style={{ color: TEXT_SOFT }}>({a.id})</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SOFT, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Pages</div>
+                {(fbInfo.pages || []).length === 0 ? (
+                  <div style={{ fontSize: 13, color: TEXT_SOFT }}>No pages found.</div>
+                ) : (fbInfo.pages || []).map((p) => (
+                  <div key={p.id} style={{ fontSize: 13, color: TEXT, marginBottom: 2 }}>
+                    {p.name || "Unnamed"} <span style={{ color: TEXT_SOFT }}>({p.id})</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </Card>
 
         {/* Campaigns */}
         <Card title={`Campaigns (${campaigns.length})`}>

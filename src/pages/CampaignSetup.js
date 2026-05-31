@@ -2934,6 +2934,9 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     navigate("/admin/clients");
   }, [navigate]);
 
+  // Full client detail record fetched server-side for the Account tab and badge label.
+  const [adminClientInfo, setAdminClientInfo] = React.useState(null);
+
   const navImageUrls = Array.isArray(state.imageUrls)
     ? state.imageUrls
     : Array.isArray(state.imageVariants)
@@ -3711,16 +3714,27 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [fbConnected, pages.length]);
 
-  // ✅ Admin-client mode: load the selected client's FB connection, ad accounts, and pages.
-  // Uses the admin wrapper route so no client token is exposed to the frontend.
-  // This runs instead of (not alongside) the normal adaccounts/pages effects above.
+  // ✅ Admin-client mode: when the selected client changes, immediately clear any stale
+  // FB/account state from the previous client, then load fresh data for the new client.
+  // Uses admin wrapper routes — no client token is exposed to the frontend.
   useEffect(() => {
   if (!adminClientId) return;
+
+  // Clear stale state from previous client before fetching new client data.
+  setAdAccounts([]);
+  setPages([]);
+  setSelectedAccount("");
+  setSelectedPageId("");
+  setCampaigns([]);
+  setFbConnected(false);
+  setAdminClientInfo(null);
+
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-  fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}/facebook-info`, {
-    credentials: "include",
-    headers: sid ? { "x-sm-sid": sid } : {},
-  })
+  const headers = sid ? { "x-sm-sid": sid } : {};
+  const enc = encodeURIComponent(adminClientId);
+
+  // Fetch FB connection, ad accounts, and pages for this client.
+  fetch(`/api/admin/clients/${enc}/facebook-info`, { credentials: "include", headers })
     .then((r) => r.json().catch(() => ({})))
     .then((j) => {
       if (!j.ok) return;
@@ -3729,13 +3743,16 @@ useEffect(() => {
       setFbConnected(!!j.fbConnected);
       setAdAccounts(accts);
       setPages(pgs);
-      if (accts.length) {
-        setSelectedAccount((prev) => prev || String(accts[0].id || "").replace(/^act_/, ""));
-      }
-      if (pgs.length) {
-        setSelectedPageId((prev) => prev || String(pgs[0].id || ""));
-      }
+      // Always use client's first account/page — never fall back to admin's saved selection.
+      if (accts.length) setSelectedAccount(String(accts[0].id || "").replace(/^act_/, ""));
+      if (pgs.length)   setSelectedPageId(String(pgs[0].id || ""));
     })
+    .catch(() => {});
+
+  // Fetch full client details for the Account tab display.
+  fetch(`/api/admin/clients/${enc}`, { credentials: "include", headers })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => { if (j.ok && j.client) setAdminClientInfo(j.client); })
     .catch(() => {});
   // eslint-disable-next-line
 }, [adminClientId]);
@@ -3743,6 +3760,7 @@ useEffect(() => {
 
 
 useEffect(() => {
+  if (adminClientId) return; // admin-client mode: campaign list uses admin wrapper; skip normal user endpoint
   if (!fbConnected || !selectedAccount) return;
 
   const acctId = String(selectedAccount).trim();
@@ -3922,6 +3940,7 @@ useEffect(() => {
   ]);
 
 useEffect(() => {
+  if (adminClientId) return; // admin-client mode: metrics use admin session — skip to avoid wrong data
   if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
 
   const acctId = String(selectedAccount).trim();
@@ -7489,9 +7508,50 @@ const selectedCampaignCreatives =
         Account
       </div>
       <div style={{ color: "#667085", fontWeight: 500, fontSize: 14, lineHeight: 1.6 }}>
-        Plan and account details.
+        {adminClientId ? "Managing client account" : "Plan and account details."}
       </div>
     </div>
+
+    {/* ── Admin-client mode: show selected client's info, not TheBoss ── */}
+    {adminClientId ? (
+      <div
+        style={{
+          background: "linear-gradient(150deg, #ffffff 0%, #f7f8ff 70%, #f0f3ff 100%)",
+          border: "1px solid rgba(93,89,234,0.12)",
+          borderRadius: 20,
+          padding: 22,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+          boxShadow: "0 8px 32px rgba(91,87,232,0.07)",
+        }}
+      >
+        <div style={{ background: "rgba(93,89,234,0.08)", border: "1px solid rgba(93,89,234,0.18)", borderRadius: 10, padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#5d59ea", letterSpacing: 0.3 }}>
+          Client Mode — managing: {adminClientBusinessName || adminClientId}
+        </div>
+
+        {([
+          { label: "Email",    value: adminClientInfo?.email || adminClientId },
+          { label: "Business", value: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || "—" },
+          { label: "Plan",     value: adminClientInfo?.planKey || "—" },
+          { label: "Facebook", value: adminClientInfo?.fbConnected ? "Connected" : "Not connected" },
+          { label: "Ad Account", value: selectedAccount ? `act_${selectedAccount}` : (adAccounts.length ? adAccounts.map(a => a.name || a.id).join(", ") : "—") },
+          { label: "Facebook Page", value: selectedPageId || (pages.length ? pages.map(p => p.name || p.id).join(", ") : "—") },
+        ]).map(({ label, value }) => (
+          <div key={label} style={{ border: "1px solid rgba(93,89,234,0.10)", borderRadius: 14, padding: 16, background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)" }}>
+            <div style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11, marginBottom: 6 }}>{label}</div>
+            <div style={{ color: "#111827", fontWeight: 500, fontSize: 15, lineHeight: 1.5 }}>{value}</div>
+          </div>
+        ))}
+
+        <button
+          onClick={exitClientMode}
+          style={{ alignSelf: "flex-start", border: "1px solid rgba(93,89,234,0.28)", borderRadius: 10, padding: "10px 18px", background: "rgba(93,89,234,0.08)", color: "#5d59ea", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+        >
+          Exit Client Mode → Admin Dashboard
+        </button>
+      </div>
+    ) : (
 
     <div
       style={{
@@ -7695,6 +7755,7 @@ const selectedCampaignCreatives =
         </div>
       )}
     </div>
+    )} {/* end adminClientId ternary */}
   </>
 )}
   </div>
