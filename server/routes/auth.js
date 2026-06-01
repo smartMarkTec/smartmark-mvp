@@ -5285,17 +5285,34 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
       }
     } catch {}
 
+    // Secondary source: optimizer_campaign_state also carries smArchived/hiddenFromHistory.
+    // This acts as a fallback when campaign_creatives has a different ownerKey format.
+    const _dbOptStates = db.data?.optimizer_campaign_state || [];
+
     const enriched = list.map((c) => {
+      const cId = String(c.id || '');
+
       const dbRec = _dbCampaigns.find(
         (r) =>
-          String(r.campaignId || '') === String(c.id || '') &&
+          String(r.campaignId || '') === cId &&
           _archiveCandidates.has(String(r.ownerKey || ''))
       );
-      if (!dbRec) return c;
+
+      // Fall back to optimizer_campaign_state if campaign_creatives didn't match
+      const optRec = !dbRec
+        ? _dbOptStates.find(
+            (r) =>
+              String(r.campaignId || '') === cId &&
+              _archiveCandidates.has(String(r.ownerKey || ''))
+          )
+        : null;
+
+      const rec = dbRec || optRec;
+      if (!rec) return c;
       return {
         ...c,
-        ...(dbRec.smArchived         ? { smArchived:         true } : {}),
-        ...(dbRec.hiddenFromHistory  ? { hiddenFromHistory:  true } : {}),
+        ...(rec.smArchived        ? { smArchived:        true } : {}),
+        ...(rec.hiddenFromHistory ? { hiddenFromHistory: true } : {}),
       };
     });
 
@@ -5365,16 +5382,21 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
 });
 
 router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/archive', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
-
-  const { campaignId } = req.params;
+  const { campaignId, accountId } = req.params;
   const id = String(campaignId || '').trim();
   if (!id) return res.status(400).json({ error: 'campaignId is required' });
 
   try {
+    // IMPORTANT: db.read() must happen BEFORE ownerKeyFromReq so that
+    // db.data.sessions is populated and the session→username lookup resolves
+    // to "user:username" rather than the raw SID. Storing under a raw SID causes
+    // the archive flag to be lost when the session SID changes on the next visit.
     await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
     db.data.campaign_creatives = db.data.campaign_creatives || [];
+    const normalizedAcctId = String(accountId || '').replace(/^act_/, '');
 
     const idx = db.data.campaign_creatives.findIndex(
       (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
@@ -5387,11 +5409,11 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/archive', asyn
       };
     } else {
       // No existing record — create a stub so the archive flag persists across reloads.
-      // Without this, campaigns launched externally (on Meta directly) would un-archive
-      // on next page load because the campaigns list endpoint only reads smArchived from this table.
+      // accountId is stored so the fallback cache path can also match this record.
       db.data.campaign_creatives.push({
         campaignId: id,
         ownerKey,
+        accountId: normalizedAcctId,
         smArchived: true,
         archivedAt: new Date().toISOString(),
       });
@@ -5418,15 +5440,14 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/archive', asyn
 });
 
 router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/unarchive', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
-
   const { campaignId } = req.params;
   const id = String(campaignId || '').trim();
   if (!id) return res.status(400).json({ error: 'campaignId is required' });
 
   try {
-    await db.read();
+    await db.read(); // must be before ownerKeyFromReq so session lookup is reliable
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
     db.data.campaign_creatives = db.data.campaign_creatives || [];
 
     const idx = db.data.campaign_creatives.findIndex(
@@ -5463,15 +5484,14 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/unarchive', as
 // Soft-delete a Smartemark-archived campaign from the local history.
 // Does NOT delete from Meta/Facebook. Only applies to campaigns already marked smArchived.
 router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
-
-  const { campaignId } = req.params;
+  const { campaignId, accountId } = req.params;
   const id = String(campaignId || '').trim();
   if (!id) return res.status(400).json({ error: 'campaignId is required' });
 
   try {
-    await db.read();
+    await db.read(); // must be before ownerKeyFromReq so session lookup is reliable
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
     db.data.campaign_creatives = db.data.campaign_creatives || [];
 
     const idx = db.data.campaign_creatives.findIndex(
@@ -5489,10 +5509,11 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history',
       db.data.campaign_creatives[idx].hiddenAt = new Date().toISOString();
     } else {
       // No existing creative record — create a stub so the hidden flag persists.
-      // This handles campaigns archived on Meta directly (no Smartemark creative record).
+      // Include accountId so the fallback cache path can also match this record.
       db.data.campaign_creatives.push({
         campaignId: id,
         ownerKey,
+        accountId: String(accountId || '').replace(/^act_/, ''),
         smArchived: true,
         hiddenFromHistory: true,
         hiddenAt: new Date().toISOString(),

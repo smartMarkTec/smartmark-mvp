@@ -1730,13 +1730,30 @@ function isEffectivelyArchived(campaign) {
 function isUsefulCurrentCampaign(campaign, metricsSnap) {
   if (!campaign) return false;
   if (isEffectivelyArchived(campaign) || campaign.hiddenFromHistory) return false;
+
   const status = String(campaign.status || campaign.effective_status || "").toUpperCase();
+  const name   = String(campaign.name || "").trim();
+
+  // PAUSED with zero delivery → clutter (only when we've actually loaded metrics)
   if (status === "PAUSED" && metricsSnap != null) {
     const imp = Number(metricsSnap.impressions || 0);
     const sp  = Number(metricsSnap.spend      || 0);
     const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
-    if (imp === 0 && sp === 0 && cl === 0) return false; // no delivery — clutter
+    if (imp === 0 && sp === 0 && cl === 0) return false;
   }
+
+  // Generic fallback-cache stub: name is literally "Campaign" (default placeholder),
+  // no useful metrics, and not ACTIVE or IN_PROCESS/WITH_ISSUES on Meta.
+  // These are local DB stubs with no real delivery — exclude from active view.
+  const isGenericName = name === "Campaign" || name === "" || name === "Unnamed campaign";
+  if (isGenericName && metricsSnap != null) {
+    const imp = Number(metricsSnap.impressions || 0);
+    const sp  = Number(metricsSnap.spend      || 0);
+    const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
+    const trulyLive = status === "ACTIVE" || status === "IN_PROCESS" || status === "WITH_ISSUES";
+    if (!trulyLive && imp === 0 && sp === 0 && cl === 0) return false;
+  }
+
   return true;
 }
 
