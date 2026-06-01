@@ -1713,6 +1713,15 @@ function getCampaignDisplayStatus(campaign) {
   return "Active";
 }
 
+// A campaign is "effectively archived" if Smartemark marked it archived OR if Meta's
+// own status is ARCHIVED/DELETED (e.g. archived directly on Meta without going through
+// the Smartemark archive flow, so smArchived may still be false in our DB).
+function isEffectivelyArchived(campaign) {
+  if (campaign?.smArchived) return true;
+  const s = String(campaign?.effective_status || campaign?.status || "").toUpperCase();
+  return s === "ARCHIVED" || s === "DELETED";
+}
+
 function summarizeOptimizerEntry(kind, payload) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -3871,8 +3880,11 @@ useEffect(() => {
       for (const c of list) {
         if (!c.id) continue;
 
-        // Creative data
-        if (Array.isArray(c.images) || c.meta?.headline || c.meta?.body) {
+        // Creative data — only populate when real content exists so campaigns without
+        // stored creatives don't pollute the map with empty entries that mask the
+        // "no creative" fallback.
+        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body;
+        if (hasCreative) {
           newCreatives[c.id] = {
             images:         (c.images || []).filter(Boolean),
             mediaSelection: c.mediaSelection || "image",
@@ -6886,8 +6898,8 @@ const selectedCampaignCreatives =
         </option>
       )}
       {(showArchived
-        ? campaigns.filter((c) => c.smArchived && !c.hiddenFromHistory)
-        : campaigns.filter((c) => !c.smArchived && !c.hiddenFromHistory)
+        ? campaigns.filter((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory)
+        : campaigns.filter((c) => !isEffectivelyArchived(c) && !c.hiddenFromHistory)
       ).map((c) => {
         const ds = getCampaignDisplayStatus(c);
         return (
@@ -6998,7 +7010,7 @@ const selectedCampaignCreatives =
           </>
         )}
 
-        {selectedLiveCampaign?.smArchived ? (
+        {isEffectivelyArchived(selectedLiveCampaign) ? (
           <>
             <button
               type="button"
@@ -7017,7 +7029,7 @@ const selectedCampaignCreatives =
             <button
               type="button"
               onClick={() => {
-                const firstActive = campaigns.find((c) => !c.smArchived);
+                const firstActive = campaigns.find((c) => !isEffectivelyArchived(c) && !c.hiddenFromHistory);
                 setShowArchived(false);
                 setSelectedCampaignId(firstActive?.id || "");
                 setExpandedId(firstActive?.id || null);
@@ -7037,11 +7049,11 @@ const selectedCampaignCreatives =
             >
               Archive campaign
             </button>
-            {campaigns.some((c) => c.smArchived) && (
+            {campaigns.some((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory) && (
               <button
                 type="button"
                 onClick={() => {
-                  const firstArchived = campaigns.find((c) => c.smArchived);
+                  const firstArchived = campaigns.find((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory);
                   setShowArchived(true);
                   setSelectedCampaignId(firstArchived?.id || "");
                   setExpandedId(firstArchived?.id || null);
@@ -7053,11 +7065,11 @@ const selectedCampaignCreatives =
               </button>
             )}
           </>
-        ) : campaigns.some((c) => c.smArchived) ? (
+        ) : campaigns.some((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory) ? (
           <button
             type="button"
             onClick={() => {
-              const firstArchived = campaigns.find((c) => c.smArchived);
+              const firstArchived = campaigns.find((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory);
               setShowArchived(true);
               setSelectedCampaignId(firstArchived?.id || "");
               setExpandedId(firstArchived?.id || null);

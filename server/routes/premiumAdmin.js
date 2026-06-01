@@ -365,6 +365,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         c.status || opt?.currentStatus || 'ACTIVE'
       ).trim().toUpperCase();
 
+      // Treat as archived if Smartemark's own flag is set OR if Meta's stored status
+      // is ARCHIVED/DELETED (campaign was archived on Meta without going through Smartemark)
+      const isMetaArchived = status === 'ARCHIVED' || status === 'DELETED';
+
       campaigns.push({
         id:               cId,
         name:             c.name || opt?.campaignName || 'Campaign',
@@ -372,7 +376,7 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         effective_status: status,
         start_time:       c.createdAt || c.updatedAt || null,
         stop_time:        c.endDate || null,
-        smArchived:       !!(c.smArchived || opt?.smArchived),
+        smArchived:       !!(c.smArchived || opt?.smArchived || isMetaArchived),
         archivedAt:       c.archivedAt || null,
         accountId:        String(c.accountId || opt?.accountId || '').replace(/^act_/, ''),
         launchComplete:   !!c.launchComplete,
@@ -440,11 +444,25 @@ router.patch('/admin/clients/:id/campaign/:campaignId/hide-history', limitAdmin,
       (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
     );
     if (cIdx !== -1) {
-      if (!db.data.campaign_creatives[cIdx].smArchived) {
+      const rec = db.data.campaign_creatives[cIdx];
+      const metaStatus = String(rec.status || rec.effective_status || '').toUpperCase();
+      const isArchived = !!rec.smArchived || metaStatus === 'ARCHIVED' || metaStatus === 'DELETED';
+      if (!isArchived) {
         return res.status(400).json({ ok: false, error: 'Only archived campaigns can be removed from history.' });
       }
       db.data.campaign_creatives[cIdx].hiddenFromHistory = true;
       db.data.campaign_creatives[cIdx].hiddenAt = new Date().toISOString();
+    } else {
+      // No creative record — create a stub so the hidden flag persists across reloads
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      db.data.campaign_creatives.push({
+        campaignId,
+        ownerKey,
+        smArchived: true,
+        hiddenFromHistory: true,
+        hiddenAt: new Date().toISOString(),
+        hiddenReason: 'hide_from_history',
+      });
     }
 
     db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
@@ -461,6 +479,83 @@ router.patch('/admin/clients/:id/campaign/:campaignId/hide-history', limitAdmin,
   } catch (err) {
     console.error('[Admin] hide-history error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Failed to hide campaign from history.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/campaigns/cleanup-test-history
+// Admin-only. Soft-hides all archived/finished campaign records for the given
+// client. Does NOT delete Meta/Facebook campaigns. Never touches active campaigns.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/campaigns/cleanup-test-history', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    await ensureDB();
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const now = new Date().toISOString();
+    const ACTIVE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES']);
+
+    let ccHidden = 0, ccSkipped = 0, osHidden = 0, osSkipped = 0;
+
+    // campaign_creatives
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+    for (let i = 0; i < db.data.campaign_creatives.length; i++) {
+      const r = db.data.campaign_creatives[i];
+      if (String(r?.ownerKey || '') !== ownerKey) continue;
+      if (r.hiddenFromHistory) { ccSkipped++; continue; }
+
+      const s = String(r.status || r.effective_status || '').toUpperCase();
+      const isArchivedOrOld = r.smArchived || s === 'ARCHIVED' || s === 'DELETED' || s === 'COMPLETED';
+      const isActive = ACTIVE_STATUSES.has(s) && !r.smArchived;
+
+      if (isActive) { ccSkipped++; continue; }
+      if (!isArchivedOrOld && s !== '') { ccSkipped++; continue; }
+
+      db.data.campaign_creatives[i] = {
+        ...r,
+        hiddenFromHistory: true,
+        hiddenAt: now,
+        hiddenReason: 'manual_test_cleanup',
+      };
+      ccHidden++;
+    }
+
+    // optimizer_campaign_state
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    for (let i = 0; i < db.data.optimizer_campaign_state.length; i++) {
+      const s = db.data.optimizer_campaign_state[i];
+      if (String(s?.ownerKey || '') !== ownerKey) continue;
+      if (s.hiddenFromHistory) { osSkipped++; continue; }
+
+      const status = String(s.currentStatus || '').toUpperCase();
+      const isArchivedOrOld = s.smArchived || status === 'ARCHIVED' || status === 'DELETED' || status === 'COMPLETED';
+      const isActive = ACTIVE_STATUSES.has(status) && !s.smArchived;
+
+      if (isActive) { osSkipped++; continue; }
+      if (!isArchivedOrOld && status !== '') { osSkipped++; continue; }
+
+      db.data.optimizer_campaign_state[i] = {
+        ...s,
+        hiddenFromHistory: true,
+        hiddenAt: now,
+        hiddenReason: 'manual_test_cleanup',
+      };
+      osHidden++;
+    }
+
+    await db.write();
+    return res.json({
+      ok: true,
+      ownerKey,
+      campaign_creatives: { hidden: ccHidden, skipped: ccSkipped },
+      optimizer_campaign_state: { hidden: osHidden, skipped: osSkipped },
+    });
+  } catch (err) {
+    console.error('[Admin] cleanup-test-history error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Cleanup failed.' });
   }
 });
 

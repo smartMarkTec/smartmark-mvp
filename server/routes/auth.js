@@ -5478,11 +5478,25 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history',
       (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
     );
     if (idx !== -1) {
-      if (!db.data.campaign_creatives[idx].smArchived) {
+      const rec = db.data.campaign_creatives[idx];
+      const metaStatus = String(rec.status || rec.effective_status || '').toUpperCase();
+      const isArchived = !!rec.smArchived || metaStatus === 'ARCHIVED' || metaStatus === 'DELETED';
+      if (!isArchived) {
         return res.status(400).json({ error: 'Only archived campaigns can be removed from history.' });
       }
       db.data.campaign_creatives[idx].hiddenFromHistory = true;
       db.data.campaign_creatives[idx].hiddenAt = new Date().toISOString();
+    } else {
+      // No existing creative record — create a stub so the hidden flag persists.
+      // This handles campaigns archived on Meta directly (no Smartemark creative record).
+      db.data.campaign_creatives.push({
+        campaignId: id,
+        ownerKey,
+        smArchived: true,
+        hiddenFromHistory: true,
+        hiddenAt: new Date().toISOString(),
+        hiddenReason: 'hide_from_history',
+      });
     }
 
     db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
