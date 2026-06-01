@@ -4592,11 +4592,31 @@ const handleUnarchiveCampaign = async (campaignId) => {
 
 const handleHideFromHistory = async (campaignId) => {
   if (!campaignId || campaignId === "__DRAFT__") return;
+
+  // Remove from ALL frontend state maps immediately — the goal is instant UI cleanup.
+  // Backend call follows; if it fails we show a warning but do not reinsert the campaign.
+  setCampaigns((prev) =>
+    Array.isArray(prev) ? prev.filter((c) => c.id !== campaignId) : prev
+  );
+  setMetricsMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+  setOptimizerStateMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+  setCampaignCreativesMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+  setPublicSummaryMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+  setOptimizerCreativeMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+  setShowCampaignMenu(false);
+  setShowArchived(false);
+
+  const remaining = (campaigns || []).filter(
+    (c) => c.id !== campaignId && !c.smArchived && !c.hiddenFromHistory
+  );
+  setSelectedCampaignId(remaining[0]?.id || "");
+  setExpandedId(remaining[0]?.id || null);
+
+  // Persist to backend — does NOT call Meta. Only sets local hiddenFromHistory flag.
   setLoading(true);
   try {
     let r;
     if (adminClientId) {
-      // Admin-client mode: use the admin route which resolves the client's ownerKey server-side
       const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
       r = await fetch(
         `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${campaignId}/hide-history`,
@@ -4609,22 +4629,13 @@ const handleHideFromHistory = async (campaignId) => {
         method: "PATCH",
       });
     }
-    if (!r.ok) throw new Error("Remove from history failed");
-
-    // Remove immediately from local state (soft-delete — no data is wiped from Meta or DB)
-    setCampaigns((prev) =>
-      Array.isArray(prev) ? prev.filter((c) => c.id !== campaignId) : prev
-    );
-    setShowCampaignMenu(false);
-    setShowArchived(false);
-
-    const remaining = (campaigns || []).filter(
-      (c) => c.id !== campaignId && !c.smArchived && !c.hiddenFromHistory
-    );
-    setSelectedCampaignId(remaining[0]?.id || "");
-    setExpandedId(remaining[0]?.id || null);
+    if (!r.ok) {
+      // Campaign removed from UI. Backend failed — on next reload it may reappear.
+      // Non-critical: the DB record can be cleaned up manually via the cleanup endpoint.
+      console.warn("[Smartemark] hide-history backend failed for", campaignId, "— removed from UI only");
+    }
   } catch {
-    alert("Could not remove from history.");
+    console.warn("[Smartemark] hide-history request error for", campaignId);
   }
   setLoading(false);
 };
@@ -6998,7 +7009,18 @@ const selectedCampaignCreatives =
       })}
     </select>
 
-    {selectedLiveCampaign && ["Active", "Paused"].includes(getCampaignDisplayStatus(selectedLiveCampaign)) && (
+    {selectedLiveCampaign && (() => {
+        // Only show the pause/unpause icon for campaigns with a KNOWN live Meta status.
+        // Empty/default status (from old DB stubs) must never trigger a Meta /pause call.
+        const _rawSt = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
+        const _knownLive = ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"].includes(_rawSt);
+        if (!_knownLive) return false;
+        if (!["Active", "Paused"].includes(getCampaignDisplayStatus(selectedLiveCampaign))) return false;
+        // Also skip for generic/clutter campaigns (they would call /pause on a non-existent Meta object)
+        const _snap = (optimizerStateMap[selectedLiveCampaign?.id]?.metricsSnapshot) ||
+                      (metricsMap[selectedLiveCampaign?.id] || null);
+        return isUsefulCurrentCampaign(selectedLiveCampaign, _snap);
+      })() && (
       <button
         type="button"
         onClick={() => {
