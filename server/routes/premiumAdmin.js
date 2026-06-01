@@ -119,23 +119,101 @@ const limitAdmin = basicRateLimit({ windowMs: 60 * 1000, max: 60 });
 router.use(secureHeaders());
 router.use(basicAuth());
 
+// Helper: build the intake object from request body (shared by normal + admin routes)
+function buildIntakeFromBody(b, existingIntake) {
+  const now = new Date().toISOString();
+  return {
+    // Business basics
+    businessName:                   String(b.businessName || '').trim(),
+    websiteUrl:                     String(b.websiteUrl || '').trim(),
+    mainPhone:                      String(b.mainPhone || '').trim(),
+    serviceArea:                    String(b.serviceArea || '').trim(),
+    mainServices:                   String(b.mainServices || '').trim(),
+    callForwardingNumber:           String(b.callForwardingNumber || '').trim(),
+    // Offers / specials
+    currentSpecialOrOffer:          String(b.currentSpecialOrOffer || '').trim(),
+    seasonalSpecials:               String(b.seasonalSpecials || '').trim(),
+    servicesNotToAdvertise:         String(b.servicesNotToAdvertise || '').trim(),
+    preferredAdBudget:              String(b.preferredAdBudget || '').trim(),
+    // Campaign strategy
+    serviceToPromoteFirst:          String(b.serviceToPromoteFirst || '').trim(),
+    targetCities:                   String(b.targetCities || '').trim(),
+    idealCustomer:                  String(b.idealCustomer || '').trim(),
+    businessDifferentiator:         String(b.businessDifferentiator || '').trim(),
+    customerProblem:                String(b.customerProblem || '').trim(),
+    promotionOffer:                 String(b.promotionOffer || '').trim(),
+    preferredTone:                  String(b.preferredTone || '').trim(),
+    // Website access (no passwords)
+    websitePlatform:                String(b.websitePlatform || '').trim(),
+    websiteLoginOrWebPersonContact: String(b.websiteLoginOrWebPersonContact || '').trim(),
+    websiteAccessMethod:            String(b.websiteAccessMethod || '').trim(),
+    canAddSmartemark:               String(b.canAddSmartemark || '').trim(),
+    // Facebook / tracking
+    facebookPageUrl:                String(b.facebookPageUrl || '').trim(),
+    facebookAdAccountNotes:         String(b.facebookAdAccountNotes || '').trim(),
+    // Contact
+    bestContactName:                String(b.bestContactName || '').trim(),
+    bestContactEmail:               String(b.bestContactEmail || '').trim(),
+    bestContactPhone:               String(b.bestContactPhone || '').trim(),
+    additionalNotes:                String(b.additionalNotes || '').trim(),
+    // Timestamps — preserve original submission date on re-submit
+    submittedAt: existingIntake?.submittedAt || now,
+    updatedAt: now,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/premium-intake
+// Any authenticated user can submit — plan check removed so standalone links
+// sent to customers (who may not yet have upgraded in Stripe) still work.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/premium-intake', limitIntake, async (req, res) => {
   try {
+    await ensureDB();
     const ownerKey = ownerKeyFromReq(req);
     const user = await findUserByOwnerKey(ownerKey);
 
     if (!user) {
-      return res.status(401).json({ ok: false, error: 'Not authenticated. Please log in.' });
+      return res.status(401).json({ ok: false, error: 'Not authenticated. Please log in to your Smartemark account first, then open this link.' });
     }
-    if (!canSubmitPremiumIntake(user)) {
-      return res.status(403).json({
-        ok: false,
-        error: 'Premium intake is for Premium plan customers.',
-      });
+
+    const b = req.body || {};
+    const required = ['businessName', 'websiteUrl', 'mainPhone', 'serviceArea', 'mainServices', 'bestContactName', 'bestContactEmail'];
+    const missing = required.filter((k) => !String(b[k] || '').trim());
+    if (missing.length) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields.', missing });
     }
+
+    const idx = db.data.users.findIndex(
+      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+    );
+    if (idx === -1) return res.status(500).json({ ok: false, error: 'User record not found.' });
+
+    const now = new Date().toISOString();
+    db.data.users[idx].premiumIntake = buildIntakeFromBody(b, db.data.users[idx].premiumIntake);
+    db.data.users[idx].onboarding = {
+      ...(db.data.users[idx].onboarding || defaultOnboarding()),
+      intake_completed: true,
+      updatedAt: now,
+    };
+
+    await db.write();
+    return res.json({ ok: true, message: 'Premium intake saved.' });
+  } catch (err) {
+    console.error('[PremiumIntake] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/premium-intake
+// Admin fills the intake form on behalf of an existing client.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/premium-intake', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
 
     const b = req.body || {};
     const required = ['businessName', 'websiteUrl', 'mainPhone', 'serviceArea', 'mainServices', 'bestContactName', 'bestContactEmail'];
@@ -148,30 +226,10 @@ router.post('/premium-intake', limitIntake, async (req, res) => {
     const idx = db.data.users.findIndex(
       (u) => String(u?.username || '').trim() === String(user.username || '').trim()
     );
-    if (idx === -1) return res.status(500).json({ ok: false, error: 'User record not found.' });
+    if (idx === -1) return res.status(500).json({ ok: false, error: 'Client record not found.' });
 
     const now = new Date().toISOString();
-
-    db.data.users[idx].premiumIntake = {
-      businessName:                   String(b.businessName || '').trim(),
-      websiteUrl:                     String(b.websiteUrl || '').trim(),
-      mainPhone:                      String(b.mainPhone || '').trim(),
-      serviceArea:                    String(b.serviceArea || '').trim(),
-      mainServices:                   String(b.mainServices || '').trim(),
-      currentSpecialOrOffer:          String(b.currentSpecialOrOffer || '').trim(),
-      preferredAdBudget:              String(b.preferredAdBudget || '').trim(),
-      facebookPageUrl:                String(b.facebookPageUrl || '').trim(),
-      facebookAdAccountNotes:         String(b.facebookAdAccountNotes || '').trim(),
-      websitePlatform:                String(b.websitePlatform || '').trim(),
-      websiteLoginOrWebPersonContact: String(b.websiteLoginOrWebPersonContact || '').trim(),
-      bestContactName:                String(b.bestContactName || '').trim(),
-      bestContactEmail:               String(b.bestContactEmail || '').trim(),
-      bestContactPhone:               String(b.bestContactPhone || '').trim(),
-      additionalNotes:                String(b.additionalNotes || '').trim(),
-      submittedAt: db.data.users[idx].premiumIntake?.submittedAt || now,
-      updatedAt: now,
-    };
-
+    db.data.users[idx].premiumIntake = buildIntakeFromBody(b, db.data.users[idx].premiumIntake);
     db.data.users[idx].onboarding = {
       ...(db.data.users[idx].onboarding || defaultOnboarding()),
       intake_completed: true,
@@ -179,9 +237,9 @@ router.post('/premium-intake', limitIntake, async (req, res) => {
     };
 
     await db.write();
-    return res.json({ ok: true, message: 'Premium intake saved.' });
+    return res.json({ ok: true, message: 'Intake saved for client.' });
   } catch (err) {
-    console.error('[PremiumIntake] error:', err?.message || err);
+    console.error('[AdminIntake] error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong. Please try again.' });
   }
 });

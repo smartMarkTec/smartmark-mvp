@@ -152,6 +152,14 @@ export default function AdminClientDetail() {
   const callTracking = client?.callTracking || null;
   const campaigns = client?.campaigns || [];
 
+  const intakeUrl = `${window.location.origin}/premium-intake?adminClientId=${id}`;
+  const copyIntakeLink = () => {
+    navigator.clipboard.writeText(intakeUrl).then(
+      () => alert("Intake link copied! Send this to the client so they can fill out their setup form."),
+      () => alert("Copy failed — link: " + intakeUrl)
+    );
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: "#f8f9fc", fontFamily: FONT, padding: "28px 20px 60px" }}>
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -183,22 +191,26 @@ export default function AdminClientDetail() {
               {!client?.fbConnected && <span style={{ color: "#d97706", marginLeft: 8 }}>● Facebook not connected</span>}
             </div>
           </div>
-          <button
-            onClick={() => navigate(`/form?adminClientId=${encodeURIComponent(id)}`)}
-            style={{
-              padding: "10px 22px",
-              background: PURPLE,
-              color: "#fff",
-              border: "none",
-              borderRadius: 9,
-              fontWeight: 700,
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: FONT,
-            }}
-          >
-            Manage →
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={copyIntakeLink}
+              style={{ padding: "10px 16px", background: "white", color: PURPLE, border: `1px solid ${PURPLE}`, borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
+            >
+              Copy Intake Link
+            </button>
+            <button
+              onClick={() => navigate(`/premium-intake?adminClientId=${encodeURIComponent(id)}`)}
+              style={{ padding: "10px 16px", background: "#f5f3ff", color: PURPLE, border: `1px solid rgba(93,89,234,0.3)`, borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
+            >
+              Open Intake Form →
+            </button>
+            <button
+              onClick={() => navigate(`/form?adminClientId=${encodeURIComponent(id)}`)}
+              style={{ padding: "10px 22px", background: PURPLE, color: "#fff", border: "none", borderRadius: 9, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: FONT }}
+            >
+              Manage →
+            </button>
+          </div>
         </div>
 
         {/* Onboarding checklist */}
@@ -243,42 +255,97 @@ export default function AdminClientDetail() {
         </Card>
 
         {/* Premium Intake */}
-        {intake ? (
-          <Card title="Premium Intake Answers">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-              <InfoRow label="Business Name" value={intake.businessName} />
-              <InfoRow label="Website" value={intake.websiteUrl} />
-              <InfoRow label="Phone" value={intake.mainPhone} />
-              <InfoRow label="Service Area" value={intake.serviceArea} />
-            </div>
-            <InfoRow label="Main Services" value={intake.mainServices} />
-            <InfoRow label="Current Special / Offer" value={intake.currentSpecialOrOffer} />
-            <InfoRow label="Preferred Ad Budget" value={intake.preferredAdBudget} />
-            <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-              <InfoRow label="Facebook Page URL" value={intake.facebookPageUrl} />
+        <Card title={`Premium Intake — ${intake?.submittedAt ? "Submitted ✓" : "Pending"}`}>
+          {intake ? (
+            <>
+              <div style={{ marginBottom: 12, fontSize: 12, color: TEXT_SOFT }}>
+                Submitted: {intake.submittedAt ? new Date(intake.submittedAt).toLocaleString() : "—"}
+                {intake.updatedAt && intake.updatedAt !== intake.submittedAt && (
+                  <span style={{ marginLeft: 10 }}>Updated: {new Date(intake.updatedAt).toLocaleString()}</span>
+                )}
+              </div>
+
+              {/* Business Info */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8, marginTop: 4 }}>Business Info</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                <InfoRow label="Business Name" value={intake.businessName} />
+                <InfoRow label="Website" value={intake.websiteUrl} />
+                <InfoRow label="Phone" value={intake.mainPhone} />
+                <InfoRow label="Service Area" value={intake.serviceArea} />
+              </div>
+              <InfoRow label="Main Services" value={intake.mainServices} />
+              <InfoRow label="Call Forwarding Number" value={intake.callForwardingNumber} />
+
+              <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
+
+              {/* Campaign Strategy */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Campaign Strategy</div>
+              <InfoRow label="Service to Promote First" value={intake.serviceToPromoteFirst} />
+              <InfoRow label="Target Cities / Areas" value={intake.targetCities} />
+              <InfoRow label="Ideal Customer" value={intake.idealCustomer} />
+              <InfoRow label="What Makes Them Different" value={intake.businessDifferentiator} />
+              <InfoRow label="Customer Problem Before Calling" value={intake.customerProblem} />
+              <InfoRow label="Promotion Offer / Hook" value={intake.promotionOffer} />
+              <InfoRow label="Preferred Ad Tone" value={intake.preferredTone} />
+
+              <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
+
+              {/* Offers & Budget */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Offers & Budget</div>
+              <InfoRow label="Current Special / Offer" value={intake.currentSpecialOrOffer} />
+              <InfoRow label="Seasonal Specials / Financing / Plans" value={intake.seasonalSpecials} />
+              <InfoRow label="Services NOT to Advertise" value={intake.servicesNotToAdvertise} />
+              <InfoRow label="Preferred Ad Budget" value={intake.preferredAdBudget} />
+
+              <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
+
+              {/* Website Access */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Website Access</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                <InfoRow label="Website Platform" value={intake.websitePlatform} />
+                <InfoRow label="Website Manager / Contact" value={intake.websiteLoginOrWebPersonContact} />
+              </div>
+              <InfoRow label="Access Method" value={intake.websiteAccessMethod} />
+              <InfoRow label="Can Add Smartemark as Admin" value={intake.canAddSmartemark} />
+
+              <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
+
+              {/* Contact */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Contact</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                <InfoRow label="Contact Name" value={intake.bestContactName} />
+                <InfoRow label="Contact Email" value={intake.bestContactEmail} />
+                <InfoRow label="Contact Phone" value={intake.bestContactPhone} />
+                <InfoRow label="Facebook Page URL" value={intake.facebookPageUrl} />
+              </div>
               <InfoRow label="Facebook Ad Account Notes" value={intake.facebookAdAccountNotes} />
-              <InfoRow label="Website Platform" value={intake.websitePlatform} />
-              <InfoRow label="Website Contact" value={intake.websiteLoginOrWebPersonContact} />
-            </div>
-            <hr style={{ border: "none", borderTop: `1px solid ${BORDER}`, margin: "12px 0" }} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-              <InfoRow label="Contact Name" value={intake.bestContactName} />
-              <InfoRow label="Contact Email" value={intake.bestContactEmail} />
-              <InfoRow label="Contact Phone" value={intake.bestContactPhone} />
-            </div>
-            <InfoRow label="Additional Notes" value={intake.additionalNotes} />
-            <div style={{ marginTop: 8, fontSize: 12, color: TEXT_SOFT }}>
-              Submitted: {intake.submittedAt ? new Date(intake.submittedAt).toLocaleString() : "—"}
-            </div>
-          </Card>
-        ) : (
-          <Card title="Premium Intake Answers">
-            <p style={{ color: TEXT_SOFT, fontSize: 14, margin: 0 }}>
-              This client has not submitted the Premium intake form yet.
-            </p>
-          </Card>
-        )}
+              <InfoRow label="Additional Notes" value={intake.additionalNotes} />
+            </>
+          ) : (
+            <>
+              <p style={{ color: TEXT_SOFT, fontSize: 14, margin: "0 0 14px" }}>
+                This client has not submitted the setup intake form yet.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={copyIntakeLink}
+                  style={{ padding: "9px 16px", background: "#f5f3ff", color: PURPLE, border: `1px solid rgba(93,89,234,0.3)`, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
+                >
+                  Copy Intake Link
+                </button>
+                <button
+                  onClick={() => navigate(`/premium-intake?adminClientId=${encodeURIComponent(id)}`)}
+                  style={{ padding: "9px 16px", background: "white", color: PURPLE, border: `1px solid ${PURPLE}`, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
+                >
+                  Open Intake Form →
+                </button>
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: 12, color: TEXT_SOFT }}>
+                Send the intake link to your client, or fill it out yourself in admin mode.
+              </p>
+            </>
+          )}
+        </Card>
 
         {/* Facebook / Ad Account Info */}
         <Card title="Facebook & Ad Account">
