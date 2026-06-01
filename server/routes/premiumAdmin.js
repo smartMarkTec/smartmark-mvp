@@ -446,9 +446,9 @@ router.patch('/admin/clients/:id/campaign/:campaignId/hide-history', limitAdmin,
     if (cIdx !== -1) {
       const rec = db.data.campaign_creatives[cIdx];
       const metaStatus = String(rec.status || rec.effective_status || '').toUpperCase();
-      const isArchived = !!rec.smArchived || metaStatus === 'ARCHIVED' || metaStatus === 'DELETED';
-      if (!isArchived) {
-        return res.status(400).json({ ok: false, error: 'Only archived campaigns can be removed from history.' });
+      const LIVE = new Set(['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES']);
+      if (LIVE.has(metaStatus) && !rec.smArchived) {
+        return res.status(400).json({ ok: false, error: 'Active campaigns cannot be removed from history. Archive or pause the campaign first.' });
       }
       db.data.campaign_creatives[cIdx].hiddenFromHistory = true;
       db.data.campaign_creatives[cIdx].hiddenAt = new Date().toISOString();
@@ -496,9 +496,17 @@ router.post('/admin/clients/:id/campaigns/cleanup-test-history', limitAdmin, req
     await ensureDB();
     const ownerKey = `user:${String(user.username || '').trim()}`;
     const now = new Date().toISOString();
-    const ACTIVE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES']);
+    const TRULY_LIVE = new Set(['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES']);
 
     let ccHidden = 0, ccSkipped = 0, osHidden = 0, osSkipped = 0;
+
+    // Pre-build optimizer state map for quick lookup during creative record pass
+    const optMap = {};
+    for (const os of (db.data.optimizer_campaign_state || [])) {
+      if (String(os?.ownerKey || '') === ownerKey) {
+        optMap[String(os.campaignId || '')] = os;
+      }
+    }
 
     // campaign_creatives
     db.data.campaign_creatives = db.data.campaign_creatives || [];
@@ -508,11 +516,23 @@ router.post('/admin/clients/:id/campaigns/cleanup-test-history', limitAdmin, req
       if (r.hiddenFromHistory) { ccSkipped++; continue; }
 
       const s = String(r.status || r.effective_status || '').toUpperCase();
-      const isArchivedOrOld = r.smArchived || s === 'ARCHIVED' || s === 'DELETED' || s === 'COMPLETED';
-      const isActive = ACTIVE_STATUSES.has(s) && !r.smArchived;
 
-      if (isActive) { ccSkipped++; continue; }
-      if (!isArchivedOrOld && s !== '') { ccSkipped++; continue; }
+      // Never hide truly live campaigns
+      if (TRULY_LIVE.has(s) && !r.smArchived) { ccSkipped++; continue; }
+
+      const isArchivedOrOld = r.smArchived || ['ARCHIVED', 'DELETED', 'COMPLETED'].includes(s);
+
+      // For PAUSED: hide only if no real delivery in stored metrics
+      if (s === 'PAUSED' && !r.smArchived) {
+        const optState = optMap[String(r.campaignId || '')];
+        const snap = optState?.metricsSnapshot || {};
+        const hasDelivery = Number(snap.impressions || 0) > 0 || Number(snap.spend || 0) > 0;
+        if (hasDelivery) { ccSkipped++; continue; } // real paused campaign, keep
+        // no delivery → treat as clutter, fall through to hide
+      } else if (!isArchivedOrOld && s !== '') {
+        ccSkipped++;
+        continue;
+      }
 
       db.data.campaign_creatives[i] = {
         ...r,
@@ -526,19 +546,28 @@ router.post('/admin/clients/:id/campaigns/cleanup-test-history', limitAdmin, req
     // optimizer_campaign_state
     db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
     for (let i = 0; i < db.data.optimizer_campaign_state.length; i++) {
-      const s = db.data.optimizer_campaign_state[i];
-      if (String(s?.ownerKey || '') !== ownerKey) continue;
-      if (s.hiddenFromHistory) { osSkipped++; continue; }
+      const os = db.data.optimizer_campaign_state[i];
+      if (String(os?.ownerKey || '') !== ownerKey) continue;
+      if (os.hiddenFromHistory) { osSkipped++; continue; }
 
-      const status = String(s.currentStatus || '').toUpperCase();
-      const isArchivedOrOld = s.smArchived || status === 'ARCHIVED' || status === 'DELETED' || status === 'COMPLETED';
-      const isActive = ACTIVE_STATUSES.has(status) && !s.smArchived;
+      const status = String(os.currentStatus || '').toUpperCase();
 
-      if (isActive) { osSkipped++; continue; }
-      if (!isArchivedOrOld && status !== '') { osSkipped++; continue; }
+      if (TRULY_LIVE.has(status) && !os.smArchived) { osSkipped++; continue; }
+
+      const isArchivedOrOld = os.smArchived || ['ARCHIVED', 'DELETED', 'COMPLETED'].includes(status);
+
+      if (status === 'PAUSED' && !os.smArchived) {
+        const snap = os.metricsSnapshot || {};
+        const hasDelivery = Number(snap.impressions || 0) > 0 || Number(snap.spend || 0) > 0;
+        if (hasDelivery) { osSkipped++; continue; }
+        // no delivery → fall through to hide
+      } else if (!isArchivedOrOld && status !== '') {
+        osSkipped++;
+        continue;
+      }
 
       db.data.optimizer_campaign_state[i] = {
-        ...s,
+        ...os,
         hiddenFromHistory: true,
         hiddenAt: now,
         hiddenReason: 'manual_test_cleanup',
@@ -556,6 +585,91 @@ router.post('/admin/clients/:id/campaigns/cleanup-test-history', limitAdmin, req
   } catch (err) {
     console.error('[Admin] cleanup-test-history error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Cleanup failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/clients/:id/campaign/:campaignId/metrics
+// Admin-only. Returns stored or live metrics for a specific client campaign.
+// First checks optimizer_campaign_state (DB). Falls back to Meta Insights API
+// using the client's stored FB token if no DB metrics exist. Never returns tokens.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:id/campaign/:campaignId/metrics', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required.' });
+
+    await ensureDB();
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+
+    // Check stored optimizer state first
+    const stored = (db.data.optimizer_campaign_state || []).find(
+      (s) => String(s?.campaignId || '') === campaignId && String(s?.ownerKey || '') === ownerKey
+    );
+    if (stored?.metricsSnapshot && Object.keys(stored.metricsSnapshot).length > 0) {
+      const snap = stored.metricsSnapshot;
+      const hasData = Number(snap.impressions || 0) > 0 || Number(snap.spend || 0) > 0;
+      if (hasData) {
+        return res.json({ ok: true, source: 'db', metricsSnapshot: snap });
+      }
+    }
+
+    // Fall back to Meta Insights API using client's token
+    const token = getFbUserToken(ownerKey);
+    if (!token) {
+      return res.json({ ok: false, noMetrics: true, source: 'none',
+        error: 'No stored metrics and Facebook is not connected for this client.' });
+    }
+
+    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+      params: {
+        access_token: token,
+        fields: 'impressions,clicks,spend,cpm,ctr,actions,reach,unique_clicks',
+        date_preset: 'maximum',
+      },
+      timeout: 10000,
+    });
+
+    const row = Array.isArray(response.data?.data) ? (response.data.data[0] || {}) : {};
+    const actions = Array.isArray(row.actions) ? row.actions : [];
+
+    const CONV_TYPES = new Set(['lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead',
+      'omni_lead','purchase','offsite_conversion.fb_pixel_purchase']);
+    const LINK_TYPES = new Set(['link_click','landing_page_view','outbound_click']);
+
+    const conversions = actions.reduce((sum, a) =>
+      CONV_TYPES.has(String(a?.action_type||'').toLowerCase()) ? sum + Number(a?.value||0) : sum, 0);
+    const linkClicks = actions.reduce((sum, a) =>
+      LINK_TYPES.has(String(a?.action_type||'').toLowerCase()) ? sum + Number(a?.value||0) : sum, 0);
+
+    const impressions = Number(row.impressions || 0);
+    const clicks      = Number(row.clicks      || 0);
+    const spend       = Number(row.spend       || 0);
+    const ctr         = Number(row.ctr         || 0);
+    const cpm         = Number(row.cpm         || 0);
+    const reach       = Number(row.reach       || 0);
+    const cpc         = linkClicks > 0 ? spend / linkClicks : clicks > 0 ? spend / clicks : 0;
+    const costPerConversion  = conversions > 0 ? spend / conversions : 0;
+    const conversionRate     = linkClicks > 0 && conversions > 0 ? (conversions / linkClicks) * 100 : 0;
+
+    const metricsSnapshot = {
+      impressions, clicks, linkClicks, spend, ctr, cpm, cpc, reach,
+      conversions, conversionRate, costPerConversion,
+      lastSyncedAt: new Date().toISOString(),
+    };
+
+    return res.json({ ok: true, source: 'meta', metricsSnapshot });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    if (fbErr?.code === 190 || fbErr?.code === 102) {
+      return res.json({ ok: false, noMetrics: true, error: 'Facebook session expired for this client.' });
+    }
+    console.error('[Admin] campaign metrics error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Could not fetch campaign metrics.' });
   }
 });
 

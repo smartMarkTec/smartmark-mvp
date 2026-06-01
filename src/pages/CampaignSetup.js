@@ -1722,6 +1722,24 @@ function isEffectivelyArchived(campaign) {
   return s === "ARCHIVED" || s === "DELETED";
 }
 
+// A campaign is "useful current" (shown in the active dropdown) if:
+//  - not hidden, not effectively archived
+//  - AND if PAUSED: only show when we have no metrics yet (might be new) OR when there's actual delivery.
+//    PAUSED + loaded metrics that are all-zero = failed/test launch clutter → hide from active view.
+//    Users can still find and hide these via the campaign menu once we show them in neither list.
+function isUsefulCurrentCampaign(campaign, metricsSnap) {
+  if (!campaign) return false;
+  if (isEffectivelyArchived(campaign) || campaign.hiddenFromHistory) return false;
+  const status = String(campaign.status || campaign.effective_status || "").toUpperCase();
+  if (status === "PAUSED" && metricsSnap != null) {
+    const imp = Number(metricsSnap.impressions || 0);
+    const sp  = Number(metricsSnap.spend      || 0);
+    const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
+    if (imp === 0 && sp === 0 && cl === 0) return false; // no delivery — clutter
+  }
+  return true;
+}
+
 function summarizeOptimizerEntry(kind, payload) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -3940,6 +3958,53 @@ useEffect(() => {
     .catch(() => {});
   // eslint-disable-next-line
 }, [adminClientId]);
+
+// ── Admin-client metrics fetch: if the selected campaign has no stored metrics,
+// try to fetch them from Meta via the admin route using the client's token.
+// Uses a ref-gate so we only attempt once per campaign per session (avoids loops).
+const _adminMetricsFetchedRef = React.useRef(new Set());
+useEffect(() => {
+  if (!adminClientId || !selectedCampaignId || selectedCampaignId === "__DRAFT__") return;
+  if (_adminMetricsFetchedRef.current.has(selectedCampaignId)) return;
+
+  // Skip fetch if metrics already loaded
+  const existingSnap = optimizerStateMap[selectedCampaignId]?.metricsSnapshot;
+  const existingMap  = metricsMap[selectedCampaignId];
+  const already = (existingSnap && (Number(existingSnap.impressions||0) > 0 || Number(existingSnap.spend||0) > 0)) ||
+                  (existingMap  && (Number(existingMap.impressions||0)  > 0 || Number(existingMap.spend||0)  > 0));
+  if (already) { _adminMetricsFetchedRef.current.add(selectedCampaignId); return; }
+
+  _adminMetricsFetchedRef.current.add(selectedCampaignId);
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = sid ? { "x-sm-sid": sid } : {};
+  const enc = encodeURIComponent(adminClientId);
+
+  fetch(`/api/admin/clients/${enc}/campaign/${selectedCampaignId}/metrics`, { credentials: "include", headers })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => {
+      if (!j.ok) return;
+      const m = j.metricsSnapshot || j.metrics || {};
+      if (!m || Object.keys(m).length === 0) return;
+      setMetricsMap((prev) => ({
+        ...prev,
+        [selectedCampaignId]: {
+          impressions: Number(m.impressions) || 0,
+          clicks:      Number(m.linkClicks || m.clicks) || 0,
+          ctr:         Number(m.ctr)   || 0,
+          spend:       Number(m.spend) || 0,
+        },
+      }));
+      setOptimizerStateMap((prev) => ({
+        ...prev,
+        [selectedCampaignId]: {
+          ...(prev[selectedCampaignId] || {}),
+          metricsSnapshot: m,
+        },
+      }));
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [adminClientId, selectedCampaignId]);
 
 // ── Admin-client exit guard: wipe ALL client-derived maps the instant adminClientId
 // transitions from a non-empty value to "". This fires even if exitClientMode had
@@ -6899,7 +6964,10 @@ const selectedCampaignCreatives =
       )}
       {(showArchived
         ? campaigns.filter((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory)
-        : campaigns.filter((c) => !isEffectivelyArchived(c) && !c.hiddenFromHistory)
+        : campaigns.filter((c) => {
+            const snap = optimizerStateMap[c.id]?.metricsSnapshot || metricsMap[c.id] || null;
+            return isUsefulCurrentCampaign(c, snap);
+          })
       ).map((c) => {
         const ds = getCampaignDisplayStatus(c);
         return (

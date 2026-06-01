@@ -5480,9 +5480,10 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history',
     if (idx !== -1) {
       const rec = db.data.campaign_creatives[idx];
       const metaStatus = String(rec.status || rec.effective_status || '').toUpperCase();
-      const isArchived = !!rec.smArchived || metaStatus === 'ARCHIVED' || metaStatus === 'DELETED';
-      if (!isArchived) {
-        return res.status(400).json({ error: 'Only archived campaigns can be removed from history.' });
+      // Reject only truly live/active campaigns. Paused, finished, archived, deleted are all safe to hide.
+      const LIVE = new Set(['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES']);
+      if (LIVE.has(metaStatus) && !rec.smArchived) {
+        return res.status(400).json({ error: 'Active campaigns cannot be removed from history. Archive or pause the campaign first.' });
       }
       db.data.campaign_creatives[idx].hiddenFromHistory = true;
       db.data.campaign_creatives[idx].hiddenAt = new Date().toISOString();
