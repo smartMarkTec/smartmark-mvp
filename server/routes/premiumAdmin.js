@@ -361,8 +361,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         (s) => String(s?.campaignId || '').trim() === cId
       ) || null;
 
+      // Do NOT default to 'ACTIVE' — stubs with no stored status should have empty string
+      // so the frontend can correctly identify them as unknown/stub (not truly live).
       const status = String(
-        c.status || opt?.currentStatus || 'ACTIVE'
+        c.status || opt?.currentStatus || ''
       ).trim().toUpperCase();
 
       // Treat as archived if Smartemark's own flag is set OR if Meta's stored status
@@ -397,7 +399,7 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
       if (s.hiddenFromHistory) { seen.add(cId); continue; }
       seen.add(cId);
 
-      const status = String(s.currentStatus || 'ACTIVE').trim().toUpperCase();
+      const status = String(s.currentStatus || '').trim().toUpperCase();
       campaigns.push({
         id:               cId,
         name:             s.campaignName || 'Campaign',

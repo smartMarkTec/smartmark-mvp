@@ -1737,20 +1737,24 @@ function isUsefulCurrentCampaign(campaign, metricsSnap) {
   const isGenericName = name === "Campaign" || name === "" || name === "Unnamed campaign";
   const trulyLive = status === "ACTIVE" || status === "IN_PROCESS" || status === "WITH_ISSUES";
 
-  // Generic-named PAUSED stubs are always clutter — filter regardless of whether metrics
-  // are loaded. Real campaigns have real names; "Campaign" is the DB fallback placeholder.
-  if (isGenericName && status === "PAUSED" && !trulyLive) return false;
+  // Empty/unknown status = stub with no real Meta data → always clutter if generic name.
+  // The admin campaigns endpoint no longer defaults to 'ACTIVE', so empty = truly unknown.
+  if (isGenericName && status === "") return false;
 
-  // PAUSED with zero delivery → clutter (only when metrics are confirmed loaded)
-  if (status === "PAUSED" && metricsSnap != null) {
+  // Generic-named PAUSED stubs → always clutter
+  if (isGenericName && status === "PAUSED") return false;
+
+  // Generic-named stub with a live-looking status but zero delivery → not really live.
+  // Real active campaigns always accumulate impressions/spend; zero means it never ran.
+  if (isGenericName && trulyLive && metricsSnap != null) {
     const imp = Number(metricsSnap.impressions || 0);
     const sp  = Number(metricsSnap.spend      || 0);
     const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
     if (imp === 0 && sp === 0 && cl === 0) return false;
   }
 
-  // Generic-named non-live campaigns with confirmed zero delivery → clutter
-  if (isGenericName && !trulyLive && metricsSnap != null) {
+  // PAUSED with zero confirmed delivery → clutter
+  if (status === "PAUSED" && metricsSnap != null) {
     const imp = Number(metricsSnap.impressions || 0);
     const sp  = Number(metricsSnap.spend      || 0);
     const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
@@ -7194,8 +7198,14 @@ const selectedCampaignCreatives =
         )}
 
         {selectedLiveCampaign && (() => {
-          const _st = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
-          const _isTrulyLive = ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"].includes(_st) && !selectedLiveCampaign.smArchived;
+          const _st   = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
+          const _snap = optimizerStateMap[selectedLiveCampaign?.id]?.metricsSnapshot ||
+                        metricsMap[selectedLiveCampaign?.id] || null;
+          // Truly live = known live Meta status + not archived + passes the useful-campaign check.
+          // Generic/stub/zero-delivery campaigns fail isUsefulCurrentCampaign → not treated as live.
+          const _isTrulyLive = ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"].includes(_st) &&
+                               !selectedLiveCampaign.smArchived &&
+                               isUsefulCurrentCampaign(selectedLiveCampaign, _snap);
           if (_isTrulyLive) {
             return (
               <button
