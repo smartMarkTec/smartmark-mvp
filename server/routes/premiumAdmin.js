@@ -668,8 +668,15 @@ router.get('/admin/clients/:id/campaign/:campaignId/metrics', limitAdmin, requir
     if (fbErr?.code === 190 || fbErr?.code === 102) {
       return res.json({ ok: false, noMetrics: true, error: 'Facebook session expired for this client.' });
     }
+    // Object does not exist / missing permissions / unsupported request — old/test campaign
+    if (fbErr?.code === 100 || fbErr?.code === 803 || fbErr?.code === 200 ||
+        String(fbErr?.message || '').toLowerCase().includes('does not exist') ||
+        String(fbErr?.message || '').toLowerCase().includes('unsupported')) {
+      return res.json({ ok: false, noMetrics: true, error: 'This campaign no longer exists on Meta or permissions are missing.' });
+    }
     console.error('[Admin] campaign metrics error:', err?.message || err);
-    return res.status(500).json({ ok: false, error: 'Could not fetch campaign metrics.' });
+    // Return ok:false (not a 500) so the frontend can handle gracefully without crashing
+    return res.json({ ok: false, noMetrics: true, error: 'Could not fetch campaign metrics from Meta.' });
   }
 });
 

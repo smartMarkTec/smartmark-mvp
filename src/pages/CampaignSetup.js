@@ -1734,7 +1734,14 @@ function isUsefulCurrentCampaign(campaign, metricsSnap) {
   const status = String(campaign.status || campaign.effective_status || "").toUpperCase();
   const name   = String(campaign.name || "").trim();
 
-  // PAUSED with zero delivery → clutter (only when we've actually loaded metrics)
+  const isGenericName = name === "Campaign" || name === "" || name === "Unnamed campaign";
+  const trulyLive = status === "ACTIVE" || status === "IN_PROCESS" || status === "WITH_ISSUES";
+
+  // Generic-named PAUSED stubs are always clutter — filter regardless of whether metrics
+  // are loaded. Real campaigns have real names; "Campaign" is the DB fallback placeholder.
+  if (isGenericName && status === "PAUSED" && !trulyLive) return false;
+
+  // PAUSED with zero delivery → clutter (only when metrics are confirmed loaded)
   if (status === "PAUSED" && metricsSnap != null) {
     const imp = Number(metricsSnap.impressions || 0);
     const sp  = Number(metricsSnap.spend      || 0);
@@ -1742,16 +1749,12 @@ function isUsefulCurrentCampaign(campaign, metricsSnap) {
     if (imp === 0 && sp === 0 && cl === 0) return false;
   }
 
-  // Generic fallback-cache stub: name is literally "Campaign" (default placeholder),
-  // no useful metrics, and not ACTIVE or IN_PROCESS/WITH_ISSUES on Meta.
-  // These are local DB stubs with no real delivery — exclude from active view.
-  const isGenericName = name === "Campaign" || name === "" || name === "Unnamed campaign";
-  if (isGenericName && metricsSnap != null) {
+  // Generic-named non-live campaigns with confirmed zero delivery → clutter
+  if (isGenericName && !trulyLive && metricsSnap != null) {
     const imp = Number(metricsSnap.impressions || 0);
     const sp  = Number(metricsSnap.spend      || 0);
     const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
-    const trulyLive = status === "ACTIVE" || status === "IN_PROCESS" || status === "WITH_ISSUES";
-    if (!trulyLive && imp === 0 && sp === 0 && cl === 0) return false;
+    if (imp === 0 && sp === 0 && cl === 0) return false;
   }
 
   return true;
@@ -7168,15 +7171,32 @@ const selectedCampaignCreatives =
           <div style={{ padding: "10px 12px", color: "#9ca3af", fontSize: 13 }}>No campaign selected</div>
         )}
 
-        {selectedLiveCampaign && (
-          <button
-            type="button"
-            onClick={() => { setShowCampaignMenu(false); handleDeleteCampaign(selectedLiveCampaign.id); }}
-            style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
-          >
-            Delete campaign
-          </button>
-        )}
+        {selectedLiveCampaign && (() => {
+          const _st = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
+          const _isTrulyLive = ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"].includes(_st) && !selectedLiveCampaign.smArchived;
+          if (_isTrulyLive) {
+            return (
+              <button
+                type="button"
+                onClick={() => { setShowCampaignMenu(false); handleDeleteCampaign(selectedLiveCampaign.id); }}
+                style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+              >
+                Cancel live campaign
+              </button>
+            );
+          }
+          // Non-live (PAUSED, FINISHED, generic stubs, etc.) — hide locally only, never call Meta
+          return (
+            <button
+              type="button"
+              onClick={() => handleHideFromHistory(selectedLiveCampaign.id)}
+              style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+            >
+              Remove from Smartemark History
+            </button>
+          );
+        })()}
+
       </div>
     )}
   </div>
