@@ -440,6 +440,20 @@ app.get("/", (_req, res) => {
   res.json({ status: "SmartMark backend running", time: new Date().toISOString() });
 });
 
+/* --- Safety redirect: if someone opens the backend URL for a frontend route --- */
+app.get("/premium-intake", (req, res) => {
+  const frontendBase = (
+    process.env.CLIENT_URL ||
+    process.env.FRONTEND_URL ||
+    "https://smartemark.com"
+  ).replace(/\/+$/, "");
+  const token = String(req.query.token || "").trim();
+  const dest = token
+    ? `${frontendBase}/premium-intake?token=${encodeURIComponent(token)}`
+    : `${frontendBase}/premium-intake`;
+  return res.redirect(302, dest);
+});
+
 /* ---------------------------------- 404 ---------------------------------- */
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });

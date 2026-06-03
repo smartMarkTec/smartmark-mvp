@@ -189,8 +189,7 @@ router.post('/admin/clients/:id/intake-link', limitAdmin, requireAdmin, async (r
     }
 
     const base = (
-      process.env.PUBLIC_BASE_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
+      process.env.CLIENT_URL ||
       process.env.FRONTEND_URL ||
       'https://smartemark.com'
     ).replace(/\/+$/, '');
