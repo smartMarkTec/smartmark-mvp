@@ -3,6 +3,7 @@
 
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
@@ -162,6 +163,88 @@ function buildIntakeFromBody(b, existingIntake) {
     updatedAt: now,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/intake-link
+// Admin only. Generates (or retrieves) a secure public intake token for the
+// client so the admin can send them a link they can fill out without logging in.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/intake-link', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    await ensureDB();
+    const idx = db.data.users.findIndex(
+      (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+    );
+    if (idx === -1) return res.status(500).json({ ok: false, error: 'Client record not found.' });
+
+    let token = db.data.users[idx].premiumIntakeToken;
+    if (!token) {
+      token = crypto.randomBytes(24).toString('hex');
+      db.data.users[idx].premiumIntakeToken = token;
+      await db.write();
+    }
+
+    const base = (
+      process.env.PUBLIC_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.FRONTEND_URL ||
+      'https://smartemark.com'
+    ).replace(/\/+$/, '');
+
+    return res.json({ ok: true, token, url: `${base}/premium-intake?token=${token}` });
+  } catch (err) {
+    console.error('[Admin] intake-link error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Failed to generate intake link.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/premium-intake/token
+// Public — no login required. Customer submits the intake form via a token link
+// that the admin generated for their account.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/premium-intake/token', limitIntake, async (req, res) => {
+  try {
+    await ensureDB();
+    const b = req.body || {};
+    const token = String(b.token || '').trim();
+
+    if (!token) {
+      return res.status(400).json({ ok: false, error: 'Invalid or missing intake token.' });
+    }
+
+    const idx = db.data.users.findIndex(
+      (u) => String(u?.premiumIntakeToken || '') === token
+    );
+    if (idx === -1) {
+      return res.status(404).json({ ok: false, error: 'This intake link is invalid. Please contact Smartemark for a new link.' });
+    }
+
+    const required = ['businessName', 'websiteUrl', 'mainPhone', 'serviceArea', 'mainServices', 'bestContactName', 'bestContactEmail'];
+    const missing = required.filter((k) => !String(b[k] || '').trim());
+    if (missing.length) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields.', missing });
+    }
+
+    const now = new Date().toISOString();
+    db.data.users[idx].premiumIntake = buildIntakeFromBody(b, db.data.users[idx].premiumIntake);
+    db.data.users[idx].onboarding = {
+      ...(db.data.users[idx].onboarding || defaultOnboarding()),
+      intake_completed: true,
+      updatedAt: now,
+    };
+
+    await db.write();
+    return res.json({ ok: true, message: 'Setup information received. Thank you!' });
+  } catch (err) {
+    console.error('[PublicIntake] token error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Something went wrong. Please try again.' });
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/premium-intake

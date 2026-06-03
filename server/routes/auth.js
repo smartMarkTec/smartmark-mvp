@@ -3412,7 +3412,7 @@ const adsetTargeting = includeInstagram
 
 // destination_type is intentionally omitted — Meta infers it from the creative CTA
 // (CALL_NOW → phone, LEARN_MORE → website). Explicitly setting destination_type:
-//   • 'WEBSITE' requires a pixel-linked promoted_object in v18.0 for many accounts
+//   • 'WEBSITE' requires a pixel-linked promoted_object for many accounts
 //   • 'PHONE_CALL' is incompatible with optimization_goal 'LINK_CLICKS'
 // Omitting it avoids both invalid-parameter failures across all account configurations.
 const adsetPayload = {

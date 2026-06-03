@@ -110,9 +110,11 @@ export default function PremiumIntake() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Read adminClientId from URL — when TheBoss fills the form for a client
   const params = new URLSearchParams(location.search);
   const adminClientId = params.get("adminClientId") || "";
+  const intakeToken = params.get("token") || "";
+  // token mode = customer-facing public link; no login required
+  const isTokenMode = !!intakeToken && !adminClientId;
 
   const [form, setForm] = useState(EMPTY);
   const [step, setStep] = useState(1);
@@ -131,15 +133,24 @@ export default function PremiumIntake() {
     setSubmitting(true);
     setError("");
     try {
-      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-      const headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+      let url, headers, body;
 
-      // Admin filling on behalf of client → use admin endpoint
-      const url = adminClientId
-        ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/premium-intake`
-        : "/api/premium-intake";
+      if (isTokenMode) {
+        // Customer-facing public link — no session needed
+        url = "/api/premium-intake/token";
+        headers = { "Content-Type": "application/json" };
+        body = JSON.stringify({ ...form, token: intakeToken });
+      } else {
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+        // Admin filling on behalf of client → admin endpoint; otherwise logged-in user endpoint
+        url = adminClientId
+          ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/premium-intake`
+          : "/api/premium-intake";
+        body = JSON.stringify(form);
+      }
 
-      const r = await fetch(url, { method: "POST", credentials: "include", headers, body: JSON.stringify(form) });
+      const r = await fetch(url, { method: "POST", credentials: "include", headers, body });
       const j = await r.json().catch(() => ({}));
       if (!j.ok) throw new Error(j.error || "Submission failed. Please try again.");
       navigate("/premium-intake-complete");
@@ -158,12 +169,22 @@ export default function PremiumIntake() {
 
         {/* Header */}
         <div style={{ marginBottom: 28 }}>
-          <button
-            onClick={() => step === 1 ? navigate("/setup") : setStep(step - 1)}
-            style={{ background: "none", border: "none", color: TEXT_SOFT, fontSize: 14, cursor: "pointer", padding: 0, marginBottom: 16, fontFamily: FONT }}
-          >
-            ← {step === 1 ? "Back to Dashboard" : "Back"}
-          </button>
+          {!isTokenMode && (
+            <button
+              onClick={() => step === 1 ? navigate("/setup") : setStep(step - 1)}
+              style={{ background: "none", border: "none", color: TEXT_SOFT, fontSize: 14, cursor: "pointer", padding: 0, marginBottom: 16, fontFamily: FONT }}
+            >
+              ← {step === 1 ? "Back to Dashboard" : "Back"}
+            </button>
+          )}
+          {isTokenMode && step > 1 && (
+            <button
+              onClick={() => setStep(step - 1)}
+              style={{ background: "none", border: "none", color: TEXT_SOFT, fontSize: 14, cursor: "pointer", padding: 0, marginBottom: 16, fontFamily: FONT }}
+            >
+              ← Back
+            </button>
+          )}
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(93,89,234,0.08)", color: PURPLE, fontSize: 12, fontWeight: 700, padding: "4px 12px", borderRadius: 999, marginBottom: 12, letterSpacing: 0.4 }}>
             Smartemark Premium Setup {adminClientId ? `— Admin Mode` : ""}
           </div>
@@ -343,9 +364,11 @@ export default function PremiumIntake() {
             }}>
               {submitting ? "Submitting…" : "Submit Setup Information"}
             </button>
-            <p style={{ textAlign: "center", marginTop: 12, fontSize: 13, color: TEXT_SOFT }}>
-              After submitting, connect your Facebook account from the Dashboard.
-            </p>
+            {!isTokenMode && (
+              <p style={{ textAlign: "center", marginTop: 12, fontSize: 13, color: TEXT_SOFT }}>
+                After submitting, connect your Facebook account from the Dashboard.
+              </p>
+            )}
           </form>
         )}
 

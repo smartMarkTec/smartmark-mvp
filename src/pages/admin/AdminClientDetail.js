@@ -76,6 +76,7 @@ export default function AdminClientDetail() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [fbInfo, setFbInfo] = useState(null);
+  const [copyingLink, setCopyingLink] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -152,12 +153,24 @@ export default function AdminClientDetail() {
   const callTracking = client?.callTracking || null;
   const campaigns = client?.campaigns || [];
 
-  const intakeUrl = `${window.location.origin}/premium-intake?adminClientId=${id}`;
-  const copyIntakeLink = () => {
-    navigator.clipboard.writeText(intakeUrl).then(
-      () => alert("Intake link copied! Send this to the client so they can fill out their setup form."),
-      () => alert("Copy failed — link: " + intakeUrl)
-    );
+  const copyIntakeLink = async () => {
+    if (copyingLink) return;
+    setCopyingLink(true);
+    try {
+      const r = await fetch(`/api/admin/clients/${id}/intake-link`, {
+        method: "POST",
+        credentials: "include",
+        headers: adminHeaders({ "Content-Type": "application/json" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok || !j.url) throw new Error(j.error || "Failed to generate link.");
+      await navigator.clipboard.writeText(j.url);
+      alert("Customer intake link copied!\n\nSend this link to the client. They can fill out the form without logging in.\n\n" + j.url);
+    } catch (err) {
+      alert("Could not generate intake link: " + err.message);
+    } finally {
+      setCopyingLink(false);
+    }
   };
 
   return (
@@ -194,15 +207,16 @@ export default function AdminClientDetail() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={copyIntakeLink}
-              style={{ padding: "10px 16px", background: "white", color: PURPLE, border: `1px solid ${PURPLE}`, borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
+              disabled={copyingLink}
+              style={{ padding: "10px 16px", background: "white", color: PURPLE, border: `1px solid ${PURPLE}`, borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: copyingLink ? "not-allowed" : "pointer", fontFamily: FONT, opacity: copyingLink ? 0.6 : 1 }}
             >
-              Copy Intake Link
+              {copyingLink ? "Generating…" : "Copy Customer Intake Link"}
             </button>
             <button
               onClick={() => navigate(`/premium-intake?adminClientId=${encodeURIComponent(id)}`)}
               style={{ padding: "10px 16px", background: "#f5f3ff", color: PURPLE, border: `1px solid rgba(93,89,234,0.3)`, borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FONT }}
             >
-              Open Intake Form →
+              Open as Admin →
             </button>
             <button
               onClick={() => navigate(`/form?adminClientId=${encodeURIComponent(id)}`)}
