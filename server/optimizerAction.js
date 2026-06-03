@@ -3,7 +3,7 @@
 const axios = require('axios');
 const { buildUpdatedPrimaryText } = require('./optimizerCopy');
 
-const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v18.0';
+const { META_API_VERSION: GRAPH_VERSION } = require('./metaConfig');
 
 const PLAN_LIMITS = {
   starter: {

@@ -27,6 +27,7 @@ const {
 const {
   syncCampaignMetricsToOptimizerState,
 } = require('../optimizerMetricsSync');
+const { META_API_VERSION } = require('../metaConfig');
 const { buildDiagnosisAsync } = require('../optimizerDiagnosis');
 const { buildDecisionAsync } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
@@ -455,10 +456,10 @@ async function refreshDefaults(userToken, ownerKey) {
   const DEFAULTS = defaultsFor(ownerKey);
 
   const [acctRes, pagesRes] = await Promise.allSettled([
-    axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+    axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
       params: { access_token: userToken, fields: 'id,name,account_status' },
     }),
-    axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+    axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/accounts`, {
       params: { access_token: userToken, fields: 'id,name,access_token' },
     }),
   ]);
@@ -1029,7 +1030,7 @@ router.get('/facebook', (req, res) => {
   }
 
   const fbUrl =
-    `https://www.facebook.com/v18.0/dialog/oauth` +
+    `https://www.facebook.com/${META_API_VERSION}/dialog/oauth` +
     `?client_id=${encodeURIComponent(FACEBOOK_APP_ID)}` +
     `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
     `&response_type=code` +
@@ -1064,7 +1065,7 @@ router.get('/facebook/callback', async (req, res) => {
   } catch {}
 
   try {
-    const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+    const tokenRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`, {
       params: {
         client_id: FACEBOOK_APP_ID,
         client_secret: FACEBOOK_APP_SECRET,
@@ -1075,7 +1076,7 @@ router.get('/facebook/callback', async (req, res) => {
     const accessToken = tokenRes.data.access_token;
 
     try {
-      const x = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+      const x = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`, {
         params: {
           grant_type: 'fb_exchange_token',
           client_id: FACEBOOK_APP_ID,
@@ -2241,7 +2242,7 @@ router.get('/facebook/adaccount/:accountId/launch-limit-debug', async (req, res)
         preferredOwnerKey: rawOwnerKey,
       });
       if (userToken) {
-        const r = await axios.get(`https://graph.facebook.com/v18.0/act_${_acctNorm}/campaigns`, {
+        const r = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${_acctNorm}/campaigns`, {
           params: { access_token: userToken, fields: 'id,name,effective_status', limit: 100 },
         });
         metaCampaigns = r.data?.data || [];
@@ -2847,7 +2848,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     if (!base64) throw new Error(`Missing base64 bytes${debugLabel ? ` (${debugLabel})` : ''}`);
 
     const fbImageRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
+      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
       new URLSearchParams({ bytes: base64 }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
     );
@@ -2884,7 +2885,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     if (DEFAULTS.pageId) return String(DEFAULTS.pageId);
 
     try {
-      const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+      const pagesRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/accounts`, {
         params: { access_token: userToken, fields: 'id,name' },
       });
       const first = pagesRes.data?.data?.[0]?.id || null;
@@ -3056,7 +3057,7 @@ if (rawCity && rawState) {
     const stateFullName = US_STATE_ABBR[stateAbbr] || rawState; // fallback to raw if unknown
 
     // Search by city name only; country_code param limits to US results at the API level.
-    const geoRes = await axios.get('https://graph.facebook.com/v18.0/search', {
+    const geoRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/search`, {
       params: {
         access_token: userToken,
         type: 'adgeolocation',
@@ -3140,7 +3141,7 @@ if (!VALIDATE_ONLY) {
     ? db.data.campaign_creatives
     : [];
 
-  const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
+  const existing = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/campaigns`, {
     params: { access_token: userToken, fields: 'id,name,effective_status', limit: 100 },
   });
 
@@ -3387,7 +3388,7 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
   status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
 });
     const campaignRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/campaigns`,
       {
         name: campaignName,
         objective: 'OUTCOME_TRAFFIC',
@@ -3440,7 +3441,7 @@ console.log('[LAUNCH][adset create]', {
 });
 
 const { data: adsetData } = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adsets`,
   adsetPayload,
   { params: mkParams() }
 );
@@ -3507,7 +3508,7 @@ const creativePayload = {
 console.log('[LAUNCH][creative payload]', JSON.stringify(creativePayload));
 
 const cr = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+  `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
   creativePayload,
   { params: mkParams() }
 );
@@ -3521,7 +3522,7 @@ const cr = await axios.post(
 });
 
       const ad = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
         {
           name: `${campaignName} (Image v${i + 1})`,
           adset_id: imageAdSetId,
@@ -3686,7 +3687,7 @@ const optimizerPayload = {
     if (_launchCreatedCampaignId && userToken) {
       try {
         await axios.delete(
-          `https://graph.facebook.com/v18.0/${_launchCreatedCampaignId}`,
+          `https://graph.facebook.com/${META_API_VERSION}/${_launchCreatedCampaignId}`,
           { params: { access_token: userToken } }
         );
         console.log('[LAUNCH][cleanup] deleted phantom campaign', _launchCreatedCampaignId);
@@ -3774,7 +3775,7 @@ router.post('/facebook/adaccount/:accountId/update-adset', async (req, res) => {
 
   try {
     await axios.post(
-      `https://graph.facebook.com/v18.0/${adsetId}`,
+      `https://graph.facebook.com/${META_API_VERSION}/${adsetId}`,
       update,
       { params: { access_token: userToken } }
     );
@@ -4013,7 +4014,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-
       }
     }
 
-    const campaignRes = await axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}`, {
+    const campaignRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`, {
       params: {
         access_token: userToken,
         fields: 'id,name,status,effective_status,configured_status,objective,start_time',
@@ -5112,7 +5113,7 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
 
     // Bootstrap from live Meta campaigns if local state is empty
     if (!existingStates.length && accountId) {
-      const campaignsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
+      const campaignsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/campaigns`, {
         params: {
           access_token: userToken,
           fields: 'id,name,status,effective_status,configured_status,objective,start_time',
@@ -5259,7 +5260,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   }
 
   try {
-    const response = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`, {
+    const response = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/campaigns`, {
       params: {
         access_token: userToken,
         fields: 'id,name,status,effective_status,start_time,stop_time',
@@ -5544,7 +5545,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
-    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+    const response = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}`, {
       params: {
         access_token: userToken,
         fields:
@@ -5581,14 +5582,14 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
       adsRes,
       accountRes,
     ] = await Promise.all([
-      axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`, {
         params: {
           access_token: userToken,
           fields:
             'id,name,status,effective_status,configured_status,objective,buying_type,start_time,stop_time,created_time,updated_time',
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}/insights`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/insights`, {
         params: {
           access_token: userToken,
           fields:
@@ -5597,7 +5598,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
           limit: 1,
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/adsets`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adsets`, {
         params: {
           access_token: userToken,
           fields:
@@ -5608,7 +5609,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
           ]),
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/ads`, {
         params: {
           access_token: userToken,
           fields:
@@ -5619,7 +5620,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug',
           ]),
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}`, {
         params: {
           access_token: userToken,
           fields:
@@ -5763,7 +5764,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
     });
   }
   try {
-    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+    const response = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights`, {
       params: {
         access_token: userToken,
         fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
@@ -5933,7 +5934,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       link: String(rec?.meta?.link || '').trim(),
     };
 
-    const adsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+    const adsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/ads`, {
       params: {
         access_token: userToken,
         fields: [
@@ -6233,7 +6234,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
     }
 
     await axios.post(
-      `https://graph.facebook.com/v18.0/${normalizedCampaignId}`,
+      `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
       { status: 'PAUSED' },
       { params: { access_token: userToken } }
     );
@@ -6333,7 +6334,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
     }
 
     await axios.post(
-      `https://graph.facebook.com/v18.0/${normalizedCampaignId}`,
+      `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
@@ -6434,7 +6435,7 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/copy', async (
       return res.status(400).json({ error: 'primaryText exceeds the 2000 character limit.' });
     }
 
-    const GRAPH_BASE = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v18.0'}`;
+    const GRAPH_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
     // Fetch campaign ads to find one with an editable link_data creative.
     const adsRes = await axios.get(`${GRAPH_BASE}/${normalizedCampaignId}/ads`, {
@@ -6634,7 +6635,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
   }
   try {
     await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
+      `https://graph.facebook.com/${META_API_VERSION}/${campaignId}`,
       { status: 'ARCHIVED' },
       { params: { access_token: userToken } }
     );
@@ -6811,7 +6812,7 @@ async function getMetaRateSnapshot(userToken, accountId) {
 
   try {
     const resp = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+      `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/campaigns`,
       {
         params: {
           access_token: userToken,
@@ -6854,7 +6855,7 @@ async function bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken
   if (!ownerKey || !normalizedAccountId || !userToken) return { bootstrapped: 0 };
 
   const campaignsRes = await axios.get(
-    `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+    `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/campaigns`,
     {
       params: {
         access_token: userToken,
@@ -6929,7 +6930,7 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
   if (!ownerKey || !normalizedAccountId || !userToken) return out;
 
   const campaignsRes = await axios.get(
-    `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+    `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/campaigns`,
     {
       params: {
         access_token: userToken,
@@ -6987,13 +6988,13 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
 
     // Legit monitoring reads: campaign details + insights + adsets + ads
     const [campaignDetailRes, insightsRes, adsetsRes, adsRes] = await Promise.allSettled([
-      axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}`, {
         params: {
           access_token: userToken,
           fields: 'id,name,status,effective_status,objective,start_time',
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights`, {
         params: {
           access_token: userToken,
           fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
@@ -7001,7 +7002,7 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
           limit: 1,
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/adsets`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adsets`, {
         params: {
           access_token: userToken,
           fields: 'id,name,status,effective_status,campaign_id,daily_budget,bid_strategy',
@@ -7011,7 +7012,7 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
           ]),
         },
       }),
-      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/ads`, {
         params: {
           access_token: userToken,
           fields: 'id,name,status,effective_status,campaign_id,adset_id',

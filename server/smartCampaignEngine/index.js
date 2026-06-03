@@ -120,7 +120,7 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   return res.data;
 }
 
-const FB_API_VER = 'v23.0';
+const { META_API_VERSION: FB_API_VER } = require('../metaConfig');
 
 // =========================
 /* POLICY */

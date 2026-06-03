@@ -7,6 +7,7 @@ const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
+const { META_API_VERSION } = require('../metaConfig');
 
 // ── Session helpers (same read-only pattern as auth.js) ──────────────────────
 const COOKIE_NAME = 'sm_sid';
@@ -685,7 +686,7 @@ router.get('/admin/clients/:id/campaign/:campaignId/metrics', limitAdmin, requir
         error: 'No stored metrics and Facebook is not connected for this client.' });
     }
 
-    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+    const response = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights`, {
       params: {
         access_token: token,
         fields: 'impressions,clicks,spend,cpm,ctr,actions,reach,unique_clicks',
@@ -792,11 +793,11 @@ router.get('/admin/clients/:id/facebook-info', limitAdmin, requireAdmin, async (
 
     try {
       const [acctRes, pagesRes] = await Promise.all([
-        axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+        axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
           params: { fields: 'id,name,account_status', access_token: token },
           timeout: 10000,
         }),
-        axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+        axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/accounts`, {
           params: { fields: 'id,name', access_token: token },
           timeout: 10000,
         }),

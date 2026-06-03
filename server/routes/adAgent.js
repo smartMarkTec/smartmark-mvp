@@ -8,6 +8,7 @@ const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
+const { META_API_VERSION } = require('../metaConfig');
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -262,7 +263,7 @@ async function fetchMetaPixels(ownerKey) {
   if (!token) return { notConnected: true };
 
   try {
-    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+    const acctRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
       params: { fields: 'id,name', access_token: token },
       timeout: 10000,
     });
@@ -273,7 +274,7 @@ async function fetchMetaPixels(ownerKey) {
     const actId = accounts[0].id;
 
     const pixelRes = await axios.get(
-      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      `https://graph.facebook.com/${META_API_VERSION}/` + actId + '/adspixels',
       {
         params: { fields: 'id,name', access_token: token },
         timeout: 10000,
@@ -328,7 +329,7 @@ async function createOrFetchMetaPixel(ownerKey) {
 
   try {
     // Resolve ad account
-    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+    const acctRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
       params: { fields: 'id,name', access_token: token },
       timeout: 10000,
     });
@@ -340,7 +341,7 @@ async function createOrFetchMetaPixel(ownerKey) {
 
     // Check for existing pixel first — never create a duplicate
     const pixelRes = await axios.get(
-      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      `https://graph.facebook.com/${META_API_VERSION}/` + actId + '/adspixels',
       { params: { fields: 'id,name', access_token: token }, timeout: 10000 }
     );
     const existing = pixelRes.data?.data || [];
@@ -351,7 +352,7 @@ async function createOrFetchMetaPixel(ownerKey) {
     // No existing pixel — create one
     const pixelName = actName ? 'Smartemark Pixel - ' + actName : 'Smartemark Pixel';
     const createRes = await axios.post(
-      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      `https://graph.facebook.com/${META_API_VERSION}/` + actId + '/adspixels',
       null,
       { params: { name: pixelName, access_token: token }, timeout: 15000 }
     );
@@ -456,7 +457,7 @@ async function checkPixelEventActivity(ownerKey) {
 
   try {
     // Resolve ad account
-    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+    const acctRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
       params: { fields: 'id,name', access_token: token },
       timeout: 10000,
     });
@@ -466,7 +467,7 @@ async function checkPixelEventActivity(ownerKey) {
 
     // Fetch pixels with basic diagnostic fields
     const pixelRes = await axios.get(
-      'https://graph.facebook.com/v18.0/' + actId + '/adspixels',
+      `https://graph.facebook.com/${META_API_VERSION}/` + actId + '/adspixels',
       {
         params: { fields: 'id,name,last_fired_time,is_unavailable', access_token: token },
         timeout: 10000,
@@ -494,7 +495,7 @@ async function checkPixelEventActivity(ownerKey) {
           const nowSec = Math.floor(Date.now() / 1000);
           const sevenDaysAgo = nowSec - 7 * 24 * 3600;
           const statsRes = await axios.get(
-            'https://graph.facebook.com/v18.0/' + p.id + '/stats',
+            `https://graph.facebook.com/${META_API_VERSION}/` + p.id + '/stats',
             {
               params: {
                 start_time: sevenDaysAgo,
@@ -678,7 +679,7 @@ async function fetchMetaAdsSummary(ownerKey) {
   if (!token) return { notConnected: true };
 
   try {
-    const acctRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+    const acctRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/me/adaccounts`, {
       params: { fields: 'id,name', access_token: token },
       timeout: 10000,
     });
@@ -689,7 +690,7 @@ async function fetchMetaAdsSummary(ownerKey) {
     const actName = accounts[0].name || actId;
 
     const campRes = await axios.get(
-      'https://graph.facebook.com/v18.0/' + actId + '/campaigns',
+      `https://graph.facebook.com/${META_API_VERSION}/` + actId + '/campaigns',
       {
         params: { fields: 'id,name,status,effective_status,objective', access_token: token, limit: 10 },
         timeout: 10000,
@@ -704,7 +705,7 @@ async function fetchMetaAdsSummary(ownerKey) {
       campaigns.slice(0, 6).map(async (c) => {
         try {
           const insRes = await axios.get(
-            'https://graph.facebook.com/v18.0/' + c.id + '/insights',
+            `https://graph.facebook.com/${META_API_VERSION}/` + c.id + '/insights',
             {
               params: {
                 fields: 'impressions,clicks,spend,ctr,cpc,cpm,reach,actions',

@@ -6,6 +6,7 @@ const {
   upsertOptimizerCampaignState,
   updateOptimizerCampaignState,
 } = require('./optimizerCampaignState');
+const { META_API_VERSION } = require('./metaConfig');
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -100,7 +101,7 @@ async function fetchCampaignInsightsSnapshot({ userToken, campaignId }) {
   if (!userToken) throw new Error('userToken is required');
   if (!campaignId) throw new Error('campaignId is required');
 
-  const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+  const response = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights`, {
     params: {
       access_token: userToken,
       fields:
@@ -115,7 +116,7 @@ async function fetchCampaignInsightsSnapshot({ userToken, campaignId }) {
 
 async function fetchCampaignLiveStatus({ userToken, campaignId }) {
   try {
-    const res = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+    const res = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}`, {
       params: {
         access_token: userToken,
         fields: 'effective_status,status',
