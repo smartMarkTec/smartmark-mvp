@@ -3394,6 +3394,7 @@ const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariant
         objective: 'OUTCOME_TRAFFIC',
         status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
         special_ad_categories: [],
+        is_adset_budget_sharing_enabled: false,
       },
       { params: mkParams() }
     );
