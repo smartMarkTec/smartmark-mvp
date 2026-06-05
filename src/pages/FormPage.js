@@ -899,6 +899,9 @@ export default function FormPage() {
   const [videoUploadError, setVideoUploadError] = useState("");
   const videoInputRef = React.useRef(null);
 
+  const [creativeSource, setCreativeSource] = useState("ai_image"); // "ai_image" | "upload_photo" | "upload_video"
+  const [copyGenerated, setCopyGenerated] = useState(false); // true once copy-only generation ran for upload modes
+
   const [result, setResult] = useState(null);
   const [imageUrls, setImageUrls] = useState([]);
   const [activeImage, setActiveImage] = useState(0);
@@ -1815,90 +1818,118 @@ useEffect(() => {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-      if (!hasGenerated && isGenerateTrigger(value)) {
-        if (!canRunImageGen()) {
-          const msg = quotaMessage();
-          setError(msg);
-          setChatHistory((ch) => [...ch, { from: "gpt", text: msg }]);
+      if (!hasGenerated && !copyGenerated && isGenerateTrigger(value)) {
+        if (creativeSource === "ai_image") {
+          if (!canRunImageGen()) {
+            const msg = quotaMessage();
+            setError(msg);
+            setChatHistory((ch) => [...ch, { from: "gpt", text: msg }]);
+            return;
+          }
+
+          // ✅ Track the key action: generating creatives
+          trackEvent("generate_creatives", {
+            page: "form",
+            action: "initial",
+          });
+
+          bumpImageGenCount();
+
+          // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
+          clearDraftDisabled();
+
+          const nextCtx = buildCtxKey(answers || {});
+          setActiveCtx(nextCtx);
+          purgeCreativeDraftKeys();
+
+          // also clear image cache for the new run so nothing "ghosts" in
+          try {
+            lsRemove(IMAGE_CACHE_KEY);
+            lsRemove(IMAGE_DRAFTS_KEY);
+          } catch {}
+
+          // ✅ Reset preview state so nothing stale can show
+          setResult(null);
+          setImageUrls([]);
+          setActiveImage(0);
+          setImageUrl("");
+          setHasGenerated(false);
+          setImageEditing(false);
+          setImageDataUrls([]);
+          setImgFail({});
+
+          setLoading(true);
+          setGenerating(true);
+
+          setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
+
+          const swapThinkingTimer = setTimeout(() => {
+            setChatHistory((ch) => {
+              const next = [...ch];
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
+                  next[i] = {
+                    ...next[i],
+                    text: "This could take about a minute — generating your previews…",
+                  };
+                  break;
+                }
+              }
+              return next;
+            });
+          }, 700);
+
+          setTimeout(async () => {
+            const token = getRandomString();
+            try {
+              setImageUrls([]);
+              setImageUrl("");
+            } catch {}
+
+            try {
+              await warmBackend();
+              await generatePosterBPair(token);
+
+              setChatHistory((ch) => [
+                ...ch,
+                { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." },
+              ]);
+              setHasGenerated(true);
+            } catch (err) {
+              console.error("generation failed:", err);
+              setError("Generation failed (server cold or busy). Try again in a few seconds.");
+            } finally {
+              clearTimeout(swapThinkingTimer);
+              setGenerating(false);
+              setLoading(false);
+            }
+          }, 80);
+
           return;
         }
 
-             // ✅ Track the key action: generating creatives
-        trackEvent("generate_creatives", {
-          page: "form",
-          action: "initial",
-        });
-
-        bumpImageGenCount();
-
-        // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
-        clearDraftDisabled();
-
-        const nextCtx = buildCtxKey(answers || {});
-        setActiveCtx(nextCtx);
-        purgeCreativeDraftKeys();
-
-
-// also clear image cache for the new run so nothing “ghosts” in
-try {
-  lsRemove(IMAGE_CACHE_KEY);
-  lsRemove(IMAGE_DRAFTS_KEY);
-} catch {}
-
-
-        // ✅ Reset preview state so nothing stale can show
-        setResult(null);
-        setImageUrls([]);
-        setActiveImage(0);
-        setImageUrl("");
-        setHasGenerated(false);
-        setImageEditing(false);
-        setImageDataUrls([]);
-        setImgFail({});
-
+        // Upload mode (upload_photo or upload_video): generate copy only, no image
         setLoading(true);
-        setGenerating(true);
-
         setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
 
-        const swapThinkingTimer = setTimeout(() => {
-          setChatHistory((ch) => {
-            const next = [...ch];
-            for (let i = next.length - 1; i >= 0; i--) {
-              if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
-                next[i] = {
-                  ...next[i],
-                  text: "This could take about a minute — generating your previews…",
-                };
-                break;
-              }
-            }
-            return next;
-          });
-        }, 700);
-
         setTimeout(async () => {
-          const token = getRandomString();
-          try {
-            setImageUrls([]);
-            setImageUrl("");
-          } catch {}
-
           try {
             await warmBackend();
-            await generatePosterBPair(token);
-
-            setChatHistory((ch) => [
-              ...ch,
-              { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." },
-            ]);
-            setHasGenerated(true);
+            const smartCopy = await summarizeAdCopy(answers || {});
+            const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
+            const aiBody = smartCopy?.subline || smartCopy?.body || "";
+            if (aiHeadline || aiBody) {
+              setResult((prev) => ({ ...(prev || {}), headline: aiHeadline, body: aiBody }));
+            }
+            setCopyGenerated(true);
+            const uploadPrompt = creativeSource === "upload_photo"
+              ? "Your ad copy is ready! Upload your photo below to continue."
+              : "Your ad copy is ready! Upload your video below to continue.";
+            setChatHistory((ch) => [...ch, { from: "gpt", text: uploadPrompt }]);
           } catch (err) {
-            console.error("generation failed:", err);
-            setError("Generation failed (server cold or busy). Try again in a few seconds.");
+            console.error("copy generation failed:", err);
+            setChatHistory((ch) => [...ch, { from: "gpt", text: "Copy generation failed. Please try again." }]);
           } finally {
-            clearTimeout(swapThinkingTimer);
-            setGenerating(false);
             setLoading(false);
           }
         }, 80);
@@ -1906,10 +1937,13 @@ try {
         return;
       }
 
-      if (hasGenerated) {
+      if (hasGenerated || copyGenerated) {
         await handleSideChat(value, null);
       } else {
-        await handleSideChat(value, "Ready to generate your campaign? (yes/no)");
+        const readyPrompt = creativeSource === "ai_image"
+          ? "Ready to generate your campaign? (yes/no)"
+          : "Ready to generate your ad copy? Type 'yes' to continue.";
+        await handleSideChat(value, readyPrompt);
       }
       return;
     }
@@ -2045,7 +2079,14 @@ async function generatePosterBPair(runToken) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setUserUploadedImage(ev.target?.result || null);
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result || null;
+      setUserUploadedImage(dataUrl);
+      // In upload_photo mode auto-upload to server immediately so Continue becomes available
+      if (creativeSource === "upload_photo" && dataUrl) {
+        handlePhotoCreative(dataUrl);
+      }
+    };
     reader.readAsDataURL(file);
     e.target.value = ""; // allow re-selecting the same file later
   }
@@ -2086,6 +2127,63 @@ async function generatePosterBPair(runToken) {
       setError(msg);
     } finally {
       setImageLoading(false);
+    }
+  }
+
+  // Uploads a photo data URL directly to the media server and sets imageUrls + hasGenerated.
+  // Used by upload_photo mode so handleUploadChange can auto-upload on file selection.
+  async function handlePhotoCreative(dataUrl) {
+    if (!dataUrl) return;
+    setImageLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/media/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.urls?.[0]) {
+        throw new Error(data.error || "Photo upload failed — please try again.");
+      }
+      const serverUrl = toAbsoluteMedia(data.urls[0]);
+      setImageUrls([serverUrl]);
+      setActiveImage(0);
+      setImageUrl(serverUrl);
+      setHasGenerated(true);
+      cacheImagesFor24h(getActiveCtx(), [serverUrl]).catch(() => {});
+      const draftId = creativeIdFromUrl(serverUrl);
+      saveImageDraftById(draftId, {
+        headline: (result?.headline || "").slice(0, 55),
+        body: result?.body || "",
+        overlay: normalizeOverlayCTA(answers?.cta || ""),
+      });
+    } catch (err) {
+      setError(String(err?.message || "Photo upload failed."));
+    } finally {
+      setImageLoading(false);
+    }
+  }
+
+  function handleCreativeSourceChange(newSource) {
+    if (newSource === creativeSource) return;
+    setCreativeSource(newSource);
+    if (newSource === "ai_image") {
+      setMediaType("image");
+      setCopyGenerated(false);
+      // Don't reset uploadedVideoUrl — user can keep it if they switch back later
+    } else if (newSource === "upload_video") {
+      setUploadedVideoUrl("");
+      setUploadedVideoMeta(null);
+      setVideoUploadError("");
+      setMediaType("video");
+      setCopyGenerated(false);
+    } else if (newSource === "upload_photo") {
+      setUploadedVideoUrl("");
+      setUploadedVideoMeta(null);
+      setVideoUploadError("");
+      setMediaType("image");
+      setCopyGenerated(false);
     }
   }
 
@@ -2456,6 +2554,50 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
+      {/* ── Creative type picker ─────────────────────────────────────────── */}
+      <div style={{ width: "100%", maxWidth: 760, marginTop: 18, marginBottom: 0, padding: "0 0 0 0", boxSizing: "border-box" }}>
+        <div style={{ background: "rgba(255,255,255,0.92)", borderRadius: 18, border: "1.5px solid #e8e4f4", boxShadow: "0 2px 16px rgba(66,54,120,0.07)", padding: "18px 22px" }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a22", marginBottom: 12 }}>
+            What kind of ad creative do you want to use?
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {[
+              { id: "ai_image",     label: "Generate an AI image",  icon: "✨", desc: "Smartemark designs your ad" },
+              { id: "upload_photo", label: "Upload my own photo",    icon: "📷", desc: "Your photo, AI writes the copy" },
+              { id: "upload_video", label: "Upload my own video",    icon: "🎬", desc: "Your video, AI writes the copy" },
+            ].map(({ id, label, icon, desc }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => handleCreativeSourceChange(id)}
+                style={{
+                  flex: 1,
+                  minWidth: 120,
+                  padding: "11px 14px",
+                  borderRadius: 12,
+                  border: creativeSource === id ? "2px solid #6c63d4" : "1.5px solid #e0dced",
+                  background: creativeSource === id ? "#f0eeff" : "#fff",
+                  color: creativeSource === id ? "#4c3db0" : "#5a5a6e",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 3,
+                  textAlign: "left",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                <span style={{ fontSize: 18 }}>{icon}</span>
+                <span>{label}</span>
+                <span style={{ fontWeight: 500, fontSize: 11, color: creativeSource === id ? "#6c63d4" : "#9990b8" }}>{desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
          <div
         style={{
           width: "100%",
@@ -2669,7 +2811,9 @@ async function generatePosterBPair(runToken) {
       </div>
 
          <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
-        <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>Ad Previews</div>
+        <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>
+          {creativeSource === "upload_photo" ? "Your Photo Ad" : creativeSource === "upload_video" ? "Your Video Ad" : "Ad Previews"}
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? 12 : 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
@@ -2702,225 +2846,170 @@ async function generatePosterBPair(runToken) {
               letterSpacing: 0.08,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              {/* Upload control — left side, replaces "Sponsored" */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input
-                  ref={uploadInputRef}
-                  type="file"
-                  accept="image/jpeg,image/jpg,image/png,image/webp"
-                  style={{ display: "none" }}
-                  onChange={handleUploadChange}
-                />
+            {/* Hidden file input — always present so refs work in all modes */}
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              style={{ display: "none" }}
+              onChange={handleUploadChange}
+            />
 
-                {userUploadedImage ? (
-                  /* Photo is uploaded — show thumbnail, mode toggle, remove */
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    {/* Thumbnail */}
-                    <img
-                      src={userUploadedImage}
-                      alt="Your photo"
-                      onClick={() => uploadInputRef.current?.click()}
-                      title="Click to replace photo"
-                      style={{
-                        width: 30,
-                        height: 30,
-                        objectFit: "cover",
-                        borderRadius: 6,
-                        border: "2px solid #8f87ff",
-                        cursor: "pointer",
-                        flexShrink: 0,
-                      }}
-                    />
-
-                    {/* Mode toggle — the user's explicit choice */}
-                    <div style={{ display: "flex", borderRadius: 7, overflow: "hidden", border: "1px solid #ddd8ed", flexShrink: 0 }}>
-                      <button
-                        onClick={() => setUploadMode("asis")}
-                        title="Use your photo exactly as-is — no AI changes"
-                        style={{
-                          background: uploadMode === "asis" ? "#6c63d4" : "rgba(255,255,255,0.85)",
-                          color: uploadMode === "asis" ? "#fff" : "#7b74c0",
-                          border: "none",
-                          padding: "4px 9px",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        Use as-is
-                      </button>
-                      <button
-                        onClick={() => setUploadMode("ai")}
-                        title="Let Smartemark AI design a polished ad from your photo"
-                        style={{
-                          background: uploadMode === "ai" ? "#6c63d4" : "rgba(255,255,255,0.85)",
-                          color: uploadMode === "ai" ? "#fff" : "#7b74c0",
-                          border: "none",
-                          padding: "4px 9px",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        AI design
-                      </button>
+            {creativeSource === "ai_image" ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                {/* Upload control — small optional photo for AI mode */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {userUploadedImage ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <img
+                        src={userUploadedImage}
+                        alt="Your photo"
+                        onClick={() => uploadInputRef.current?.click()}
+                        title="Click to replace photo"
+                        style={{ width: 30, height: 30, objectFit: "cover", borderRadius: 6, border: "2px solid #8f87ff", cursor: "pointer", flexShrink: 0 }}
+                      />
+                      <div style={{ display: "flex", borderRadius: 7, overflow: "hidden", border: "1px solid #ddd8ed", flexShrink: 0 }}>
+                        <button onClick={() => setUploadMode("asis")} title="Use your photo exactly as-is" style={{ background: uploadMode === "asis" ? "#6c63d4" : "rgba(255,255,255,0.85)", color: uploadMode === "asis" ? "#fff" : "#7b74c0", border: "none", padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Use as-is</button>
+                        <button onClick={() => setUploadMode("ai")} title="AI design from your photo" style={{ background: uploadMode === "ai" ? "#6c63d4" : "rgba(255,255,255,0.85)", color: uploadMode === "ai" ? "#fff" : "#7b74c0", border: "none", padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>AI design</button>
+                      </div>
+                      <button onClick={() => { setUserUploadedImage(null); setUploadMode("ai"); }} title="Remove photo" style={{ background: "none", border: "none", cursor: "pointer", color: "#a09ab8", fontSize: 13, padding: 2, lineHeight: 1, flexShrink: 0 }}><FaTimes /></button>
                     </div>
-
-                    {/* Remove */}
-                    <button
-                      onClick={() => { setUserUploadedImage(null); setUploadMode("ai"); }}
-                      title="Remove custom photo"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#a09ab8",
-                        fontSize: 13,
-                        padding: 2,
-                        lineHeight: 1,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <FaTimes />
+                  ) : (
+                    <button onClick={() => uploadInputRef.current?.click()} title="Add your own photo (optional)" style={{ background: "none", border: "1.5px dashed #c8c2d8", borderRadius: 7, padding: "4px 10px", fontSize: 12, color: "#9990b8", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span>Add photo
                     </button>
+                  )}
+                </div>
+                <button
+                  style={{ background: "none", color: "#5a5a6e", border: "1px solid rgba(0,0,0,0.13)", borderRadius: 8, fontWeight: 600, fontSize: "0.93rem", padding: "5px 14px", cursor: imageLoading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6, opacity: imageLoading ? 0.5 : 1, whiteSpace: "nowrap" }}
+                  onClick={userUploadedImage && uploadMode === "asis" ? handleUploadAsIs : handleRegenerateImage}
+                  disabled={imageLoading}
+                  title={userUploadedImage && uploadMode === "asis" ? "Use this photo as your ad creative" : "Regenerate Image Ad"}
+                >
+                  <FaSyncAlt style={{ fontSize: 13 }} />
+                  {imageLoading || generating ? <Dotty /> : (userUploadedImage && uploadMode === "asis" ? "Use photo" : "Regenerate")}
+                </button>
+              </div>
+            ) : creativeSource === "upload_photo" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {imageLoading ? (
+                  <div style={{ fontSize: 13, color: "#7b74c0", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Dotty /> Uploading photo...
+                  </div>
+                ) : imageUrls[0] ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <img src={imageUrls[0]} alt="Your photo" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 8, border: "2px solid #6c63d4" }} />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: "#4c3db0" }}>Photo selected</div>
+                      <div style={{ fontSize: 11, color: "#7b74c0" }}>Ready to continue</div>
+                    </div>
+                    <button onClick={() => uploadInputRef.current?.click()} style={{ background: "none", border: "1px solid #c8c2d8", borderRadius: 7, padding: "4px 10px", fontSize: 12, color: "#7b74c0", fontWeight: 600, cursor: "pointer" }}>Change</button>
+                    <button onClick={() => { setUserUploadedImage(null); setImageUrls([]); setImageUrl(""); setHasGenerated(false); }} style={{ background: "none", border: "none", color: "#a09ab8", cursor: "pointer", fontSize: 15, padding: "0 4px", lineHeight: 1 }}>×</button>
                   </div>
                 ) : (
-                  /* No photo — show upload affordance */
                   <button
                     onClick={() => uploadInputRef.current?.click()}
-                    title="Add your own photo (optional)"
-                    style={{
-                      background: "none",
-                      border: "1.5px dashed #c8c2d8",
-                      borderRadius: 7,
-                      padding: "4px 10px",
-                      fontSize: 12,
-                      color: "#9990b8",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 5,
-                      whiteSpace: "nowrap",
-                    }}
+                    style={{ background: "#f0eeff", border: "2px dashed #8f87ff", borderRadius: 10, padding: "10px 18px", fontSize: 13, color: "#4c3db0", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
                   >
-                    <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span>
-                    Add photo
+                    <span style={{ fontSize: 20 }}>📷</span>
+                    Upload your photo
+                    <span style={{ fontWeight: 500, color: "#7b74c0", fontSize: 11 }}>JPG, PNG, WEBP</span>
                   </button>
                 )}
               </div>
-
-              {/* Action button — label and handler depend on upload mode */}
-              <button
-                style={{
-                  background: "none",
-                  color: "#5a5a6e",
-                  border: "1px solid rgba(0,0,0,0.13)",
-                  borderRadius: 8,
-                  fontWeight: 600,
-                  fontSize: "0.93rem",
-                  padding: "5px 14px",
-                  cursor: imageLoading ? "not-allowed" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  opacity: imageLoading ? 0.5 : 1,
-                  whiteSpace: "nowrap",
-                }}
-                onClick={userUploadedImage && uploadMode === "asis" ? handleUploadAsIs : handleRegenerateImage}
-                disabled={imageLoading}
-                title={userUploadedImage && uploadMode === "asis" ? "Use this photo as your ad creative" : "Regenerate Image Ad"}
-              >
-                <FaSyncAlt style={{ fontSize: 13 }} />
-                {imageLoading || generating
-                  ? <Dotty />
-                  : (userUploadedImage && uploadMode === "asis" ? "Use photo" : "Regenerate")
-                }</button>
-            </div>
-
-            {/* ✅ put this OUTSIDE the button */}
-            <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
-              {(() => {
-                const q = loadGenQuota();
-                const remaining = Math.max(0, regenLimit - (q.used || 0));
-
-                const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
-                const hrs = Math.floor(totalMins / 60);
-                const mins = totalMins % 60;
-
-                const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-
-                return `Generations left today: ${remaining}/${regenLimit} (resets in ~${resetStr})`;
-              })()}
-            </div>
-
-            {/* ── Optional video upload ─────────────────────────────────────── */}
-            <div style={{ marginTop: 14, borderTop: "1px solid #e8e4f0", paddingTop: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#7b74c0", marginBottom: 4 }}>
-                Upload your own video ad <span style={{ fontWeight: 400, color: "#9990b8" }}>(optional)</span>
+            ) : (
+              /* upload_video: just show a label — video section below is the main area */
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#4c3db0" }}>
+                🎬 Video ad creative
               </div>
-              <div style={{ fontSize: 12, color: "#9990b8", marginBottom: 8, lineHeight: 1.5 }}>
-                If you already have a video you want to use in the ad, upload it here. We'll use this video as the campaign creative instead of the generated image.
+            )}
+
+            {/* Generation quota — only relevant for AI image mode */}
+            {creativeSource === "ai_image" && (
+              <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
+                {(() => {
+                  const q = loadGenQuota();
+                  const remaining = Math.max(0, regenLimit - (q.used || 0));
+                  const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+                  const hrs = Math.floor(totalMins / 60);
+                  const mins = totalMins % 60;
+                  const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+                  return `Generations left today: ${remaining}/${regenLimit} (resets in ~${resetStr})`;
+                })()}
               </div>
+            )}
 
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/mp4,video/quicktime,video/webm"
-                style={{ display: "none" }}
-                onChange={handleVideoSelect}
-              />
+            {/* ── Video upload section — primary for upload_video, optional for ai_image, hidden for upload_photo ── */}
+            {creativeSource !== "upload_photo" && (
+              <div style={{ marginTop: 14, borderTop: creativeSource === "upload_video" ? "none" : "1px solid #e8e4f0", paddingTop: creativeSource === "upload_video" ? 0 : 14 }}>
+                {creativeSource === "ai_image" && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7b74c0", marginBottom: 4 }}>
+                      Upload your own video ad <span style={{ fontWeight: 400, color: "#9990b8" }}>(optional)</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9990b8", marginBottom: 8, lineHeight: 1.5 }}>
+                      If you already have a video you want to use in the ad, upload it here. We'll use this video instead of the generated image.
+                    </div>
+                  </>
+                )}
 
-              {uploadedVideoUrl ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: mediaType === "video" ? "#f0fdf4" : "#fafafa", border: mediaType === "video" ? "1px solid #bbf7d0" : "1px solid #ddd8ed", borderRadius: 8 }}>
-                  <span style={{ fontSize: 18 }}>🎬</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: mediaType === "video" ? "#065f46" : "#5a5a6e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {uploadedVideoMeta?.originalName || "video.mp4"}
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm"
+                  style={{ display: "none" }}
+                  onChange={handleVideoSelect}
+                />
+
+                {uploadedVideoUrl ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
+                    <span style={{ fontSize: 18 }}>🎬</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#065f46", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{uploadedVideoMeta?.originalName || "video.mp4"}</div>
+                      <div style={{ fontSize: 11, color: "#9990b8" }}>
+                        {uploadedVideoMeta?.mimeType} · {uploadedVideoMeta?.size ? (uploadedVideoMeta.size / 1024 / 1024).toFixed(1) + " MB" : ""}
+                        <span style={{ marginLeft: 6, color: "#059669", fontWeight: 700 }}>● Selected as creative</span>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "#9990b8" }}>
-                      {uploadedVideoMeta?.mimeType} · {uploadedVideoMeta?.size ? (uploadedVideoMeta.size / 1024 / 1024).toFixed(1) + " MB" : ""}
-                      {mediaType === "video" && <span style={{ marginLeft: 6, color: "#059669", fontWeight: 700 }}>● Selected as creative</span>}
-                    </div>
+                    <button onClick={() => videoInputRef.current?.click()} style={{ background: "none", border: "none", color: "#7b74c0", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "2px 6px" }}>Replace</button>
+                    <button onClick={handleRemoveVideo} style={{ background: "none", border: "none", color: "#a09ab8", cursor: "pointer", fontSize: 15, padding: "0 4px", lineHeight: 1 }}>×</button>
                   </div>
-                  <button onClick={() => videoInputRef.current?.click()} style={{ background: "none", border: "none", color: "#7b74c0", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "2px 6px" }}>Replace</button>
-                  <button onClick={handleRemoveVideo} style={{ background: "none", border: "none", color: "#a09ab8", cursor: "pointer", fontSize: 15, padding: "0 4px", lineHeight: 1 }}>×</button>
-                </div>
-              ) : videoUploading ? (
-                <div style={{ fontSize: 12, color: "#7b74c0", padding: "8px 12px", background: "#f5f3ff", border: "1px solid #ddd8ed", borderRadius: 8 }}>
-                  Uploading video…
-                </div>
-              ) : (
-                <button
-                  onClick={() => videoInputRef.current?.click()}
-                  style={{ background: "none", border: "1.5px dashed #c8c2d8", borderRadius: 7, padding: "6px 14px", fontSize: 12, color: "#9990b8", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  <span style={{ fontSize: 15 }}>🎬</span> Upload video ad
-                </button>
-              )}
+                ) : videoUploading ? (
+                  <div style={{ fontSize: 12, color: "#7b74c0", padding: "8px 12px", background: "#f5f3ff", border: "1px solid #ddd8ed", borderRadius: 8 }}>Uploading video…</div>
+                ) : (
+                  <button
+                    onClick={() => videoInputRef.current?.click()}
+                    style={{
+                      background: creativeSource === "upload_video" ? "#f0eeff" : "none",
+                      border: creativeSource === "upload_video" ? "2px dashed #8f87ff" : "1.5px dashed #c8c2d8",
+                      borderRadius: creativeSource === "upload_video" ? 10 : 7,
+                      padding: creativeSource === "upload_video" ? "10px 18px" : "6px 14px",
+                      fontSize: creativeSource === "upload_video" ? 13 : 12,
+                      color: creativeSource === "upload_video" ? "#4c3db0" : "#9990b8",
+                      fontWeight: creativeSource === "upload_video" ? 700 : 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: creativeSource === "upload_video" ? 8 : 6,
+                    }}
+                  >
+                    <span style={{ fontSize: creativeSource === "upload_video" ? 20 : 15 }}>🎬</span>
+                    {creativeSource === "upload_video" ? "Upload your video" : "Upload video ad"}
+                    {creativeSource === "upload_video" && <span style={{ fontWeight: 500, color: "#7b74c0", fontSize: 11 }}>MP4, MOV, WEBM</span>}
+                  </button>
+                )}
 
-              {videoUploadError && (
-                <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px" }}>
-                  {videoUploadError}
-                </div>
-              )}
+                {videoUploadError && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px" }}>{videoUploadError}</div>
+                )}
 
-              <div style={{ marginTop: 5, fontSize: 11, color: "#b8b4cc" }}>
-                MP4, MOV, or WEBM · max 35 MB
+                <div style={{ marginTop: 5, fontSize: 11, color: "#b8b4cc" }}>MP4, MOV, or WEBM · max 35 MB</div>
               </div>
-            </div>
+            )}
           </div>
 
+          {/* Image preview area — hidden for upload_video (video is shown above) */}
+          {creativeSource !== "upload_video" && (
           <div
             style={{
               background: "#222",
@@ -2931,7 +3020,11 @@ async function generatePosterBPair(runToken) {
               minHeight: 220,
             }}
           >
-            {imageLoading || generating ? (
+            {imageLoading ? (
+              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Dotty />
+              </div>
+            ) : generating ? (
               <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Dotty />
               </div>
@@ -2950,7 +3043,6 @@ async function generatePosterBPair(runToken) {
                 }}
               />
             ) : userUploadedImage ? (
-              /* Show the user's uploaded photo immediately — before they hit Regenerate */
               <img
                 src={userUploadedImage}
                 alt="Your uploaded photo"
@@ -2968,13 +3060,14 @@ async function generatePosterBPair(runToken) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: 22,
+                  fontSize: creativeSource === "upload_photo" ? 14 : 22,
                 }}
               >
-                Image goes here
+                {creativeSource === "upload_photo" ? "Upload your photo above to preview it here" : "Image goes here"}
               </div>
             )}
           </div>
+          )}
 
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
@@ -3135,7 +3228,15 @@ async function generatePosterBPair(runToken) {
           onClick={() => {
             const isVideoMode = mediaType === "video" && !!uploadedVideoUrl;
 
-            if (!hasGenerated && !isVideoMode) {
+            if (creativeSource === "upload_photo" && !hasGenerated) {
+              alert("Upload your photo first.");
+              return;
+            }
+            if (creativeSource === "upload_video" && !isVideoMode) {
+              alert("Upload your video first.");
+              return;
+            }
+            if (creativeSource === "ai_image" && !hasGenerated && !isVideoMode) {
               alert("Generate your previews first. Type 'yes' in the chat.");
               return;
             }
@@ -3257,7 +3358,11 @@ async function generatePosterBPair(runToken) {
             });
           }}
           onMouseEnter={(e) => {
-            if (!hasGenerated) return;
+            const isVideoMode = mediaType === "video" && !!uploadedVideoUrl;
+            const isReady = (creativeSource === "upload_photo" && hasGenerated) ||
+                            (creativeSource === "upload_video" && isVideoMode) ||
+                            (creativeSource === "ai_image" && (hasGenerated || isVideoMode));
+            if (!isReady) return;
             e.currentTarget.style.transform = "translateY(-1px)";
           }}
           onMouseLeave={(e) => {
