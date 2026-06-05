@@ -4,6 +4,8 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
@@ -121,6 +123,42 @@ const limitAdmin = basicRateLimit({ windowMs: 60 * 1000, max: 60 });
 router.use(secureHeaders());
 router.use(basicAuth());
 
+// ── Intake media file upload ──────────────────────────────────────────────────
+const INTAKE_MEDIA_DIR = (() => {
+  const d = process.env.INTAKE_MEDIA_DIR ||
+    (process.env.RENDER ? '/tmp/intake-media' : path.join(process.cwd(), 'server', 'intake-media'));
+  try { fs.mkdirSync(d, { recursive: true }); } catch {}
+  return d;
+})();
+
+const ALLOWED_INTAKE_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/webp',
+  'video/mp4', 'video/quicktime', 'video/webm',
+]);
+
+const MIME_TO_EXT = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+  'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
+};
+
+function parseIntakeFile(dataUrl) {
+  const s = String(dataUrl || '').trim();
+  const m = s.match(/^data:([^;]+);base64,([\s\S]+)$/);
+  if (!m) return null;
+  const mime = m[1].toLowerCase().trim();
+  if (!ALLOWED_INTAKE_MIME.has(mime)) return null;
+  const ext = MIME_TO_EXT[mime];
+  if (!ext) return null;
+  const buffer = Buffer.from(m[2], 'base64');
+  return { mime, buffer, ext };
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // Helper: build the intake object from request body (shared by normal + admin routes)
 function buildIntakeFromBody(b, existingIntake) {
   const now = new Date().toISOString();
@@ -158,6 +196,9 @@ function buildIntakeFromBody(b, existingIntake) {
     bestContactEmail:               String(b.bestContactEmail || '').trim(),
     bestContactPhone:               String(b.bestContactPhone || '').trim(),
     additionalNotes:                String(b.additionalNotes || '').trim(),
+    // Media assets — preserved from DB (uploaded separately via /api/intake-media/upload)
+    mediaAssets: Array.isArray(existingIntake?.mediaAssets) ? existingIntake.mediaAssets : [],
+    mediaUploadNotes: String(b.mediaUploadNotes || existingIntake?.mediaUploadNotes || '').trim(),
     // Timestamps — preserve original submission date on re-submit
     submittedAt: existingIntake?.submittedAt || now,
     updatedAt: now,
@@ -325,6 +366,105 @@ router.post('/admin/clients/:id/premium-intake', limitAdmin, requireAdmin, async
     console.error('[AdminIntake] error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Something went wrong. Please try again.' });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/intake-media/upload
+// Upload a single image or video for premium intake.
+// Auth: session cookie/header OR valid intake token (for public token links).
+// Body: { dataUrl, originalName, token? }
+// Limits: 35 MB per file, max 8 files per user.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/intake-media/upload', limitIntake, express.json({ limit: '50mb' }), async (req, res) => {
+  try {
+    await ensureDB();
+    const b = req.body || {};
+    const dataUrl = String(b.dataUrl || '').trim();
+    const originalName = String(b.originalName || '').slice(0, 200).trim();
+    const token = String(b.token || '').trim();
+
+    if (!dataUrl) return res.status(400).json({ ok: false, error: 'No file data provided.' });
+
+    // Resolve user by session or by intake token
+    let userIdx = -1;
+    if (token) {
+      userIdx = db.data.users.findIndex((u) => String(u?.premiumIntakeToken || '') === token);
+    } else {
+      const ownerKey = ownerKeyFromReq(req);
+      const user = await findUserByOwnerKey(ownerKey);
+      if (user) {
+        userIdx = db.data.users.findIndex(
+          (u) => String(u?.username || '').trim() === String(user.username || '').trim()
+        );
+      }
+    }
+    if (userIdx === -1) {
+      return res.status(401).json({ ok: false, error: 'Not authorized. Please reload the page and try again.' });
+    }
+
+    const parsed = parseIntakeFile(dataUrl);
+    if (!parsed) {
+      return res.status(400).json({ ok: false, error: 'Unsupported file type. Allowed: PNG, JPG, WEBP, MP4, MOV, WEBM.' });
+    }
+
+    const MAX_BYTES = 35 * 1024 * 1024; // 35 MB
+    if (parsed.buffer.length > MAX_BYTES) {
+      return res.status(400).json({ ok: false, error: `File too large (${fmtBytes(parsed.buffer.length)}). Maximum is 35 MB per file.` });
+    }
+
+    // Enforce per-user file count limit
+    const existing = db.data.users[userIdx].premiumIntake?.mediaAssets;
+    if (Array.isArray(existing) && existing.length >= 8) {
+      return res.status(400).json({ ok: false, error: 'Maximum 8 files allowed per intake.' });
+    }
+
+    // Save to disk
+    const id = crypto.randomBytes(10).toString('hex');
+    const filename = `intake-${id}.${parsed.ext}`;
+    fs.writeFileSync(path.join(INTAKE_MEDIA_DIR, filename), parsed.buffer);
+
+    const meta = {
+      originalName: originalName || filename,
+      filename,
+      url: `/api/admin/intake-media/${filename}`,
+      mimeType: parsed.mime,
+      size: parsed.buffer.length,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    // Append to the user's premiumIntake.mediaAssets
+    if (!db.data.users[userIdx].premiumIntake) db.data.users[userIdx].premiumIntake = {};
+    if (!Array.isArray(db.data.users[userIdx].premiumIntake.mediaAssets)) {
+      db.data.users[userIdx].premiumIntake.mediaAssets = [];
+    }
+    db.data.users[userIdx].premiumIntake.mediaAssets.push(meta);
+    await db.write();
+
+    console.log('[intake-media] uploaded:', { username: db.data.users[userIdx].username, filename, size: fmtBytes(meta.size) });
+    return res.json({ ok: true, file: meta });
+  } catch (err) {
+    console.error('[intake-media/upload]', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Upload failed. Please try again.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/intake-media/:filename
+// Admin-only. Serves an uploaded intake media file for viewing or download.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/intake-media/:filename', requireAdmin, (req, res) => {
+  const filename = path.basename(String(req.params.filename || '').trim());
+  if (!filename || filename.includes('..')) return res.status(400).end();
+
+  const filePath = path.join(INTAKE_MEDIA_DIR, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: 'File not found.' });
+
+  const download = req.query.download === '1';
+  if (download) {
+    return res.download(filePath, filename);
+  }
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  return res.sendFile(filePath);
 });
 
 // ── GET /api/premium-intake/status — lets frontend check if already submitted ─

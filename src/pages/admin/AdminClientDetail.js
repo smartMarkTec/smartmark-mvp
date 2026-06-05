@@ -361,6 +361,72 @@ export default function AdminClientDetail() {
           )}
         </Card>
 
+        {/* Uploaded Campaign Media */}
+        <Card title="Uploaded Campaign Media">
+          {(() => {
+            const assets = intake?.mediaAssets;
+            const notes = intake?.mediaUploadNotes;
+
+            const downloadFile = async (url, filename) => {
+              try {
+                const r = await fetch(url + "?download=1", { credentials: "include", headers: adminHeaders() });
+                if (!r.ok) { alert("Download failed."); return; }
+                const blob = await r.blob();
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+              } catch { alert("Download failed."); }
+            };
+
+            if (!assets || assets.length === 0) {
+              return <p style={{ color: TEXT_SOFT, fontSize: 14, margin: 0 }}>No campaign media uploaded yet.</p>;
+            }
+
+            return (
+              <>
+                {notes && (
+                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#92400e", lineHeight: 1.6 }}>
+                    <strong>Client notes:</strong> {notes}
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {assets.map((f, i) => (
+                    <div key={f.filename || i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f8f9fc", border: `1px solid ${BORDER}`, borderRadius: 10, gap: 12, flexWrap: "wrap" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: TEXT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.originalName}</div>
+                        <div style={{ fontSize: 11, color: TEXT_SOFT, marginTop: 2 }}>
+                          {f.mimeType} · {f.size ? (f.size / 1024 / 1024).toFixed(1) + " MB" : ""}
+                          {f.uploadedAt && <span style={{ marginLeft: 8 }}>Uploaded {new Date(f.uploadedAt).toLocaleString()}</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                        <a
+                          href={f.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: 13, fontWeight: 600, color: PURPLE, textDecoration: "none" }}
+                        >
+                          View
+                        </a>
+                        <button
+                          onClick={() => downloadFile(f.url, f.originalName)}
+                          style={{ fontSize: 13, fontWeight: 600, color: "#374151", background: "white", border: `1px solid ${BORDER}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: FONT }}
+                        >
+                          Download
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </Card>
+
         {/* Facebook / Ad Account Info */}
         <Card title="Facebook & Ad Account">
           {!fbInfo ? (

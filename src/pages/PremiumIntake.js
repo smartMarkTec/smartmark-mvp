@@ -42,9 +42,11 @@ const EMPTY = {
   bestContactEmail: "",
   bestContactPhone: "",
   additionalNotes: "",
+  // Media
+  mediaUploadNotes: "",
 };
 
-const STEP1_REQUIRED = ["businessName", "websiteUrl", "mainPhone", "serviceArea", "mainServices"];
+const STEP1_REQUIRED = ["businessName", "websiteUrl", "mainPhone", "serviceArea", "mainServices", "preferredAdBudget"];
 
 function Field({ label, name, placeholder, required, value, onChange, multiline, hint, type }) {
   return (
@@ -83,10 +85,13 @@ function Field({ label, name, placeholder, required, value, onChange, multiline,
   );
 }
 
-function SelectField({ label, name, value, onChange, options, hint }) {
+function SelectField({ label, name, value, onChange, options, hint, required }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>
+        {label}
+        {required && <span style={{ color: "#ef4444", marginLeft: 3 }}>*</span>}
+      </label>
       {hint && <div style={{ fontSize: 12, color: TEXT_SOFT, marginBottom: 5 }}>{hint}</div>}
       <select
         value={value}
@@ -121,8 +126,64 @@ export default function PremiumIntake() {
   const [authorized, setAuthorized] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [uploadingFiles, setUploadingFiles] = useState([]);
+  const [uploadError, setUploadError] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFileChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    setUploadError("");
+
+    const MAX_SIZE = 35 * 1024 * 1024;
+    const ALLOWED = ["image/png", "image/jpeg", "image/webp", "video/mp4", "video/quicktime", "video/webm"];
+
+    for (const file of files) {
+      if (!ALLOWED.includes(file.type)) {
+        setUploadError(`"${file.name}" is not a supported type. Allowed: PNG, JPG, WEBP, MP4, MOV, WEBM.`);
+        continue;
+      }
+      if (file.size > MAX_SIZE) {
+        setUploadError(`"${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is 35 MB.`);
+        continue;
+      }
+      if (uploadedFiles.length >= 8) {
+        setUploadError("Maximum 8 files allowed.");
+        break;
+      }
+
+      const pendingId = `pending-${Date.now()}-${Math.random()}`;
+      setUploadingFiles((p) => [...p, { id: pendingId, name: file.name }]);
+
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onerror = () => reject(new Error("Could not read file."));
+          reader.readAsDataURL(file);
+        });
+
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        const headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+        const body = JSON.stringify({ dataUrl, originalName: file.name, ...(intakeToken ? { token: intakeToken } : {}) });
+        const r = await fetch("/api/intake-media/upload", { method: "POST", credentials: "include", headers, body });
+        const j = await r.json().catch(() => ({}));
+        if (!j.ok) throw new Error(j.error || "Upload failed.");
+        setUploadedFiles((p) => [...p, j.file]);
+      } catch (err) {
+        setUploadError(`"${file.name}": ${err.message}`);
+      } finally {
+        setUploadingFiles((p) => p.filter((x) => x.id !== pendingId));
+      }
+    }
+  };
+
+  const removeUploadedFile = (filename) => {
+    setUploadedFiles((p) => p.filter((f) => f.filename !== filename));
+  };
 
   const step1Valid = STEP1_REQUIRED.every((k) => String(form[k] || "").trim());
   const step3Valid = String(form.bestContactName || "").trim() && String(form.bestContactEmail || "").trim() && authorized;
@@ -135,11 +196,13 @@ export default function PremiumIntake() {
     try {
       let url, headers, body;
 
+      const formWithMedia = { ...form, mediaUploadNotes: form.mediaUploadNotes };
+
       if (isTokenMode) {
         // Customer-facing public link — no session needed
         url = "/api/premium-intake/token";
         headers = { "Content-Type": "application/json" };
-        body = JSON.stringify({ ...form, token: intakeToken });
+        body = JSON.stringify({ ...formWithMedia, token: intakeToken });
       } else {
         const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
         headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
@@ -147,7 +210,7 @@ export default function PremiumIntake() {
         url = adminClientId
           ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/premium-intake`
           : "/api/premium-intake";
-        body = JSON.stringify(form);
+        body = JSON.stringify(formWithMedia);
       }
 
       const r = await fetch(url, { method: "POST", credentials: "include", headers, body });
@@ -235,7 +298,21 @@ export default function PremiumIntake() {
               <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_SOFT, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 14 }}>Offers & Budget</div>
               <Field label="Current Special or Offer" value={form.currentSpecialOrOffer} onChange={set("currentSpecialOrOffer")} placeholder="e.g. $89 AC tune-up, free estimate on installs" multiline />
               <Field label="Seasonal Specials / Discounts / Financing / Maintenance Plans" value={form.seasonalSpecials} onChange={set("seasonalSpecials")} placeholder="e.g. Spring tune-up special, 0% financing, annual maintenance plans" multiline hint="Include any limited-time offers, recurring deals, or membership programs." />
-              <Field label="Preferred Monthly Ad Budget" value={form.preferredAdBudget} onChange={set("preferredAdBudget")} placeholder="e.g. $300/month" hint="Ad spend is separate from Smartemark's fee." />
+              <SelectField
+                label="Preferred Monthly Ad Budget"
+                value={form.preferredAdBudget}
+                onChange={set("preferredAdBudget")}
+                required
+                hint="Smaller budgets can still work, but they usually take longer to gather data. For most local campaigns, $300–$600/month gives the campaign more room to learn. Ad spend is separate from Smartemark's fee."
+                options={[
+                  "Not sure yet — I'd like a recommendation",
+                  "$150–$300/month — starter test",
+                  "$300–$600/month — recommended starting range",
+                  "$600–$1,000/month — more aggressive growth",
+                  "$1,000+/month — aggressive scaling",
+                  "Other / custom",
+                ]}
+              />
               <Field label="Call Forwarding Number" value={form.callForwardingNumber} onChange={set("callForwardingNumber")} placeholder="e.g. (832) 555-0100" hint="The real phone number ad calls should connect to." />
             </div>
 
@@ -297,6 +374,75 @@ export default function PremiumIntake() {
                 ]}
                 hint="We need to install a small tracking script on your site."
               />
+            </div>
+
+            {/* Media upload */}
+            <div style={{ background: "white", border: `1px solid ${BORDER}`, borderRadius: 14, padding: "22px 24px", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_SOFT, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Photos / Videos for Your Ads</div>
+              <div style={{ fontSize: 13, color: TEXT_SOFT, lineHeight: 1.6, marginBottom: 14 }}>
+                If you have photos or videos you'd like us to use in your ads, upload them here. This could include team photos, trucks, equipment, before/after work, job-site clips, product/service photos, or anything that represents your business.
+              </div>
+
+              {/* File list */}
+              {uploadedFiles.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                  {uploadedFiles.map((f) => (
+                    <div key={f.filename} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, gap: 8 }}>
+                      <div style={{ overflow: "hidden" }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#065f46", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.originalName}</div>
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>{f.mimeType} · {(f.size / 1024 / 1024).toFixed(1)} MB</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeUploadedFile(f.filename)}
+                        style={{ background: "none", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 16, lineHeight: 1, flexShrink: 0, padding: "0 4px" }}
+                        title="Remove"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* In-progress uploads */}
+              {uploadingFiles.map((u) => (
+                <div key={u.id} style={{ fontSize: 13, color: TEXT_SOFT, padding: "6px 12px", marginBottom: 6, background: "#fafafa", border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+                  Uploading {u.name}…
+                </div>
+              ))}
+
+              {uploadError && (
+                <div style={{ padding: "9px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#b91c1c", fontSize: 13, marginBottom: 10 }}>
+                  {uploadError}
+                </div>
+              )}
+
+              {uploadedFiles.length < 8 && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 18px", background: "#f5f3ff", color: PURPLE, border: `1px solid rgba(93,89,234,0.3)`, borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: FONT }}>
+                  + Add Photos / Videos
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm"
+                    onChange={handleFileChange}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              )}
+              <div style={{ marginTop: 6, fontSize: 11, color: TEXT_SOFT }}>
+                Up to 8 files · max 35 MB each · PNG, JPG, WEBP, MP4, MOV, WEBM
+              </div>
+
+              {/* Notes about files */}
+              <div style={{ marginTop: 14 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Notes about these files</label>
+                <textarea
+                  value={form.mediaUploadNotes}
+                  onChange={set("mediaUploadNotes")}
+                  placeholder="Example: Use the truck photo first, avoid the older logo, video shows our AC install work, etc."
+                  rows={2}
+                  style={{ width: "100%", padding: "10px 12px", border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: 14, fontFamily: FONT, color: TEXT, outline: "none", background: "#fafafa", resize: "vertical", boxSizing: "border-box" }}
+                />
+              </div>
             </div>
 
             <button type="submit" style={{
