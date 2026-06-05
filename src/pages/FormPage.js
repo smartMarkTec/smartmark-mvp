@@ -890,8 +890,14 @@ export default function FormPage() {
   const [imageDataUrls, setImageDataUrls] = useState([]); // 2 items max
   const [imgFail, setImgFail] = useState({}); // {0:true,1:true}
 
-  // Video removed: force image-only
-  const [mediaType, setMediaType] = useState("image");
+  const [mediaType, setMediaType] = useState("image"); // "image" | "video"
+
+  // Optional user-uploaded video ad
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState(""); // server URL after upload
+  const [uploadedVideoMeta, setUploadedVideoMeta] = useState(null); // { originalName, mimeType, size }
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoUploadError, setVideoUploadError] = useState("");
+  const videoInputRef = React.useRef(null);
 
   const [result, setResult] = useState(null);
   const [imageUrls, setImageUrls] = useState([]);
@@ -2083,6 +2089,60 @@ async function generatePosterBPair(runToken) {
     }
   }
 
+  async function handleVideoSelect(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const ALLOWED = ["video/mp4", "video/quicktime", "video/webm"];
+    if (!ALLOWED.includes(file.type)) {
+      setVideoUploadError("Unsupported file type. Please use MP4, MOV, or WEBM.");
+      return;
+    }
+    const MAX_SIZE = 35 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      setVideoUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 35 MB.`);
+      return;
+    }
+    setVideoUploadError("");
+    setVideoUploading(true);
+    setUploadedVideoUrl("");
+    setUploadedVideoMeta(null);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        reader.onerror = () => reject(new Error("Could not read file."));
+        reader.readAsDataURL(file);
+      });
+      const r = await fetch(`${API_BASE}/upload-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, originalName: file.name }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.error || "Video upload failed.");
+      setUploadedVideoUrl(j.videoUrl);
+      setUploadedVideoMeta({ originalName: j.originalName, mimeType: j.mimeType, size: j.size });
+      setMediaType("video");
+      setHasGenerated(true); // unlock Continue
+    } catch (err) {
+      setVideoUploadError(err.message || "Video upload failed. Please try again.");
+      setUploadedVideoUrl("");
+      setMediaType("image");
+    } finally {
+      setVideoUploading(false);
+    }
+  }
+
+  function handleRemoveVideo() {
+    setUploadedVideoUrl("");
+    setUploadedVideoMeta(null);
+    setVideoUploadError("");
+    setMediaType("image");
+    // Restore hasGenerated based on whether images exist
+    if (!imageUrls.length) setHasGenerated(false);
+  }
+
   async function handleRegenerateImage() {
     if (!canRunImageGen()) {
       const msg = quotaMessage();
@@ -2803,6 +2863,62 @@ async function generatePosterBPair(runToken) {
                 return `Generations left today: ${remaining}/${regenLimit} (resets in ~${resetStr})`;
               })()}
             </div>
+
+            {/* ── Optional video upload ─────────────────────────────────────── */}
+            <div style={{ marginTop: 14, borderTop: "1px solid #e8e4f0", paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#7b74c0", marginBottom: 4 }}>
+                Upload your own video ad <span style={{ fontWeight: 400, color: "#9990b8" }}>(optional)</span>
+              </div>
+              <div style={{ fontSize: 12, color: "#9990b8", marginBottom: 8, lineHeight: 1.5 }}>
+                If you already have a video you want to use in the ad, upload it here. We'll use this video as the campaign creative instead of the generated image.
+              </div>
+
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/webm"
+                style={{ display: "none" }}
+                onChange={handleVideoSelect}
+              />
+
+              {uploadedVideoUrl ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: mediaType === "video" ? "#f0fdf4" : "#fafafa", border: mediaType === "video" ? "1px solid #bbf7d0" : "1px solid #ddd8ed", borderRadius: 8 }}>
+                  <span style={{ fontSize: 18 }}>🎬</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: mediaType === "video" ? "#065f46" : "#5a5a6e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {uploadedVideoMeta?.originalName || "video.mp4"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9990b8" }}>
+                      {uploadedVideoMeta?.mimeType} · {uploadedVideoMeta?.size ? (uploadedVideoMeta.size / 1024 / 1024).toFixed(1) + " MB" : ""}
+                      {mediaType === "video" && <span style={{ marginLeft: 6, color: "#059669", fontWeight: 700 }}>● Selected as creative</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => videoInputRef.current?.click()} style={{ background: "none", border: "none", color: "#7b74c0", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "2px 6px" }}>Replace</button>
+                  <button onClick={handleRemoveVideo} style={{ background: "none", border: "none", color: "#a09ab8", cursor: "pointer", fontSize: 15, padding: "0 4px", lineHeight: 1 }}>×</button>
+                </div>
+              ) : videoUploading ? (
+                <div style={{ fontSize: 12, color: "#7b74c0", padding: "8px 12px", background: "#f5f3ff", border: "1px solid #ddd8ed", borderRadius: 8 }}>
+                  Uploading video…
+                </div>
+              ) : (
+                <button
+                  onClick={() => videoInputRef.current?.click()}
+                  style={{ background: "none", border: "1.5px dashed #c8c2d8", borderRadius: 7, padding: "6px 14px", fontSize: 12, color: "#9990b8", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <span style={{ fontSize: 15 }}>🎬</span> Upload video ad
+                </button>
+              )}
+
+              {videoUploadError && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px" }}>
+                  {videoUploadError}
+                </div>
+              )}
+
+              <div style={{ marginTop: 5, fontSize: 11, color: "#b8b4cc" }}>
+                MP4, MOV, or WEBM · max 35 MB
+              </div>
+            </div>
           </div>
 
           <div
@@ -3017,7 +3133,9 @@ async function generatePosterBPair(runToken) {
   transform: "translateY(0)",
 }}
           onClick={() => {
-            if (!hasGenerated) {
+            const isVideoMode = mediaType === "video" && !!uploadedVideoUrl;
+
+            if (!hasGenerated && !isVideoMode) {
               alert("Generate your previews first. Type 'yes' in the chat.");
               return;
             }
@@ -3036,6 +3154,38 @@ async function generatePosterBPair(runToken) {
             const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);
 
+            if (isVideoMode) {
+              // ── Video creative path ─────────────────────────────────────────
+              try { localStorage.setItem("sm_last_website_url_v1", String(answers?.url || "").trim()); } catch {}
+              try {
+                localStorage.setItem("smartmark_media_selection", "video");
+                localStorage.setItem("smartmark_last_video_url", uploadedVideoUrl);
+                localStorage.setItem("smartmark_last_video_meta", JSON.stringify(uploadedVideoMeta || {}));
+                localStorage.removeItem("smartmark_last_image_url");
+                localStorage.removeItem("smartmark_last_fb_video_id");
+              } catch {}
+              navigate("/setup", {
+                state: {
+                  ctxKey,
+                  mediaType: "video",
+                  mediaSelection: "video",
+                  videoUrl: uploadedVideoUrl,
+                  videoMeta: uploadedVideoMeta || {},
+                  imageUrls: [],
+                  headline: mergedHeadline,
+                  body: mergedBody,
+                  imageOverlayCTA: mergedCTA,
+                  answers,
+                  ...(adminClientId ? {
+                    adminClientId,
+                    adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
+                  } : {}),
+                },
+              });
+              return;
+            }
+
+            // ── Image creative path (existing) ─────────────────────────────────
             const draftForSetup = {
   ctxKey,
   images: imgA,

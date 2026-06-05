@@ -194,6 +194,58 @@ app.post("/api/media/upload", express.json({ limit: "25mb" }), (req, res) => {
   }
 });
 
+/* ----------------------- VIDEO AD UPLOAD (dataURL -> /api/media/<file>) ----------------------- */
+
+const ALLOWED_VIDEO_MIME = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const VIDEO_EXT_MAP = { "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm" };
+const MAX_VIDEO_BYTES = 35 * 1024 * 1024; // 35 MB binary (fits under 50 MB base64 JSON limit)
+
+function parseVideoDataUrl(dataUrl) {
+  const s = String(dataUrl || "").trim();
+  const m = s.match(/^data:([^;]+);base64,([\s\S]+)$/);
+  if (!m) return null;
+  const mime = m[1].toLowerCase().trim();
+  if (!ALLOWED_VIDEO_MIME.has(mime)) return null;
+  const ext = VIDEO_EXT_MAP[mime];
+  if (!ext) return null;
+  const buffer = Buffer.from(m[2], "base64");
+  return { mime, buffer, ext };
+}
+
+app.post("/api/upload-video-ad", express.json({ limit: "50mb" }), (req, res) => {
+  try {
+    const { dataUrl, originalName } = req.body || {};
+    if (!dataUrl) return res.status(400).json({ ok: false, error: "No video data provided." });
+
+    const parsed = parseVideoDataUrl(dataUrl);
+    if (!parsed) {
+      return res.status(400).json({ ok: false, error: "Unsupported file type. Allowed: MP4, MOV, WEBM." });
+    }
+    if (parsed.buffer.length > MAX_VIDEO_BYTES) {
+      return res.status(400).json({ ok: false, error: `File too large (${(parsed.buffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is 35 MB.` });
+    }
+
+    const id = crypto.randomBytes(10).toString("hex");
+    const filename = `video-ad-${Date.now()}-${id}.${parsed.ext}`;
+    const outPath = path.join(generatedPath, filename);
+    fs.writeFileSync(outPath, parsed.buffer);
+
+    const videoUrl = `/api/media/${filename}`;
+    console.log("[upload-video-ad] saved:", { filename, size: parsed.buffer.length, mime: parsed.mime });
+    return res.json({
+      ok: true,
+      videoUrl,
+      filename,
+      originalName: String(originalName || filename).slice(0, 200),
+      mimeType: parsed.mime,
+      size: parsed.buffer.length,
+    });
+  } catch (e) {
+    console.error("[upload-video-ad] error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Upload failed." });
+  }
+});
+
 app.get("/api/media/:filename", async (req, res) => {
   try {
     const raw = String(req.params.filename || "").trim();

@@ -3095,6 +3095,10 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     ? state.urls
     : [];
 
+  const navVideoUrl = String(state.videoUrl || "").trim();
+  const navVideoMeta = state.videoMeta || null;
+  const isVideoCreative = (String(state.mediaType || state.mediaSelection || "").toLowerCase() === "video") && !!navVideoUrl;
+
   const headline = state.headline || "";
   const body = state.body || "";
   const answers = state.answers || {};
@@ -5179,57 +5183,61 @@ const forceHostOnRenderMedia = async (candidates) => {
   return final.filter(isRenderMediaUrl).slice(0, 2);
 };
 
-let candidateImgs = [];
+let filteredImages = [];
 
-// Draft images take exclusive priority: if the user has a draft, never blend in
-// a different campaign's saved creatives — that's what causes campaign 1 to leak
-// into campaign 2. The global backups (fetchable/cache/imageDrafts) are also
-// gated here because they're not campaign-specific and can carry stale images.
-const hasDraftImages = Array.isArray(draftCreatives?.images) && draftCreatives.images.length > 0;
+if (!isVideoCreative) {
+  let candidateImgs = [];
 
-if (hasDraftImages) {
-  candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
-  if (Array.isArray(navImageUrls) && navImageUrls.length) {
-    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
-  }
-} else {
-  // No draft → fall back to saved creatives for the selected campaign (re-launch path)
-  if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+  // Draft images take exclusive priority: if the user has a draft, never blend in
+  // a different campaign's saved creatives — that's what causes campaign 1 to leak
+  // into campaign 2. The global backups (fetchable/cache/imageDrafts) are also
+  // gated here because they're not campaign-specific and can carry stale images.
+  const hasDraftImages = Array.isArray(draftCreatives?.images) && draftCreatives.images.length > 0;
+
+  if (hasDraftImages) {
+    candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
+    if (Array.isArray(navImageUrls) && navImageUrls.length) {
+      candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+    }
+  } else {
+    // No draft → fall back to saved creatives for the selected campaign (re-launch path)
+    if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+      try {
+        const saved = getSavedCreatives(selectedCampaignId);
+        if (Array.isArray(saved?.images)) {
+          candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+        }
+      } catch {}
+    }
+    if (Array.isArray(navImageUrls) && navImageUrls.length) {
+      candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+    }
     try {
-      const saved = getSavedCreatives(selectedCampaignId);
-      if (Array.isArray(saved?.images)) {
-        candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
-      }
+      candidateImgs = candidateImgs
+        .concat(loadFetchableImagesBackup(resolvedUser) || [])
+        .concat(getCachedFetchableImages(resolvedUser) || []);
+    } catch {}
+    try {
+      candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
     } catch {}
   }
-  if (Array.isArray(navImageUrls) && navImageUrls.length) {
-    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+
+  filteredImages = await forceHostOnRenderMedia(candidateImgs);
+
+  if (!filteredImages.length) {
+    try {
+      filteredImages = await forceHostOnRenderMedia(draftCreatives?.images || []);
+    } catch {}
   }
-  try {
-    candidateImgs = candidateImgs
-      .concat(loadFetchableImagesBackup(resolvedUser) || [])
-      .concat(getCachedFetchableImages(resolvedUser) || []);
-  } catch {}
-  try {
-    candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
-  } catch {}
-}
 
-let filteredImages = await forceHostOnRenderMedia(candidateImgs);
+  if (!filteredImages.length) {
+    throw new Error("No launchable images. Please regenerate creatives (images must be hosted on Render /api/media).");
+  }
 
-if (!filteredImages.length) {
   try {
-    filteredImages = await forceHostOnRenderMedia(draftCreatives?.images || []);
+    saveFetchableImagesBackup(resolvedUser, filteredImages);
   } catch {}
 }
-
-if (!filteredImages.length) {
-  throw new Error("No launchable images. Please regenerate creatives (images must be hosted on Render /api/media).");
-}
-
-try {
-  saveFetchableImagesBackup(resolvedUser, filteredImages);
-} catch {}
 
 const payload = {
   form: {
@@ -5248,10 +5256,11 @@ const payload = {
   // Merge launchPhone back into answers so backend always has it, even when route state was lost
   answers: { ...(answers || {}), phone: launchPhone || (answers?.phone || '') },
 
-  mediaSelection: "image",
-  imageVariants: filteredImages,
-  imageUrls: filteredImages,
-  images: filteredImages,
+  mediaSelection: isVideoCreative ? "video" : "image",
+  mediaType: isVideoCreative ? "video" : "image",
+  ...(isVideoCreative
+    ? { videoUrl: navVideoUrl, imageVariants: [], imageUrls: [], images: [] }
+    : { imageVariants: filteredImages, imageUrls: filteredImages, images: filteredImages }),
 
   flightStart: startISO,
   flightEnd: endISO,
@@ -5261,7 +5270,7 @@ const payload = {
   includeInstagram: !isNoWebsite && !websiteBlank && includeInstagram,
 
   overrideCountPerType: {
-    images: Math.min(2, filteredImages.length),
+    images: isVideoCreative ? 0 : Math.min(2, filteredImages.length),
   },
 };
 
@@ -5536,7 +5545,9 @@ const getSavedCreatives = (campaignId) => {
   if (runtime) {
     return {
       images: (runtime.images || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2),
-      mediaSelection: "image",
+      mediaType: runtime.mediaType || "image",
+      mediaSelection: runtime.mediaSelection || "image",
+      videos: runtime.videos || [],
       meta: {
         headline: String(runtime?.meta?.headline || "").trim(),
         body: String(runtime?.meta?.body || "").trim(),
@@ -5546,7 +5557,7 @@ const getSavedCreatives = (campaignId) => {
   }
 
   if (!selectedAccount) {
-    return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+    return { images: [], mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
   }
 
   const acctKey = String(selectedAccount || "").replace(/^act_/, "");
@@ -5557,7 +5568,7 @@ const getSavedCreatives = (campaignId) => {
 
   const saved = map[campaignId] || null;
   if (!saved) {
-    return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+    return { images: [], mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
   }
 
   const images = (saved.images || [])
@@ -5567,7 +5578,9 @@ const getSavedCreatives = (campaignId) => {
 
   return {
     images,
-    mediaSelection: "image",
+    mediaType: saved.mediaType || "image",
+    mediaSelection: saved.mediaSelection || "image",
+    videos: saved.videos || [],
     meta: {
       headline: String(saved?.meta?.headline || "").trim(),
       body: String(saved?.meta?.body || "").trim(),
@@ -5584,10 +5597,12 @@ const getSavedCreatives = (campaignId) => {
       : null;
 
 const selectedCampaignCreatives =
-  selectedCampaignId === "__DRAFT__" && hasDraft
+  selectedCampaignId === "__DRAFT__" && (hasDraft || isVideoCreative)
     ? {
         images: draftCreatives?.images || [],
-        mediaSelection: "image",
+        mediaType: isVideoCreative ? "video" : "image",
+        mediaSelection: isVideoCreative ? "video" : "image",
+        videos: isVideoCreative ? [navVideoUrl] : [],
         meta: {
           headline: String(previewCopy?.headline || headline || "").trim(),
           body: String(previewCopy?.body || body || "").trim(),
@@ -5596,7 +5611,7 @@ const selectedCampaignCreatives =
       }
     : selectedCampaignId && selectedCampaignId !== "__DRAFT__"
     ? getSavedCreatives(selectedCampaignId)
-    : { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+    : { images: [], mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
 
    const selectedOptimizerCreativeState =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
@@ -6424,6 +6439,10 @@ const selectedCampaignCreatives =
               selectedOptimizerState?.currentHeadline ||
               null;
             const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
+            const creativeIsVideo = (selectedCampaignCreatives?.mediaType || selectedCampaignCreatives?.mediaSelection || "image") === "video";
+            const creativeVideoUrl = creativeIsVideo
+              ? (isDraftView ? navVideoUrl : String(selectedCampaignCreatives?.videos?.[0] || "").trim())
+              : "";
             const pending =
               selectedCampaignId !== "__DRAFT__"
                 ? optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null
@@ -6529,7 +6548,45 @@ const selectedCampaignCreatives =
                   </div>
                 </div>
 
-                {images.length ? (
+                {creativeIsVideo && creativeVideoUrl ? (
+                  <div
+                    style={{
+                      border: "1px solid rgba(93,89,234,0.12)",
+                      borderRadius: 18,
+                      overflow: "hidden",
+                      background: "#f8fafc",
+                      boxShadow: "0 4px 16px rgba(91,87,232,0.07)",
+                    }}
+                  >
+                    <div style={{ background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <video
+                        src={toAbsoluteMedia(creativeVideoUrl)}
+                        controls
+                        style={{ width: "100%", maxHeight: 340, display: "block", background: "#0f172a" }}
+                      />
+                    </div>
+                    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ background: "#eef2ff", color: "#4f46e5", fontWeight: 800, fontSize: 11, borderRadius: 6, padding: "3px 8px", textTransform: "uppercase", letterSpacing: 0.4 }}>Video Creative</span>
+                        {navVideoMeta?.originalName && (
+                          <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>{navVideoMeta.originalName}</span>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Primary Copy</div>
+                        <div style={{ color: "#111827", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+                          {String(aiCurrentPrimaryText || creativeMeta?.body || previewCopy?.body || body || "No copy available yet.").trim()}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Headline</div>
+                        <div style={{ color: "#111827", fontWeight: 800, fontSize: 14, lineHeight: 1.5 }}>
+                          {String(aiCurrentHeadline || creativeMeta?.headline || previewCopy?.headline || headline || "No headline available yet.").trim()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : images.length ? (
                   <div
                     style={{
                       display: "grid",

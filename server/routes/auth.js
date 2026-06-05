@@ -2913,7 +2913,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       flightEnd = null,
       flightHours = null,
       overrideCountPerType = null,
+      mediaType: reqMediaType = 'image',
+      mediaSelection: reqMediaSelection = 'image',
+      videoUrl: reqVideoUrl = '',
     } = req.body;
+
+    const isVideoLaunch = (String(reqMediaType || reqMediaSelection || '').trim().toLowerCase() === 'video') && !!String(reqVideoUrl || '').trim();
 
     const pageIdFinal = await resolvePageId(pageId);
     if (!pageIdFinal) {
@@ -3323,23 +3328,25 @@ const plan = policy.decideVariantPlan({
 
 const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariants);
 
-    if (needImg > 0 && imageVariants.length < needImg) {
+    if (!isVideoLaunch && needImg > 0 && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
 
     const parsedVariants = [];
-    for (let i = 0; i < needImg; i++) {
-      const v = parseImageVariant(imageVariants[i]);
-      const normalized = normalizeImageUrl(v.url);
-      const inline = v.bytes ? extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim() : null;
+    if (!isVideoLaunch) {
+      for (let i = 0; i < needImg; i++) {
+        const v = parseImageVariant(imageVariants[i]);
+        const normalized = normalizeImageUrl(v.url);
+        const inline = v.bytes ? extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim() : null;
 
-      if (!inline && !normalized) {
-        return res.status(400).json({
-          error: `Invalid image URL for variant ${i + 1}. Do NOT send blob: URLs.`,
-          badValue: imageVariants[i],
-        });
+        if (!inline && !normalized) {
+          return res.status(400).json({
+            error: `Invalid image URL for variant ${i + 1}. Do NOT send blob: URLs.`,
+            badValue: imageVariants[i],
+          });
+        }
+        parsedVariants.push({ url: normalized || v.url, bytes: inline });
       }
-      parsedVariants.push({ url: normalized || v.url, bytes: inline });
     }
 
     const now = new Date();
@@ -3417,7 +3424,7 @@ const adsetTargeting = includeInstagram
 //   • 'PHONE_CALL' is incompatible with optimization_goal 'LINK_CLICKS'
 // Omitting it avoids both invalid-parameter failures across all account configurations.
 const adsetPayload = {
-  name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+  name: `${campaignName} (${isVideoLaunch ? 'Video' : 'Image'}) - ${new Date().toISOString()}`,
   campaign_id: campaignId,
   daily_budget: perAdsetBudgetCents,
   billing_event: 'IMPRESSIONS',
@@ -3450,91 +3457,126 @@ const { data: adsetData } = await axios.post(
 
     const adIds = [];
     const usedImages = [];
+    const usedVideos = [];
+    const usedFbVideoIds = [];
 
-    for (let i = 0; i < needImg; i++) {
-      const variant = parsedVariants[i];
-      const hash = await uploadImage(variant, i);
+    const creativeMessage = String(form.adCopy || adCopy || '').trim();
+    const _adCopyFirstSegment = String(adCopy || '').trim().split('\n\n')[0].split('\n')[0].trim();
+    const _adCopyHeadline = _adCopyFirstSegment.split(/\s+/).filter(Boolean).length <= 10 ? _adCopyFirstSegment : '';
+    const creativeTitle = String(form.headline || form.adHeadline || _adCopyHeadline || 'Learn More').trim();
+    const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
+    const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
+    const creativeLinkDataLink = destinationUrl;
 
-      console.log('[LAUNCH][creative create]', {
-  accountId,
-  campaignName,
-  pageIdFinal,
-  destinationUrl,
-  hash,
-  message: form.adCopy || adCopy || '',
-  ctaType: isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE',
-  ctaLink: isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl,
-  isNoWebsiteLaunch,
-  variantIndex: i + 1,
-});
+    if (isVideoLaunch) {
+      const publicVideoUrl = absolutePublicUrl(String(reqVideoUrl).trim());
+      console.log('[LAUNCH][video upload]', { accountId, publicVideoUrl, campaignName });
 
-     const creativeMessage = String(form.adCopy || adCopy || '').trim();
-// Prefer the explicit headline field from the form state. If that is absent, use the first
-// paragraph of the top-level adCopy field, which the frontend builds as
-// [finalHeadline, finalBody].filter(Boolean).join("\n\n") — so the first segment IS finalHeadline.
-// Only accept it as a headline if it is ≤10 words (guards against a body paragraph sneaking in).
-// Campaign name is NEVER a valid ad headline fallback.
-const _adCopyFirstSegment = String(adCopy || '').trim().split('\n\n')[0].split('\n')[0].trim();
-const _adCopyHeadline = _adCopyFirstSegment.split(/\s+/).filter(Boolean).length <= 10 ? _adCopyFirstSegment : '';
-const creativeTitle = String(form.headline || form.adHeadline || _adCopyHeadline || 'Learn More').trim();
+      const videoUpRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/advideos`,
+        { file_url: publicVideoUrl, title: campaignName },
+        { params: mkParams() }
+      );
+      const metaVideoId = videoUpRes.data?.id;
+      if (!metaVideoId) {
+        throw new Error('Meta video upload failed — no video ID returned. Check that the video URL is publicly accessible.');
+      }
+      console.log('[LAUNCH][video uploaded]', { metaVideoId });
 
-// No-website: CALL_NOW CTA with tel: phone link.
-// link_data.link must be a real external HTTPS URL even for call ads — Meta rejects facebook.com URLs
-// and tel: URLs in this field. destinationUrl already falls back to 'https://smartemark.com' for
-// no-website users, which is a valid external URL Meta will accept.
-// Website: LEARN_MORE with the destination URL as usual.
-const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
-const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
-const creativeLinkDataLink = destinationUrl; // same for both paths — always a real HTTPS URL
-
-const creativePayload = {
-  name: `${campaignName} (Image v${i + 1})`,
-  object_story_spec: {
-    page_id: pageIdFinal,
-    link_data: {
-      link: creativeLinkDataLink,
-      message: creativeMessage,
-      name: creativeTitle,
-      image_hash: hash,
-      call_to_action: {
-        type: creativeCtaType,
-        value: {
-          link: creativeCtaLink,
+      const videoCreativePayload = {
+        name: `${campaignName} (Video)`,
+        object_story_spec: {
+          page_id: pageIdFinal,
+          video_data: {
+            video_id: metaVideoId,
+            title: creativeTitle,
+            message: creativeMessage,
+            call_to_action: {
+              type: creativeCtaType,
+              value: { link: creativeCtaLink },
+            },
+          },
         },
-      },
-    },
-  },
-};
+      };
 
-console.log('[LAUNCH][creative payload]', JSON.stringify(creativePayload));
+      console.log('[LAUNCH][video creative payload]', JSON.stringify(videoCreativePayload));
 
-const cr = await axios.post(
-  `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
-  creativePayload,
-  { params: mkParams() }
-);
+      const vcr = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
+        videoCreativePayload,
+        { params: mkParams() }
+      );
 
-      console.log('[LAUNCH][ad create]', {
-  accountId,
-  adsetId: imageAdSetId,
-  creativeId: cr.data.id,
-  campaignName,
-  variantIndex: i + 1,
-});
-
-      const ad = await axios.post(
+      const vad = await axios.post(
         `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
         {
-          name: `${campaignName} (Image v${i + 1})`,
+          name: `${campaignName} (Video)`,
           adset_id: imageAdSetId,
-          creative: { creative_id: cr.data.id },
+          creative: { creative_id: vcr.data.id },
           status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
         },
         { params: mkParams() }
       );
 
-      adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
-      usedImages.push(variant.bytes ? '(inline_base64)' : String(variant.url || ''));
+      adIds.push(vad.data?.id || 'VALIDATION_ONLY_VIDEO');
+      usedVideos.push(String(reqVideoUrl).trim());
+      usedFbVideoIds.push(metaVideoId);
+    } else {
+      for (let i = 0; i < needImg; i++) {
+        const variant = parsedVariants[i];
+        const hash = await uploadImage(variant, i);
+
+        console.log('[LAUNCH][creative create]', {
+          accountId, campaignName, pageIdFinal, destinationUrl, hash,
+          message: form.adCopy || adCopy || '',
+          ctaType: isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE',
+          ctaLink: isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl,
+          isNoWebsiteLaunch, variantIndex: i + 1,
+        });
+
+        const creativePayload = {
+          name: `${campaignName} (Image v${i + 1})`,
+          object_story_spec: {
+            page_id: pageIdFinal,
+            link_data: {
+              link: creativeLinkDataLink,
+              message: creativeMessage,
+              name: creativeTitle,
+              image_hash: hash,
+              call_to_action: {
+                type: creativeCtaType,
+                value: { link: creativeCtaLink },
+              },
+            },
+          },
+        };
+
+        console.log('[LAUNCH][creative payload]', JSON.stringify(creativePayload));
+
+        const cr = await axios.post(
+          `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
+          creativePayload,
+          { params: mkParams() }
+        );
+
+        console.log('[LAUNCH][ad create]', {
+          accountId, adsetId: imageAdSetId, creativeId: cr.data.id, campaignName, variantIndex: i + 1,
+        });
+
+        const ad = await axios.post(
+          `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
+          {
+            name: `${campaignName} (Image v${i + 1})`,
+            adset_id: imageAdSetId,
+            creative: { creative_id: cr.data.id },
+            status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+          },
+          { params: mkParams() }
+        );
+
+        adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
+        usedImages.push(variant.bytes ? '(inline_base64)' : String(variant.url || ''));
+      }
     }
 
     const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
@@ -3553,10 +3595,11 @@ const cr = await axios.post(
       pageId: String(pageIdFinal || ''),
       name: campaignName,
       status: campaignStatus,
-      mediaSelection: 'image',
+      mediaSelection: isVideoLaunch ? 'video' : 'image',
+      mediaType: isVideoLaunch ? 'video' : 'image',
       images: usedImages,
-      videos: [],
-      fbVideoIds: [],
+      videos: usedVideos,
+      fbVideoIds: usedFbVideoIds,
       // launchComplete=true is proof that campaign, adset, and all ads were fully created.
       // This write only happens AFTER every Meta object succeeds — it is the success marker.
       launchComplete: true,
