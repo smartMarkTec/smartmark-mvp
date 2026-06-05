@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { trackEvent } from "../analytics/gaEvents";
+import { trackLead } from "../utils/metaPixel";
 
 const BOOKING_URL = "https://cal.com/william-knowles-wxottg/30min";
 
@@ -300,6 +301,7 @@ const Pricing = () => {
               href={BOOKING_URL}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={trackLead}
               style={{
                 padding: "8px 16px",
                 fontSize: 14,

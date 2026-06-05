@@ -7306,8 +7306,8 @@ const selectedCampaignCreatives =
                   <div
                     style={{
                       marginTop: 12,
-                      background: "linear-gradient(145deg, #f5f3ff 0%, #ede9fe 100%)",
-                      border: "1px solid rgba(109,40,217,0.14)",
+                      background: "#fff",
+                      border: "1px solid #e5e7eb",
                       borderRadius: 14,
                       padding: "14px 16px",
                     }}
@@ -7316,31 +7316,27 @@ const selectedCampaignCreatives =
                       style={{
                         fontSize: 10,
                         fontWeight: 700,
-                        color: "#7c3aed",
+                        color: "#6b7280",
                         letterSpacing: "0.07em",
                         textTransform: "uppercase",
                         marginBottom: 10,
                       }}
                     >
-                      Call Tracking
+                      Tracking Setup
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 8 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {[
-                        { label: "Status",            value: "Not set up" },
-                        { label: "Tracked Calls",     value: "0" },
-                        { label: "Tracking Number",   value: "Not assigned yet" },
-                        { label: "Forwarding Number", value: "Not added yet" },
+                        { label: "Meta Pixel",               value: "Installed",          ok: true  },
+                        { label: "PageView tracking",        value: "Active",              ok: true  },
+                        { label: "Lead event",               value: "Book a Call clicks",  ok: true  },
+                        { label: "Confirmed booking event",  value: "Not active yet",      ok: false },
+                        { label: "Call tracking",            value: "Not set up",          ok: false },
                       ].map((row) => (
-                        <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <div style={{ fontSize: 10, fontWeight: 600, color: "#7c3aed", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                            {row.label}
-                          </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{row.value}</div>
+                        <div key={row.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{row.label}</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: row.ok ? "#059669" : "#9ca3af" }}>{row.value}</div>
                         </div>
                       ))}
-                    </div>
-                    <div style={{ marginTop: 10, fontSize: 11, color: "#7c3aed", lineHeight: 1.45 }}>
-                      Call tracking uses a dedicated number that forwards to the business's real phone. Setup coming soon.
                     </div>
                   </div>
                 )}

@@ -21,6 +21,7 @@ import PremiumIntakeComplete from "./pages/PremiumIntakeComplete";
 import AdminClients from "./pages/admin/AdminClients";
 import AdminClientDetail from "./pages/admin/AdminClientDetail";
 import AdminManageCampaign from "./pages/admin/AdminManageCampaign";
+import BookingConfirmed from "./pages/BookingConfirmed";
 
 function NotFound() {
   return (
@@ -70,6 +71,7 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/post-checkout" element={<PostCheckout />} />
+      <Route path="/booking-confirmed" element={<BookingConfirmed />} />
       <Route path="/booked-call" element={<BookedCall />} />
       <Route path="/videos" element={<BookedCall />} />
       <Route path="/sales-assistant" element={<SalesAssistant />} />

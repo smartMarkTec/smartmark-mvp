@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { useEffect, useState } from "react";
 import { FaBolt, FaChevronDown } from "react-icons/fa";
+import { trackLead } from "../utils/metaPixel";
 
 // ─── Update this to change the booking link site-wide ─────────────────────────
 const BOOKING_URL = "https://cal.com/william-knowles-wxottg/30min";
@@ -68,13 +69,14 @@ function CTAButton({ children, onClick, small }) {
 }
 
 // ─── OutlineButton ────────────────────────────────────────────────────────────
-function OutlineButton({ children, href }) {
+function OutlineButton({ children, href, onClick }) {
   const [hover, setHover] = useState(false);
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -343,6 +345,7 @@ export default function Landing() {
                   href={BOOKING_URL}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={trackLead}
                   style={{ ...navBtn, textDecoration: "none" }}
                 >
                   Book a Call
@@ -367,6 +370,7 @@ export default function Landing() {
                 href={BOOKING_URL}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={trackLead}
                 style={{ ...navBtnSm, textDecoration: "none" }}
               >
                 Book a Call
@@ -457,7 +461,7 @@ export default function Landing() {
                 {isLoggedIn ? "Open Dashboard" : "Get Started"}
               </CTAButton>
               {BOOKING_URL && (
-                <OutlineButton href={BOOKING_URL}>Book a Call</OutlineButton>
+                <OutlineButton href={BOOKING_URL} onClick={trackLead}>Book a Call</OutlineButton>
               )}
             </div>
           </div>
@@ -695,6 +699,7 @@ export default function Landing() {
                   href={BOOKING_URL}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={trackLead}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
