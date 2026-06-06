@@ -263,6 +263,7 @@ async function markSubscriptionFromStripe({
   priceId = "",
   status = "",
   currentPeriodEnd = null,
+  extra = {},
 }) {
   const meta = derivePlanMetaFromPriceId(priceId);
 
@@ -292,6 +293,7 @@ async function markSubscriptionFromStripe({
           billingLabel: meta.billingLabel || "",
         }
       : {}),
+    ...(extra && typeof extra === "object" ? extra : {}),
   };
 
   return await setUserBillingByIdentity({ username, email, patch });
@@ -1139,6 +1141,41 @@ router.post("/sync-checkout-session", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/stripe/create-portal-session
+// Creates a Stripe Customer Portal session for the currently logged-in user.
+// Returns { ok, url } — the frontend should redirect to url.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/create-portal-session", async (req, res) => {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ ok: false, error: "Stripe is not configured." });
+    }
+
+    const result = await getAuthenticatedBilling(req);
+    if (!result.ok) {
+      return res.status(result.status).json({ ok: false, error: result.error });
+    }
+
+    const { billing } = result;
+    const customerId = String(billing?.stripeCustomerId || "").trim();
+    if (!customerId) {
+      return res.status(400).json({ ok: false, error: "No Stripe customer found for this account." });
+    }
+
+    const clientUrl = process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || "https://smartmark-mvp.onrender.com";
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${clientUrl}/settings`,
+    });
+
+    return res.json({ ok: true, url: session.url });
+  } catch (err) {
+    console.error("[stripe] create-portal-session error:", err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || "Failed to create portal session." });
+  }
+});
+
 router.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   try {
     const sig = req.headers["stripe-signature"];
@@ -1267,6 +1304,7 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const customerId = String(invoice?.customer || "").trim();
         let priceId = "";
         let currentPeriodEnd = null;
+        const hostedInvoiceUrl = String(invoice?.hosted_invoice_url || "").trim();
 
         if (subscriptionId) {
           try {
@@ -1284,6 +1322,24 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           }
         }
 
+        // Fallback: if invoice had no subscription ID, find the customer's sub by customerId
+        if (!subscriptionId && customerId) {
+          try {
+            const subList = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 1 });
+            const foundSub = subList?.data?.[0];
+            if (foundSub) {
+              if (!priceId) priceId = String(foundSub?.items?.data?.[0]?.price?.id || "").trim();
+              if (!currentPeriodEnd) currentPeriodEnd = foundSub?.current_period_end
+                ? new Date(Number(foundSub.current_period_end) * 1000).toISOString()
+                : null;
+              if (!username) username = String(foundSub?.metadata?.username || "").trim();
+              if (!email) email = String(foundSub?.metadata?.email || "").trim();
+            }
+          } catch (_e) {
+            console.warn("[stripe webhook] could not list subs for customer on payment_failed");
+          }
+        }
+
         await markSubscriptionFromStripe({
           username,
           email,
@@ -1292,6 +1348,11 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           priceId,
           status: "past_due",
           currentPeriodEnd,
+          extra: {
+            lastPaymentStatus: "failed",
+            lastPaymentFailedAt: new Date().toISOString(),
+            ...(hostedInvoiceUrl ? { hostedInvoiceUrl } : {}),
+          },
         });
 
         console.log("[stripe webhook] invoice.payment_failed", {
@@ -1299,6 +1360,8 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           email,
           customerId,
           subscriptionId,
+          priceId,
+          hostedInvoiceUrl,
         });
         break;
       }

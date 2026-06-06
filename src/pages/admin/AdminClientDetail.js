@@ -77,6 +77,9 @@ export default function AdminClientDetail() {
   const [saveMsg, setSaveMsg] = useState("");
   const [fbInfo, setFbInfo] = useState(null);
   const [copyingLink, setCopyingLink] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [retryLoading, setRetryLoading] = useState(false);
+  const [retryResult, setRetryResult] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -170,6 +173,50 @@ export default function AdminClientDetail() {
       alert("Could not generate intake link: " + err.message);
     } finally {
       setCopyingLink(false);
+    }
+  };
+
+  const retryPayment = async () => {
+    if (retryLoading) return;
+    setRetryLoading(true);
+    setRetryResult(null);
+    try {
+      const r = await fetch(`/api/admin/clients/${id}/retry-payment`, {
+        method: "POST",
+        credentials: "include",
+        headers: adminHeaders({ "Content-Type": "application/json" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      setRetryResult(j);
+      if (j.ok && j.paid) {
+        // Refresh client data so billing card reflects new status
+        const r2 = await fetch(`/api/admin/clients/${id}`, { credentials: "include", headers: adminHeaders() });
+        const j2 = await r2.json().catch(() => ({}));
+        if (j2.ok && j2.client) setClient(j2.client);
+      }
+    } catch (err) {
+      setRetryResult({ ok: false, message: err.message });
+    } finally {
+      setRetryLoading(false);
+    }
+  };
+
+  const openPortal = async () => {
+    if (portalLoading) return;
+    setPortalLoading(true);
+    try {
+      const r = await fetch(`/api/admin/clients/${id}/billing-portal`, {
+        method: "POST",
+        credentials: "include",
+        headers: adminHeaders({ "Content-Type": "application/json" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok || !j.url) throw new Error(j.error || "Failed to generate portal link.");
+      window.open(j.url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      alert("Could not open billing portal: " + err.message);
+    } finally {
+      setPortalLoading(false);
     }
   };
 
@@ -516,6 +563,92 @@ export default function AdminClientDetail() {
             <p style={{ margin: "8px 0 0", fontSize: 12, color: TEXT_SOFT, lineHeight: 1.5 }}>
               Call tracking setup is pending. A dedicated tracking number will forward to the client's real phone number.
             </p>
+          )}
+        </Card>
+
+        {/* Billing */}
+        <Card title="Billing & Subscription">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+            <InfoRow label="Plan" value={client?.planName || client?.planKey || "—"} />
+            <InfoRow label="Billing Label" value={client?.billingLabel || "—"} />
+            <InfoRow
+              label="Status"
+              value={
+                client?.billingStatus
+                  ? client.billingStatus.charAt(0).toUpperCase() + client.billingStatus.slice(1)
+                  : "—"
+              }
+            />
+            <InfoRow label="Access" value={client?.hasAccess ? "✓ Active" : "✗ No access"} />
+            <InfoRow
+              label="Current Period End"
+              value={client?.currentPeriodEnd ? new Date(client.currentPeriodEnd).toLocaleDateString() : "—"}
+            />
+            <InfoRow
+              label="Last Payment"
+              value={
+                client?.lastPaymentStatus === "failed"
+                  ? `Failed${client?.lastPaymentFailedAt ? " — " + new Date(client.lastPaymentFailedAt).toLocaleString() : ""}`
+                  : client?.lastPaymentStatus || "—"
+              }
+            />
+          </div>
+          {client?.billingStatus === "past_due" && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#991b1b", lineHeight: 1.6 }}>
+              <strong>Payment past due.</strong> Use the Stripe portal button below to have the client update their payment method.
+              {client?.hostedInvoiceUrl && (
+                <span> Or share the <a href={client.hostedInvoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#991b1b" }}>hosted invoice link</a> directly.</span>
+              )}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+            <InfoRow label="Stripe Customer ID" value={client?.stripeCustomerId || "—"} />
+            <InfoRow label="Stripe Subscription ID" value={client?.stripeSubscriptionId || "—"} />
+            <InfoRow label="Stripe Price ID" value={client?.stripePriceId || "—"} />
+          </div>
+          {client?.stripeCustomerId && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+              {(client?.billingStatus === "past_due" || client?.lastPaymentStatus === "failed" || client?.hostedInvoiceUrl) && (
+                <button
+                  onClick={retryPayment}
+                  disabled={retryLoading}
+                  style={{ padding: "9px 18px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: retryLoading ? "not-allowed" : "pointer", fontFamily: FONT, opacity: retryLoading ? 0.6 : 1 }}
+                >
+                  {retryLoading ? "Retrying…" : "Retry Payment"}
+                </button>
+              )}
+              <button
+                onClick={openPortal}
+                disabled={portalLoading}
+                style={{ padding: "9px 18px", background: PURPLE, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: portalLoading ? "not-allowed" : "pointer", fontFamily: FONT, opacity: portalLoading ? 0.6 : 1 }}
+              >
+                {portalLoading ? "Opening…" : "Open Stripe Billing Portal →"}
+              </button>
+            </div>
+          )}
+          {retryResult && (
+            <div style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: retryResult.paid ? "rgba(16,185,129,0.08)" : "rgba(220,38,38,0.07)",
+              border: `1px solid ${retryResult.paid ? "rgba(16,185,129,0.3)" : "rgba(220,38,38,0.3)"}`,
+              fontSize: 13,
+              color: retryResult.paid ? "#065f46" : "#991b1b",
+              lineHeight: 1.6,
+            }}>
+              <strong>{retryResult.paid ? "Payment succeeded." : retryResult.noOpenInvoice ? "No open invoice." : "Payment failed."}</strong>
+              {" "}{retryResult.message}
+              {retryResult.invoiceId && !retryResult.paid && retryResult.hostedInvoiceUrl && (
+                <span> <a href={retryResult.hostedInvoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#991b1b" }}>View invoice</a></span>
+              )}
+              {retryResult.paid && retryResult.amountPaid != null && (
+                <span> Amount charged: ${(retryResult.amountPaid / 100).toFixed(2)}.</span>
+              )}
+            </div>
+          )}
+          {!client?.stripeCustomerId && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: TEXT_SOFT }}>No Stripe customer ID — client has not completed checkout.</p>
           )}
         </Card>
 

@@ -559,8 +559,17 @@ router.get('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
         email: user.email || user.username,
         displayName: user.displayName || user.email || user.username,
         planKey: String(user.billing?.planKey || '').trim() || 'none',
+        planName: String(user.billing?.planName || '').trim(),
+        billingLabel: String(user.billing?.billingLabel || '').trim(),
         hasAccess: !!user.billing?.hasAccess,
         billingStatus: String(user.billing?.status || '').trim(),
+        stripeCustomerId: String(user.billing?.stripeCustomerId || '').trim(),
+        stripeSubscriptionId: String(user.billing?.stripeSubscriptionId || '').trim(),
+        stripePriceId: String(user.billing?.stripePriceId || '').trim(),
+        currentPeriodEnd: user.billing?.currentPeriodEnd || null,
+        lastPaymentStatus: String(user.billing?.lastPaymentStatus || '').trim(),
+        lastPaymentFailedAt: user.billing?.lastPaymentFailedAt || null,
+        hostedInvoiceUrl: String(user.billing?.hostedInvoiceUrl || '').trim(),
         createdAt: user.createdAt || null,
         fbConnected,
         premiumIntake: user.premiumIntake || null,
@@ -1136,6 +1145,175 @@ router.delete('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) =
   } catch (err) {
     console.error('[Admin] delete client error:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Failed to remove client.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/retry-payment
+// Finds the client's latest open Stripe invoice and attempts to pay it using
+// their saved payment method. Does NOT create a new subscription, checkout
+// session, or payment method — only retries the existing unpaid invoice.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/retry-payment', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    await ensureDB();
+
+    const username = decodeURIComponent(req.params.id || '').trim().toLowerCase();
+    if (!username) return res.status(400).json({ ok: false, error: 'Client ID required.' });
+
+    const user = db.data.users.find(
+      (u) => String(u?.username || '').trim().toLowerCase() === username ||
+             String(u?.email || '').trim().toLowerCase() === username
+    );
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const customerId = String(user?.billing?.stripeCustomerId || '').trim();
+    if (!customerId) {
+      return res.status(400).json({ ok: false, error: 'No Stripe customer ID on this account.' });
+    }
+
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey) {
+      return res.status(500).json({ ok: false, error: 'Stripe is not configured on the server.' });
+    }
+
+    const Stripe = require('stripe');
+    const stripeClient = Stripe(stripeSecretKey);
+    const stripeSubscriptionId = String(user?.billing?.stripeSubscriptionId || '').trim();
+
+    // 1. Find the latest open invoice for this customer
+    const listParams = { customer: customerId, status: 'open', limit: 1 };
+    if (stripeSubscriptionId) listParams.subscription = stripeSubscriptionId;
+    const invoiceList = await stripeClient.invoices.list(listParams);
+    const openInvoice = invoiceList?.data?.[0] || null;
+
+    if (!openInvoice) {
+      return res.json({
+        ok: false,
+        noOpenInvoice: true,
+        message: 'No open invoice found for this customer. Payment may have already succeeded or been voided.',
+      });
+    }
+
+    const invoiceId = openInvoice.id;
+    const amountDue = openInvoice.amount_due;
+
+    // 2. Attempt to pay the invoice using the customer's saved payment method
+    let paidInvoice;
+    let stripePayError = null;
+    try {
+      paidInvoice = await stripeClient.invoices.pay(invoiceId);
+    } catch (payErr) {
+      // Stripe throws for card declines — capture gracefully
+      stripePayError = payErr?.raw?.message || payErr?.message || 'Payment attempt failed.';
+      // Re-fetch the invoice to get its updated state after the failed attempt
+      paidInvoice = await stripeClient.invoices.retrieve(invoiceId);
+    }
+
+    const paid = paidInvoice?.status === 'paid';
+    const invoiceStatus = String(paidInvoice?.status || '').trim();
+    const amountPaid = paidInvoice?.amount_paid ?? 0;
+    const hostedInvoiceUrl = String(paidInvoice?.hosted_invoice_url || '').trim();
+    const paymentIntentStatus = String(paidInvoice?.payment_intent?.status || paidInvoice?.payment_intent || '').trim();
+
+    // 3. Determine subscription status from the paid invoice if possible
+    let newBillingStatus = paid ? 'active' : 'past_due';
+    if (paid && stripeSubscriptionId) {
+      try {
+        const sub = await stripeClient.subscriptions.retrieve(stripeSubscriptionId);
+        const subStatus = String(sub?.status || '').trim();
+        if (subStatus) newBillingStatus = subStatus;
+      } catch (_e) { /* keep 'active' as best guess */ }
+    }
+
+    const hasAccess = ['active', 'trialing'].includes(newBillingStatus);
+    const now = new Date().toISOString();
+
+    // 4. Update local billing record — only payment/status fields, never prices or plan keys
+    user.billing = {
+      ...(user.billing || {}),
+      status: newBillingStatus,
+      hasAccess,
+      lastPaymentStatus: paid ? 'paid' : 'failed',
+      ...(paid ? { lastPaymentSucceededAt: now } : { lastPaymentFailedAt: now }),
+      ...(hostedInvoiceUrl ? { hostedInvoiceUrl } : {}),
+      updatedAt: now,
+    };
+    await db.write();
+
+    console.log('[Admin] retry-payment', {
+      username: user.username,
+      customerId,
+      invoiceId,
+      invoiceStatus,
+      paid,
+      stripePayError,
+    });
+
+    return res.json({
+      ok: true,
+      paid,
+      invoiceId,
+      invoiceStatus,
+      amountPaid,
+      amountDue,
+      newBillingStatus,
+      hasAccess,
+      ...(hostedInvoiceUrl ? { hostedInvoiceUrl } : {}),
+      ...(paymentIntentStatus ? { paymentIntentStatus } : {}),
+      ...(stripePayError ? { paymentError: stripePayError } : {}),
+      message: paid
+        ? 'Payment succeeded. Subscription is now active.'
+        : `Payment failed: ${stripePayError || 'Invoice is still open.'}`,
+    });
+  } catch (err) {
+    console.error('[Admin] retry-payment error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to retry payment.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/billing-portal
+// Generates a Stripe Customer Portal session for a specific client.
+// Returns { ok, url } — admin opens/shares the URL so the client can update
+// their payment method without Smartemark storing any card details.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/billing-portal', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    await ensureDB();
+
+    const username = decodeURIComponent(req.params.id || '').trim().toLowerCase();
+    if (!username) return res.status(400).json({ ok: false, error: 'Client ID required.' });
+
+    const user = db.data.users.find(
+      (u) => String(u?.username || '').trim().toLowerCase() === username ||
+             String(u?.email || '').trim().toLowerCase() === username
+    );
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const customerId = String(user?.billing?.stripeCustomerId || '').trim();
+    if (!customerId) {
+      return res.status(400).json({ ok: false, error: 'No Stripe customer ID on this account. Client may not have completed checkout.' });
+    }
+
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey) {
+      return res.status(500).json({ ok: false, error: 'Stripe is not configured on the server.' });
+    }
+
+    const Stripe = require('stripe');
+    const stripeClient = Stripe(stripeSecretKey);
+    const clientUrl = process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
+
+    const session = await stripeClient.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: clientUrl,
+    });
+
+    return res.json({ ok: true, url: session.url, customerId });
+  } catch (err) {
+    console.error('[Admin] billing-portal error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to create portal session.' });
   }
 });
 
