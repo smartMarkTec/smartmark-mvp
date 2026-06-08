@@ -7889,44 +7889,73 @@ ${pendingTest ? `
                   optimizerState={selectedOptimizerState}
                   showConversions={showPremium}
                 />
-                {showPremium && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      background: "#fff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 14,
-                      padding: "14px 16px",
-                    }}
-                  >
+                {showPremium && (() => {
+                  const _snap = selectedOptimizerState?.metricsSnapshot || {};
+                  const _convConfirmed = !!selectedOptimizerState?.conversionTrackingConfirmed;
+                  const _convCount = Number(_snap.conversions || 0);
+                  const _hasRawActions = Array.isArray(_snap.rawActions) && _snap.rawActions.length > 0;
+                  const _hasDelivery = Number(_snap.impressions || 0) > 0;
+
+                  const _trackingValue = _convConfirmed
+                    ? "Conversion tracking detected"
+                    : _hasRawActions
+                    ? "Pixel active, no conversions yet"
+                    : _hasDelivery
+                    ? "Not confirmed yet"
+                    : "Waiting for delivery";
+                  const _trackingOk = _convConfirmed;
+
+                  const _trackingRows = [
+                    {
+                      label: "Conversion tracking",
+                      value: _trackingValue,
+                      ok: _trackingOk,
+                    },
+                    ...((_convConfirmed || _convCount > 0) ? [{
+                      label: "Conversions recorded",
+                      value: _convCount > 0 ? `${_convCount.toLocaleString()} total` : "None yet",
+                      ok: _convCount > 0,
+                    }] : []),
+                    ...(_hasRawActions ? [{
+                      label: "Ad activity events",
+                      value: "Active",
+                      ok: true,
+                    }] : []),
+                  ];
+
+                  return (
                     <div
                       style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: "#6b7280",
-                        letterSpacing: "0.07em",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
+                        marginTop: 12,
+                        background: "#fff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 14,
+                        padding: "14px 16px",
                       }}
                     >
-                      Tracking Setup
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#6b7280",
+                          letterSpacing: "0.07em",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                        }}
+                      >
+                        Tracking Setup
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {_trackingRows.map((row) => (
+                          <div key={row.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{row.label}</div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: row.ok ? "#059669" : "#9ca3af" }}>{row.value}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                      {[
-                        { label: "Meta Pixel",               value: "Installed",          ok: true  },
-                        { label: "PageView tracking",        value: "Active",              ok: true  },
-                        { label: "Lead event",               value: "Book a Call clicks",  ok: true  },
-                        { label: "Confirmed booking event",  value: "Not active yet",      ok: false },
-                        { label: "Call tracking",            value: "Not set up",          ok: false },
-                      ].map((row) => (
-                        <div key={row.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{row.label}</div>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: row.ok ? "#059669" : "#9ca3af" }}>{row.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
                 <button
                   onClick={generateCampaignReport}
                   style={{

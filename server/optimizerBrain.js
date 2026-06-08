@@ -93,6 +93,8 @@ async function runOptimizerBrainDiagnosis({
     `- Confidence must be a number from 0 to 1.`,
     `- Output JSON only. No markdown.`,
     `- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do NOT reference conversions, conversion tracking, or conversion data in the reason field at all. Do not say "conversion tracking is not connected", "conversion data is unavailable", "ensure conversion tracking is set up", or anything similar. Write the reason purely using available metrics — CTR, CPC, clicks, impressions, spend — as a calm, operator-like observation about what the campaign data shows and what the next monitoring step is. Write as if conversion data simply does not exist. Do not select post_click_conversion_gap when conversionTrackingConfirmed is false — prefer insufficient_data or healthy_early_signal.`,
+    `- CRITICAL — Business context: If businessBrief is null, empty, or missing fields, do NOT mention "missing business context", "critical context unavailable", "business information needed", or similar. Ignore the absence of businessBrief entirely and base the diagnosis solely on the available campaign metrics. The metrics are sufficient for a CTR-based diagnosis.`,
+    `- CRITICAL — CTR action rule: If impressions >= 2500 AND CTR < 0.8% AND delivery is active, the diagnosis MUST be low_ctr and recommendedAction MUST be update_primary_text or prepare_fresh_creative_variant. Do NOT choose continue_monitoring or gather_more_data when impressions are this high with low CTR.`,
     ``,
     `Tone rules for the "reason" field:`,
     `- Write like a calm, professional marketing advisor — not a judge.`,
@@ -235,7 +237,10 @@ async function runOptimizerBrainDecision({
     `- Action type must be from the allowed list.`,
     `- Confidence must be a number from 0 to 1.`,
     `- Output JSON only. No markdown.`,
-    `- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do not make conversion-based decisions. Do not recommend test_offer_or_audience_angle or test_new_audience_or_creative based solely on missing conversions. Focus on click quality, CTR, CPC, and spend efficiency instead.`,
+    `- CRITICAL — Conversion tracking: If conversionTrackingConfirmed is false in the input, do not make conversion-based decisions. Do not recommend test_offer_or_audience_angle or test_new_audience_or_creative based solely on missing conversions. Focus on click quality, CTR, CPC, and spend efficiency instead. Do NOT mention conversion tracking in the reason field.`,
+    `- CRITICAL — Business context: If businessBrief is null, empty, or missing, do NOT mention "missing business context", "critical context unavailable", "business information needed", or anything similar in the reason field. Ignore the absence of businessBrief entirely and base the decision on available metrics.`,
+    `- CRITICAL — No-op actions: latestAction.actionType values of "continue_monitoring", "monitoring_only", "dry_run_skipped", "check_delivery_status" count as NO successful optimization action. If the only prior actions are these no-ops and impressions exceed 2500 with CTR below 0.8%, choose generate_single_creative_variant immediately.`,
+    `- CRITICAL — CTR action rule: If impressions >= 2500 AND CTR < 0.8% AND the only prior actions are no-ops (continue_monitoring, dry_run_skipped, monitoring_only), you MUST choose generate_single_creative_variant. Do NOT choose continue_monitoring. Missing business context or conversion tracking are NOT valid reasons to delay creative testing when CTR is clearly low.`,
     decisionStrategyContext ? `\n--- MARKETING STRATEGY REFERENCE (use for context only) ---\n${decisionStrategyContext}` : '',
   ].filter((line) => line !== null && line !== undefined).join('\n').trim();
 

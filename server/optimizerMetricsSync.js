@@ -199,6 +199,12 @@ async function syncCampaignMetricsToOptimizerState({
     patch.ownerKey = String(ownerKey).trim();
   }
 
+  // Auto-confirm conversion tracking when Meta insights reports real conversions.
+  // Once confirmed it stays confirmed — don't flip back to false on zero-conversion syncs.
+  if (Number(snapshot.conversions || 0) > 0 && !existing.conversionTrackingConfirmed) {
+    patch.conversionTrackingConfirmed = true;
+  }
+
   const updated = await updateOptimizerCampaignState(campaignId, patch);
 
   return {

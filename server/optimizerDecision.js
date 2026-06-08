@@ -43,6 +43,20 @@ function hasLiveCreativeTest(optimizerState) {
   );
 }
 
+// Action types that are no-ops — monitoring, dry-run skips, or delivery checks.
+// A campaign whose latestAction is one of these has NOT received a real optimization mutation.
+function isNoOpActionType(actionType) {
+  return !String(actionType || '').trim() || [
+    'continue_monitoring',
+    'monitoring_only',
+    'dry_run_skipped',
+    'check_delivery_status',
+    'wait_for_start_time',
+    'run_diagnosis_first',
+    'run_decision_first',
+  ].includes(String(actionType).trim());
+}
+
 // Diagnoses for which Standard tier may propose a creative/copy test.
 const STANDARD_TESTABLE_DIAGNOSES = new Set([
   'low_ctr',
@@ -563,11 +577,11 @@ function buildFallbackDecision({ optimizerState }) {
         'Smartemark will generate a fresh creative visual angle instead — this is the next effective lever for improving CTR.';
       confidence = 0.85;
     } else if (
-      // High-signal rule: 5 000+ impressions with persistently weak CTR and no
-      // creative-level action taken yet → skip copy refresh, go straight to creative test.
-      impressions >= 5000 &&
+      // High-signal rule: 2500+ impressions with persistently weak CTR and no real
+      // optimization mutation taken yet → skip copy refresh, go straight to creative test.
+      impressions >= 2500 &&
       ctr < 0.8 &&
-      !lastActionType &&
+      isNoOpActionType(lastActionType) &&
       standardTestGatePassed(optimizerState, 'low_ctr') &&
       !standardCooldownActive(optimizerState)
     ) {
@@ -576,8 +590,7 @@ function buildFallbackDecision({ optimizerState }) {
         ? 'generate_single_creative_variant'
         : 'generate_two_creative_variants';
       priority = 'high';
-      reason = `CTR has stayed at ${ctr.toFixed(2)}% after ${impressions.toLocaleString()} impressions — well below the 0.8% target. ` +
-        'With this much data and no prior optimization action, Smartemark is generating a fresh challenger creative to test a new visual angle.';
+      reason = `CTR is ${ctr.toFixed(2)}% after ${impressions.toLocaleString()} impressions — below the 0.8% target with no prior creative optimization. Generating a fresh challenger creative to test a new visual angle.`;
       confidence = 0.9;
     } else if (!standardTestGatePassed(optimizerState, 'low_ctr') || standardCooldownActive(optimizerState)) {
       decision = 'hold_and_monitor';
@@ -931,6 +944,49 @@ async function buildDecisionAsync({ optimizerState }) {
         generatedAt: new Date().toISOString(),
         mode: 'fallback_rule_based_v1',
       };
+    }
+  }
+
+  // High-impression escalation — fires BEFORE the AI brain so rule-based logic cannot be
+  // overridden by an AI response that chooses continue_monitoring due to missing context.
+  // Condition: enough delivery signal, CTR clearly weak, no real mutation has been executed.
+  {
+    const _m3 = optimizerState?.metricsSnapshot || {};
+    const _imp3 = toNumber(_m3.impressions, 0);
+    const _ctr3 = toNumber(_m3.ctr, 0);
+    const _spend3 = toNumber(_m3.spend, 0);
+    const _latestActionType3 = String(optimizerState?.latestAction?.actionType || '').trim();
+    const _latestActionStatus3 = String(optimizerState?.latestAction?.status || '').trim();
+    const _latestActionExecuted3 = !!optimizerState?.latestAction?.executed;
+
+    // A "real action" is one that actually executed a mutation on Meta (not monitoring/dry-run).
+    const _hasRealMutation =
+      !isNoOpActionType(_latestActionType3) &&
+      _latestActionExecuted3 &&
+      _latestActionStatus3 === 'completed';
+
+    if (
+      _imp3 >= 2500 &&
+      _ctr3 < 0.8 &&
+      _spend3 >= 5 &&
+      !_hasRealMutation &&
+      standardTestGatePassed(optimizerState, 'low_ctr') &&
+      !standardCooldownActive(optimizerState)
+    ) {
+      return attachDecisionContext({
+        base: {
+          campaignId: String(optimizerState?.campaignId || '').trim(),
+          decision: 'launch_creative_test',
+          actionType: 'generate_single_creative_variant',
+          priority: 'high',
+          reason: `CTR is ${_ctr3.toFixed(2)}% after ${_imp3.toLocaleString()} impressions — below the 0.8% target with no prior creative optimization. Generating a fresh challenger creative to test a new visual angle.`,
+          requiresHumanApproval: true,
+          confidence: 0.9,
+          generatedAt: new Date().toISOString(),
+          mode: 'high_impression_escalation_v1',
+        },
+        optimizerState,
+      });
     }
   }
 
