@@ -3,6 +3,8 @@ import React, { useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Pricing from "./pages/Pricing";
+import LandingTest from "./pages/LandingTest";
+import PricingTest from "./pages/PricingTest";
 import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
@@ -59,7 +61,9 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/test" element={<LandingTest />} />
       <Route path="/pricing" element={<Pricing />} />
+      <Route path="/pricing-test" element={<PricingTest />} />
       <Route path="/form" element={<FormPage />} />
       <Route path="/setup" element={<CampaignSetup />} />
       <Route path="/login" element={<Login />} />

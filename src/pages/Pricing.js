@@ -124,17 +124,21 @@ const faqs = [
   },
 ];
 
-const Pricing = () => {
+const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [loadingPlan, setLoadingPlan] = useState("");
   const [openFaq, setOpenFaq] = useState(null);
 
+  const activePlans = customPlans || plans;
+  const activeVariant = variantProp || "normal";
+  const activeHomeRoute = homeRoute || "/";
+
   useEffect(() => {
     try {
-      trackEvent("view_pricing", { page: "pricing" });
+      trackEvent("view_pricing", { page: "pricing", pricingVariant: activeVariant });
     } catch {}
-  }, []);
+  }, [activeVariant]);
 
   const startCheckout = async (plan) => {
     if (!plan?.planKey) return;
@@ -143,12 +147,14 @@ const Pricing = () => {
 
     try {
       localStorage.setItem("sm_selected_plan", plan.planKey);
+      localStorage.setItem("sm_pricing_variant", activeVariant);
 
       try {
         trackEvent("pricing_cta_click", {
           page: "pricing",
           plan: plan.name,
           planKey: plan.planKey,
+          pricingVariant: activeVariant,
         });
       } catch {}
 
@@ -156,7 +162,7 @@ const Pricing = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ plan: plan.planKey }),
+        body: JSON.stringify({ plan: plan.planKey, pricingVariant: activeVariant }),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -268,7 +274,7 @@ const Pricing = () => {
           }}
         >
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate(activeHomeRoute)}
             style={{
               background: "none",
               border: "none",
@@ -357,7 +363,7 @@ const Pricing = () => {
             alignItems: "stretch",
           }}
         >
-          {plans.map((plan) => {
+          {activePlans.map((plan) => {
             const isLoading = loadingPlan === plan.planKey;
             const dark = plan.isDark;
             const cardText = dark ? "#f1f5f9" : TEXT;

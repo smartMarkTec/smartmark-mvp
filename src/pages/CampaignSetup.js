@@ -3092,6 +3092,7 @@ const [billingInfo, setBillingInfo] = useState({
   status: "",
   email: "",
   username: "",
+  monthlyPrice: 0,
 });
 
 // ✅ Email -> backend-username map (so changing username field never breaks login)
@@ -5172,6 +5173,7 @@ const adminActive = true;
       status: String(j?.billing?.status || "").trim(),
       email: String(j?.user?.email || "").trim(),
       username: String(j?.user?.username || "").trim(),
+      monthlyPrice: Number(j?.billing?.monthlyPrice || 0),
     });
 
     return !!j?.billing?.hasAccess;
@@ -5955,6 +5957,144 @@ const selectedCampaignCreatives =
   useEffect(() => {
     writeCampaignSettingsMap(resolvedUser, campaignSettingsMap);
   }, [resolvedUser, campaignSettingsMap]);
+
+  const generateCampaignReport = () => {
+    const m = metricsMap[selectedCampaignId] || {};
+    const snap = selectedOptimizerState?.metricsSnapshot || {};
+    const impressions = Number(m.impressions || 0);
+    const clicks = Number(m.clicks || 0);
+    const spend = Number(m.spend || 0);
+    const ctrNum = m.ctr !== undefined && m.ctr !== null && m.ctr !== ""
+      ? Number(m.ctr || 0)
+      : impressions > 0 ? (clicks / impressions) * 100 : 0;
+    const cpcNum = clicks > 0 ? spend / clicks : Number(snap.cpc || 0);
+    const cpmNum = Number(snap.cpm || (impressions > 0 ? (spend * 1000) / impressions : 0));
+    const linkClicks = Number(snap.linkClicks || clicks);
+    const conversions = Number(snap.conversions || 0);
+    const reach = Number(snap.reach || 0);
+
+    const campaignName = selectedLiveCampaign?.name || "Campaign";
+    const budget = displayedCampaignSettings.budget || "—";
+    const startDate = displayedCampaignSettings.startDate || "—";
+    const endDate = displayedCampaignSettings.endDate || "—";
+    const reportDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+    const diagnosis = selectedOptimizerState?.latestDiagnosis?.diagnosis || "";
+    const diagnosisReason = selectedOptimizerState?.latestDiagnosis?.reason || "";
+    const diagnosisRecommendation = selectedOptimizerState?.latestDiagnosis?.recommendedAction || "";
+    const latestAction = selectedOptimizerState?.latestAction || null;
+    const pendingTest = selectedOptimizerState?.pendingCreativeTest || null;
+
+    const summary = selectedOptimizerSummary || {};
+    const summaryHeadline = summary.headline || "";
+    const summarySubtext = summary.subtext || "";
+
+    const aiHistoryRaw = Array.isArray(selectedOptimizerState?.aiHistory) ? selectedOptimizerState.aiHistory : [];
+    const recentActions = aiHistoryRaw.filter(h => h?.type === "action" || h?.actionType).slice(-5).reverse();
+    const recentDiagnoses = aiHistoryRaw.filter(h => h?.type === "diagnosis" || h?.diagnosis).slice(-3).reverse();
+
+    const testStatus = pendingTest
+      ? String(pendingTest.status || "").toLowerCase()
+      : null;
+    const testGoal = pendingTest?.creativeGoal || pendingTest?.goal || "";
+    const testVariants = Number(pendingTest?.variantCount || 0);
+
+    const rows = (arr, label) => arr.length > 0
+      ? arr.map(r => {
+          const ts = r.generatedAt || r.createdAt || r.timestamp || "";
+          const dateStr = ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+          const text = r.summary || r.actionType || r.diagnosis || r.label || JSON.stringify(r).slice(0, 120);
+          return `<tr><td style="color:#6b7280;font-size:12px;white-space:nowrap;padding:4px 8px 4px 0">${dateStr}</td><td style="font-size:13px;padding:4px 0">${text}</td></tr>`;
+        }).join("")
+      : `<tr><td colspan="2" style="color:#9ca3af;font-size:13px;padding:4px 0">No ${label} recorded yet.</td></tr>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Campaign Report — ${campaignName}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #111827; max-width: 780px; margin: 0 auto; padding: 40px 32px; }
+  h1 { font-size: 26px; font-weight: 800; margin: 0 0 4px; }
+  .meta { color: #6b7280; font-size: 13px; margin-bottom: 32px; }
+  h2 { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin: 28px 0 12px; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+  .metric-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+  .metric-label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+  .metric-value { font-size: 22px; font-weight: 800; color: #111827; }
+  .diagnosis-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; }
+  .diagnosis-label { font-size: 11px; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .summary-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 16px; }
+  .ab-box { background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 10px; padding: 14px 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  p { margin: 4px 0 8px; font-size: 14px; line-height: 1.6; }
+  .footer { margin-top: 48px; border-top: 1px solid #e5e7eb; padding-top: 16px; font-size: 11px; color: #9ca3af; }
+  @media print { body { padding: 20px 16px; } button { display: none; } }
+</style>
+</head>
+<body>
+<button onclick="window.print()" style="float:right;background:#10b981;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;margin-top:4px">Print / Save PDF</button>
+<h1>${campaignName}</h1>
+<div class="meta">Report generated ${reportDate} &nbsp;·&nbsp; Budget: ${budget} &nbsp;·&nbsp; Start: ${startDate} &nbsp;·&nbsp; End: ${endDate}</div>
+
+<h2>Performance Metrics</h2>
+<div class="metrics-grid">
+  <div class="metric-card"><div class="metric-label">Spend</div><div class="metric-value">$${spend.toFixed(2)}</div></div>
+  <div class="metric-card"><div class="metric-label">Impressions</div><div class="metric-value">${impressions.toLocaleString()}</div></div>
+  <div class="metric-card"><div class="metric-label">Link Clicks</div><div class="metric-value">${(linkClicks > 0 ? linkClicks : clicks).toLocaleString()}</div></div>
+  <div class="metric-card"><div class="metric-label">CTR</div><div class="metric-value">${ctrNum.toFixed(2)}%</div></div>
+  <div class="metric-card"><div class="metric-label">CPC</div><div class="metric-value">$${cpcNum.toFixed(2)}</div></div>
+  <div class="metric-card"><div class="metric-label">CPM</div><div class="metric-value">${cpmNum > 0 ? "$" + cpmNum.toFixed(2) : "$0.00"}</div></div>
+  ${reach > 0 ? `<div class="metric-card"><div class="metric-label">Reach</div><div class="metric-value">${reach.toLocaleString()}</div></div>` : ""}
+  ${conversions > 0 ? `<div class="metric-card"><div class="metric-label">Conversions</div><div class="metric-value">${conversions}</div></div>` : ""}
+</div>
+
+${summaryHeadline || summarySubtext ? `
+<h2>AI Summary</h2>
+<div class="summary-box">
+  ${summaryHeadline ? `<p style="font-weight:700;font-size:15px;margin-bottom:6px">${summaryHeadline}</p>` : ""}
+  ${summarySubtext ? `<p>${summarySubtext}</p>` : ""}
+</div>` : ""}
+
+${diagnosis || diagnosisReason ? `
+<h2>AI Diagnosis</h2>
+<div class="diagnosis-box">
+  <div class="diagnosis-label">Current Assessment</div>
+  ${diagnosis ? `<p style="font-weight:600">${diagnosis}</p>` : ""}
+  ${diagnosisReason ? `<p>${diagnosisReason}</p>` : ""}
+  ${diagnosisRecommendation ? `<p><strong>Recommended next step:</strong> ${diagnosisRecommendation}</p>` : ""}
+</div>` : ""}
+
+${latestAction ? `
+<h2>Latest AI Action</h2>
+<p><strong>${latestAction.actionType || "Action taken"}</strong>${latestAction.status ? " — " + latestAction.status : ""}${latestAction.executed ? " (executed)" : ""}</p>` : ""}
+
+${recentActions.length > 0 ? `
+<h2>Recent Actions Taken</h2>
+<table>${rows(recentActions, "actions")}</table>` : ""}
+
+${recentDiagnoses.length > 0 ? `
+<h2>Recent AI Observations</h2>
+<table>${rows(recentDiagnoses, "observations")}</table>` : ""}
+
+${pendingTest ? `
+<h2>A/B Test Status</h2>
+<div class="ab-box">
+  <p><strong>Status:</strong> ${testStatus ? testStatus.charAt(0).toUpperCase() + testStatus.slice(1) : "Unknown"}</p>
+  ${testGoal ? `<p><strong>Goal:</strong> ${testGoal}</p>` : ""}
+  ${testVariants > 0 ? `<p><strong>Variants:</strong> ${testVariants}</p>` : ""}
+</div>` : ""}
+
+<div class="footer">Generated by Smartemark AI &nbsp;·&nbsp; ${reportDate}</div>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  };
 
   const openEditCurrentCampaign = () => {
     if (!selectedLiveCampaign) return;
@@ -7787,6 +7927,28 @@ const selectedCampaignCreatives =
                     </div>
                   </div>
                 )}
+                <button
+                  onClick={generateCampaignReport}
+                  style={{
+                    marginTop: 16,
+                    width: "100%",
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: "11px 16px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#374151",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  <span style={{ fontSize: 15 }}>📄</span> Print Monthly Report
+                </button>
               </>
             );
           })()}
@@ -8519,8 +8681,11 @@ const selectedCampaignCreatives =
         </div>
         <div style={{ color: "#111827", fontWeight: 500, fontSize: 16, lineHeight: 1.5 }}>
           {billingInfo?.planKey
-            ? PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
-              String(billingInfo.planKey)
+            ? (PLAN_UI[String(billingInfo.planKey).trim().toLowerCase()]?.label ||
+               String(billingInfo.planKey)) +
+              (billingInfo.monthlyPrice > 0
+                ? ` — $${billingInfo.monthlyPrice.toLocaleString()}/month`
+                : "")
             : "No active plan"}
         </div>
       </div>

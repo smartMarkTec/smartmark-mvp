@@ -76,6 +76,18 @@ const PUBLIC_PRICE_MAP = {
   premium: process.env.STRIPE_PREMIUM_PRICE_ID || "",
 };
 
+// High-ticket test price IDs — completely separate from normal pricing.
+// Existing customers and grandfathered subscriptions are never touched by this map.
+const HIGH_TICKET_PRICE_MAP = {
+  base: process.env.STRIPE_TEST_BASE_PRICE_ID || "price_1Tg5MPPT5b2dVWTGC9d0HbkO",
+  deluxe: process.env.STRIPE_TEST_DELUXE_PRICE_ID || "price_1Tg5MqPT5b2dVWTGuc2kWk09",
+  premium: process.env.STRIPE_TEST_PREMIUM_PRICE_ID || "price_1Tg5NDPT5b2dVWTGvTtDGVju",
+};
+
+// Monthly prices (used for display and metadata — not authoritative for billing).
+const NORMAL_MONTHLY_PRICE = { base: 249, deluxe: 495, premium: 749 };
+const HIGH_TICKET_MONTHLY_PRICE = { base: 495, deluxe: 995, premium: 1500 };
+
 const HIDDEN_FOUNDER_PRICE_META = {};
 function normalizePlanKey(raw) {
   return String(raw || "").trim().toLowerCase();
@@ -91,13 +103,32 @@ function getClientUrl(req) {
   return process.env.CLIENT_URL || req.headers.origin || "http://localhost:3000";
 }
 
+function normalizePricingVariant(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  return v === "high_ticket_test" ? "high_ticket_test" : "normal";
+}
+
+function getPriceIdForVariant(planKey, pricingVariant) {
+  if (normalizePricingVariant(pricingVariant) === "high_ticket_test") {
+    return String(HIGH_TICKET_PRICE_MAP[planKey] || "").trim();
+  }
+  return String(PUBLIC_PRICE_MAP[planKey] || "").trim();
+}
+
+function getMonthlyPrice(planKey, pricingVariant) {
+  if (normalizePricingVariant(pricingVariant) === "high_ticket_test") {
+    return HIGH_TICKET_MONTHLY_PRICE[planKey] || 0;
+  }
+  return NORMAL_MONTHLY_PRICE[planKey] || 0;
+}
+
+// Keep legacy helper for backwards compat (normal variant only)
 function getPriceMap() {
   return PUBLIC_PRICE_MAP;
 }
 
 function getPriceId(planKey) {
-  const map = getPriceMap();
-  return String(map[planKey] || "").trim();
+  return getPriceIdForVariant(planKey, "normal");
 }
 
 function buildPriceToPlanLookup() {
@@ -105,7 +136,6 @@ function buildPriceToPlanLookup() {
 
   for (const [planKey, priceId] of Object.entries(PUBLIC_PRICE_MAP)) {
     if (!priceId) continue;
-
     out[String(priceId).trim()] = {
       planKey,
       founder: false,
@@ -113,7 +143,27 @@ function buildPriceToPlanLookup() {
       planName: PLAN_NAME_MAP[planKey] || planKey,
       billingLabel: PLAN_NAME_MAP[planKey] || planKey,
       offerKey: `public_${planKey}`,
+      pricingVariant: "normal",
+      monthlyPrice: NORMAL_MONTHLY_PRICE[planKey] || 0,
     };
+  }
+
+  // Register high-ticket test price IDs so webhook can identify them.
+  for (const [planKey, priceId] of Object.entries(HIGH_TICKET_PRICE_MAP)) {
+    if (!priceId) continue;
+    const existing = out[String(priceId).trim()];
+    if (!existing) {
+      out[String(priceId).trim()] = {
+        planKey,
+        founder: false,
+        hidden: false,
+        planName: PLAN_NAME_MAP[planKey] || planKey,
+        billingLabel: PLAN_NAME_MAP[planKey] || planKey,
+        offerKey: `high_ticket_${planKey}`,
+        pricingVariant: "high_ticket_test",
+        monthlyPrice: HIGH_TICKET_MONTHLY_PRICE[planKey] || 0,
+      };
+    }
   }
 
   for (const [offerKey, meta] of Object.entries(HIDDEN_FOUNDER_PRICE_META)) {
@@ -127,6 +177,8 @@ function buildPriceToPlanLookup() {
       planName: String(meta.planName || "").trim(),
       billingLabel: String(meta.billingLabel || "").trim(),
       offerKey,
+      pricingVariant: "normal",
+      monthlyPrice: 0,
     };
   }
 
@@ -144,6 +196,8 @@ function derivePlanMetaFromPriceId(priceId) {
       planName: "",
       billingLabel: "",
       offerKey: "",
+      pricingVariant: "normal",
+      monthlyPrice: 0,
     }
   );
 }
@@ -291,6 +345,13 @@ async function markSubscriptionFromStripe({
           offerKey: meta.offerKey || "",
           planName: meta.planName || "",
           billingLabel: meta.billingLabel || "",
+          // Persist pricing variant from price ID lookup if not overridden by extra
+          ...(!extra?.pricingVariant && meta.pricingVariant
+            ? { pricingVariant: meta.pricingVariant }
+            : {}),
+          ...(!extra?.monthlyPrice && meta.monthlyPrice
+            ? { monthlyPrice: meta.monthlyPrice }
+            : {}),
         }
       : {}),
     ...(extra && typeof extra === "object" ? extra : {}),
@@ -492,6 +553,7 @@ router.post("/create-checkout-session", async (req, res) => {
     const planKey = normalizePlanKey(req.body?.plan);
     const email = String(req.body?.email || "").trim() || undefined;
     const launchIntent = String(req.body?.launchIntent || "").trim() === "1";
+    const pricingVariant = normalizePricingVariant(req.body?.pricingVariant);
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
@@ -500,18 +562,34 @@ router.post("/create-checkout-session", async (req, res) => {
       });
     }
 
-    const priceId = getPriceId(planKey);
+    const priceId = getPriceIdForVariant(planKey, pricingVariant);
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for plan "${planKey}". Set the corresponding env var on the server (e.g. STRIPE_BASE_PRICE_ID for base).`,
+        error: `Missing Stripe price for plan "${planKey}" (variant: ${pricingVariant}). Set the corresponding env var on the server.`,
       });
     }
 
+    const monthlyPrice = getMonthlyPrice(planKey, pricingVariant);
     const clientUrl = getClientUrl(req);
+    const cancelPath = pricingVariant === "high_ticket_test" ? "/pricing-test" : "/pricing";
 
-const successUrl = `${clientUrl}/post-checkout?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
-const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
+    const successUrl = `${clientUrl}/post-checkout?session_id={CHECKOUT_SESSION_ID}&plan=${planKey}`;
+    const cancelUrl = `${clientUrl}${cancelPath}?checkout=cancelled&plan=${planKey}`;
+
+    const sharedMeta = {
+      username: email || "",
+      email: email || "",
+      planKey,
+      founder: "false",
+      planName: PLAN_NAME_MAP[planKey],
+      billingLabel: PLAN_NAME_MAP[planKey],
+      offerKey: pricingVariant === "high_ticket_test" ? `high_ticket_${planKey}` : `public_${planKey}`,
+      pricingVariant,
+      monthlyPrice: String(monthlyPrice),
+      source: launchIntent ? "campaign_setup_launch_gate" : (pricingVariant === "high_ticket_test" ? "high_ticket_pricing_page" : "public_pricing_page"),
+      sid: getSidFromReq(req) || "",
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -522,28 +600,9 @@ const cancelUrl = `${clientUrl}/pricing?checkout=cancelled&plan=${planKey}`;
       billing_address_collection: "auto",
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: {
-        username: email || "",
-        email: email || "",
-        planKey,
-        founder: "false",
-        planName: PLAN_NAME_MAP[planKey],
-        billingLabel: PLAN_NAME_MAP[planKey],
-        offerKey: `public_${planKey}`,
-        source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
-        sid: getSidFromReq(req) || "",
-      },
+      metadata: sharedMeta,
       subscription_data: {
-        metadata: {
-          username: email || "",
-          email: email || "",
-          planKey,
-          founder: "false",
-          planName: PLAN_NAME_MAP[planKey],
-          billingLabel: PLAN_NAME_MAP[planKey],
-          offerKey: `public_${planKey}`,
-          source: launchIntent ? "campaign_setup_launch_gate" : "public_pricing_page",
-        },
+        metadata: { ...sharedMeta },
       },
     });
 
@@ -730,6 +789,18 @@ router.get("/billing-status", async (req, res) => {
 
     console.log("[stripe] billing-status: returning planKey =", effectivePlanKey || "(empty)", "for", auth.user.username);
 
+    // Infer monthlyPrice from price ID if not stored
+    let effectiveMonthlyPrice = Number(billing.monthlyPrice || 0);
+    if (!effectiveMonthlyPrice && billing.stripePriceId) {
+      const derived = derivePlanMetaFromPriceId(billing.stripePriceId);
+      if (derived.monthlyPrice) effectiveMonthlyPrice = derived.monthlyPrice;
+    }
+
+    // Infer pricingVariant from price ID if not stored
+    const effectivePricingVariant = billing.pricingVariant ||
+      (billing.stripePriceId ? derivePlanMetaFromPriceId(billing.stripePriceId).pricingVariant : "normal") ||
+      "normal";
+
     return res.json({
       ok: true,
       authenticated: true,
@@ -751,6 +822,8 @@ router.get("/billing-status", async (req, res) => {
         stripeCustomerId: billing.stripeCustomerId || "",
         stripeSubscriptionId: billing.stripeSubscriptionId || "",
         stripePriceId: billing.stripePriceId || "",
+        pricingVariant: effectivePricingVariant,
+        monthlyPrice: effectiveMonthlyPrice,
       },
     });
   } catch (err) {
@@ -780,6 +853,7 @@ router.post("/create-checkout-session-auth", async (req, res) => {
     }
 
     const planKey = normalizePlanKey(req.body?.plan);
+    const pricingVariant = normalizePricingVariant(req.body?.pricingVariant);
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
@@ -788,17 +862,32 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       });
     }
 
-    const priceId = getPriceId(planKey);
+    const priceId = getPriceIdForVariant(planKey, pricingVariant);
     if (!priceId) {
       return res.status(400).json({
         ok: false,
-        error: `Missing Stripe price for plan "${planKey}". Set the corresponding env var on the server (e.g. STRIPE_BASE_PRICE_ID for base).`,
+        error: `Missing Stripe price for plan "${planKey}" (variant: ${pricingVariant}). Set the corresponding env var on the server.`,
       });
     }
 
+    const monthlyPrice = getMonthlyPrice(planKey, pricingVariant);
     const clientUrl = getClientUrl(req);
     const username = String(auth.user.username || "").trim();
     const email = String(auth.user.email || "").trim();
+
+    const sharedMeta = {
+      username,
+      email,
+      planKey,
+      founder: "false",
+      planName: PLAN_NAME_MAP[planKey],
+      billingLabel: PLAN_NAME_MAP[planKey],
+      offerKey: pricingVariant === "high_ticket_test" ? `high_ticket_${planKey}` : `public_${planKey}`,
+      pricingVariant,
+      monthlyPrice: String(monthlyPrice),
+      source: "campaign_setup",
+      sid: getSidFromReq(req) || "",
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -807,30 +896,11 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       customer_email: email,
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-    success_url: `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`,
-cancel_url: `${clientUrl}/setup?billing_cancelled=1&plan=${planKey}`,
-      metadata: {
-        username,
-        email,
-        planKey,
-        founder: "false",
-        planName: PLAN_NAME_MAP[planKey],
-        billingLabel: PLAN_NAME_MAP[planKey],
-        offerKey: `public_${planKey}`,
-        source: "campaign_setup",
-        sid: getSidFromReq(req) || "",
-      },
+      success_url: `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`,
+      cancel_url: `${clientUrl}/setup?billing_cancelled=1&plan=${planKey}`,
+      metadata: sharedMeta,
       subscription_data: {
-        metadata: {
-          username,
-          email,
-          planKey,
-          founder: "false",
-          planName: PLAN_NAME_MAP[planKey],
-          billingLabel: PLAN_NAME_MAP[planKey],
-          offerKey: `public_${planKey}`,
-          source: "campaign_setup",
-        },
+        metadata: { ...sharedMeta },
       },
     });
 
@@ -1228,6 +1298,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           }
         }
 
+        const sessionPricingVariant = normalizePricingVariant(session?.metadata?.pricingVariant);
+        const sessionMonthlyPrice = Number(session?.metadata?.monthlyPrice || 0) || undefined;
+
         await markSubscriptionFromStripe({
           username,
           email,
@@ -1236,6 +1309,11 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           priceId,
           status: subscriptionStatus,
           currentPeriodEnd,
+          extra: {
+            pricingVariant: sessionPricingVariant,
+            ...(sessionMonthlyPrice ? { monthlyPrice: sessionMonthlyPrice } : {}),
+            planStartedAt: new Date().toISOString(),
+          },
         });
 
         console.log("[stripe webhook] checkout.session.completed", {
@@ -1260,6 +1338,9 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         let username = "";
         let email = String(invoice?.customer_email || "").trim();
 
+        let invoicePricingVariant = "normal";
+        let invoiceMonthlyPrice = 0;
+
         if (subscriptionId) {
           try {
             const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -1270,6 +1351,8 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
               : null;
             username = String(sub?.metadata?.username || "").trim();
             if (!email) email = String(sub?.metadata?.email || "").trim();
+            invoicePricingVariant = normalizePricingVariant(sub?.metadata?.pricingVariant);
+            invoiceMonthlyPrice = Number(sub?.metadata?.monthlyPrice || 0) || 0;
           } catch (_e) {
             console.warn("[stripe webhook] could not retrieve subscription on invoice.paid");
           }
@@ -1283,6 +1366,10 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           priceId,
           status,
           currentPeriodEnd,
+          extra: {
+            pricingVariant: invoicePricingVariant,
+            ...(invoiceMonthlyPrice ? { monthlyPrice: invoiceMonthlyPrice } : {}),
+          },
         });
 
         console.log("[stripe webhook] invoice.paid", {
@@ -1378,6 +1465,8 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
         const currentPeriodEnd = subscription?.current_period_end
           ? new Date(Number(subscription.current_period_end) * 1000).toISOString()
           : null;
+        const subPricingVariant = normalizePricingVariant(subscription?.metadata?.pricingVariant);
+        const subMonthlyPrice = Number(subscription?.metadata?.monthlyPrice || 0) || 0;
 
         await markSubscriptionFromStripe({
           username,
@@ -1387,6 +1476,10 @@ router.post("/webhook", express.raw({ type: "application/json" }), async (req, r
           priceId,
           status,
           currentPeriodEnd,
+          extra: {
+            pricingVariant: subPricingVariant,
+            ...(subMonthlyPrice ? { monthlyPrice: subMonthlyPrice } : {}),
+          },
         });
 
         console.log(`[stripe webhook] ${event.type}`, {

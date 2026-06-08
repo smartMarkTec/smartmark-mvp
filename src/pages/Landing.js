@@ -194,7 +194,8 @@ function MetricTile({ label, value, trend }) {
 }
 
 // ─── Landing ──────────────────────────────────────────────────────────────────
-export default function Landing() {
+export default function Landing({ pricingPath }) {
+  const activePricingPath = pricingPath || "/pricing";
   const [isMobile, setIsMobile]     = useState(window.innerWidth <= 920);
   const [openFaq, setOpenFaq]       = useState(-1);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -237,12 +238,12 @@ export default function Landing() {
       .catch(() => {});
   }, []);
 
-  // Get Started → /pricing for new visitors; → /setup for logged-in users
+  // Get Started → pricing (path varies) for new visitors; → /setup for logged-in users
   const handleCTA = () => {
     if (typeof window.fbq === "function") {
       window.fbq("track", "Lead");
     }
-    window.location.href = isLoggedIn ? "/setup" : "/pricing";
+    window.location.href = isLoggedIn ? "/setup" : activePricingPath;
   };
 
   const scrollToFaq = () => {
@@ -332,7 +333,7 @@ export default function Landing() {
           <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
             {!isMobile && (
               <>
-                <button onClick={() => (window.location.href = "/pricing")} style={navBtn}>
+                <button onClick={() => (window.location.href = activePricingPath)} style={navBtn}>
                   Pricing
                 </button>
                 <button onClick={() => (window.location.href = "/login")} style={navBtn}>
@@ -354,7 +355,7 @@ export default function Landing() {
             )}
 
             {isMobile && (
-              <button onClick={() => (window.location.href = "/pricing")} style={navBtnSm}>
+              <button onClick={() => (window.location.href = activePricingPath)} style={navBtnSm}>
                 Pricing
               </button>
             )}
