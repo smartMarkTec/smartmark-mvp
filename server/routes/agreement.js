@@ -10,7 +10,7 @@ const SID_HEADER  = 'x-sm-sid';
 const AGREEMENT_VERSION = 'smartemark_msa_v1';
 
 const PLAN_LABEL = { base: 'Base', deluxe: 'Deluxe', premium: 'Premium', operator: 'Premium', starter: 'Base', pro: 'Deluxe' };
-const VARIANT_LABEL = { high_ticket_test: 'Growth Plan Pricing', normal: 'Standard Pricing' };
+const VARIANT_LABEL = { high_ticket_test: 'Growth Pricing', normal: 'Standard Pricing' };
 
 function getSid(req) {
   return (

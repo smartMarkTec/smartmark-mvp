@@ -2,13 +2,19 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
-const BG   = "#1a1c20";
-const CARD = "#23262b";
-const GREEN = "#1ec885";
-const WHITE = "#ffffff";
-const GRAY  = "#9ca3af";
-const FONT  = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const BG       = "#f8fafc";
+const CARD     = "#ffffff";
+const BLUE     = "#2563eb";
+const GREEN    = "#16a34a";
+const TEXT     = "#111827";
+const TEXT_MD  = "#374151";
+const TEXT_MUT = "#6b7280";
+const BORDER   = "#e5e7eb";
+const BORDER_MD = "#d1d5db";
+const FONT     = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
+// ── Auth helpers (unchanged) ──────────────────────────────────────────────────
 const SM_SID_KEY = "sm_sid_v1";
 
 function getSid() {
@@ -24,14 +30,16 @@ function smFetch(path, opts = {}) {
   });
 }
 
-const PLAN_LABEL = { base: "Base", deluxe: "Deluxe", premium: "Premium", operator: "Premium", starter: "Base", pro: "Deluxe" };
-const VARIANT_LABEL = { high_ticket_test: "Growth Plan Pricing", normal: "Standard Pricing" };
+// ── Plan / routing maps (unchanged logic) ────────────────────────────────────
+const PLAN_LABEL    = { base: "Base", deluxe: "Deluxe", premium: "Premium", operator: "Premium", starter: "Base", pro: "Deluxe" };
+const VARIANT_LABEL = { high_ticket_test: "Growth Pricing", normal: "Standard Pricing" };
 const PLAN_REDIRECT = { premium: "/premium-intake", operator: "/premium-intake" };
 
 function fmt(date) {
   return new Date(date || Date.now()).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
+// ── Agreement text builder (unchanged) ───────────────────────────────────────
 function buildAgreementText({ businessName, planLabel, monthlyPrice, variantLabel, signerName, signerTitle, signerEmail, signature, date }) {
   const bn    = businessName || "[CLIENT BUSINESS NAME]";
   const sn    = signerName   || "[AUTHORIZED REPRESENTATIVE NAME]";
@@ -383,15 +391,14 @@ Email: knowlesw34@gmail.com
 END OF AGREEMENT`;
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
+// ── Shared input style ────────────────────────────────────────────────────────
 const inputStyle = {
   width: "100%",
-  background: "#2a2d33",
-  border: "1px solid #3a3d45",
+  background: "#f9fafb",
+  border: `1px solid ${BORDER_MD}`,
   borderRadius: 8,
   padding: "11px 14px",
-  color: WHITE,
+  color: TEXT,
   fontSize: 14,
   fontFamily: FONT,
   outline: "none",
@@ -402,14 +409,12 @@ const labelStyle = {
   display: "block",
   fontSize: 12,
   fontWeight: 600,
-  color: GRAY,
+  color: TEXT_MD,
   marginBottom: 6,
-  letterSpacing: "0.04em",
-  textTransform: "uppercase",
+  letterSpacing: "0.03em",
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
-
 export default function Agreement() {
   const navigate = useNavigate();
 
@@ -417,12 +422,13 @@ export default function Agreement() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr]               = useState("");
   const [expanded, setExpanded]     = useState(false);
+  const [isMobile, setIsMobile]     = useState(window.innerWidth < 640);
 
   // Billing data from server
-  const [planLabel, setPlanLabel]         = useState("");
-  const [monthlyPrice, setMonthlyPrice]   = useState(0);
-  const [variantLabel, setVariantLabel]   = useState("Standard Pricing");
-  const [planKey, setPlanKey]             = useState("");
+  const [planLabel, setPlanLabel]                       = useState("");
+  const [monthlyPrice, setMonthlyPrice]                 = useState(0);
+  const [variantLabel, setVariantLabel]                 = useState("Standard Pricing");
+  const [planKey, setPlanKey]                           = useState("");
   const [stripeCustomerId, setStripeCustomerId]         = useState("");
   const [stripeSubscriptionId, setStripeSubscriptionId] = useState("");
   const [stripePriceId, setStripePriceId]               = useState("");
@@ -446,32 +452,29 @@ export default function Agreement() {
     checked &&
     !submitting;
 
-  // ── On mount: check status ──────────────────────────────────────────────────
+  // Resize listener for mobile grid collapse
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // ── On mount: check status (unchanged) ────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         const res  = await smFetch("/api/agreement/status");
         const json = await res.json().catch(() => ({}));
 
-        if (!json?.ok) {
-          navigate("/pricing", { replace: true });
-          return;
-        }
-        if (!json.hasAccess) {
-          navigate("/pricing", { replace: true });
-          return;
-        }
-        // Already signed — skip ahead
-        if (json.signed) {
-          navigate(PLAN_REDIRECT[json.planKey] || "/setup", { replace: true });
-          return;
-        }
+        if (!json?.ok) { navigate("/pricing", { replace: true }); return; }
+        if (!json.hasAccess) { navigate("/pricing", { replace: true }); return; }
+        if (json.signed) { navigate(PLAN_REDIRECT[json.planKey] || "/setup", { replace: true }); return; }
 
-        setPlanLabel(json.planLabel         || "Base");
+        setPlanLabel(json.planLabel             || "Base");
         setMonthlyPrice(Number(json.monthlyPrice || 0));
-        setVariantLabel(json.variantLabel   || "Standard Pricing");
-        setPlanKey(json.planKey             || "");
-        setPricingVariant(json.pricingVariant || "normal");
+        setVariantLabel(json.variantLabel        || "Standard Pricing");
+        setPlanKey(json.planKey                  || "");
+        setPricingVariant(json.pricingVariant    || "normal");
         setStripeCustomerId(json.stripeCustomerId     || "");
         setStripeSubscriptionId(json.stripeSubscriptionId || "");
         setStripePriceId(json.stripePriceId           || "");
@@ -483,7 +486,7 @@ export default function Agreement() {
     })();
   }, [navigate]);
 
-  // ── Submit ──────────────────────────────────────────────────────────────────
+  // ── Submit (unchanged) ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
@@ -491,42 +494,25 @@ export default function Agreement() {
     setErr("");
 
     const snapshot = buildAgreementText({
-      businessName,
-      planLabel,
-      monthlyPrice,
-      variantLabel,
-      signerName,
-      signerTitle,
-      signerEmail,
-      signature: electronicSignature,
-      date: today,
+      businessName, planLabel, monthlyPrice, variantLabel,
+      signerName, signerTitle, signerEmail,
+      signature: electronicSignature, date: today,
     });
 
     try {
       const res  = await smFetch("/api/agreement/accept", {
         method: "POST",
         body: JSON.stringify({
-          businessName,
-          signerName,
-          signerTitle,
-          signerEmail,
-          electronicSignature,
-          checkboxAccepted: true,
+          businessName, signerName, signerTitle, signerEmail,
+          electronicSignature, checkboxAccepted: true,
           agreementVersion: "smartemark_msa_v1",
           agreementTextSnapshot: snapshot,
-          selectedPlan:         planKey,
-          monthlyPrice,
-          pricingVariant,
-          stripeCustomerId,
-          stripeSubscriptionId,
-          stripePriceId,
+          selectedPlan: planKey, monthlyPrice, pricingVariant,
+          stripeCustomerId, stripeSubscriptionId, stripePriceId,
         }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!json?.ok) {
-        setErr(json?.error || "Could not save agreement. Please try again.");
-        return;
-      }
+      if (!json?.ok) { setErr(json?.error || "Could not save agreement. Please try again."); return; }
       navigate(PLAN_REDIRECT[planKey] || "/setup", { replace: true });
     } catch {
       setErr("Network error. Please try again.");
@@ -535,46 +521,57 @@ export default function Agreement() {
     }
   }, [canSubmit, businessName, planLabel, monthlyPrice, variantLabel, signerName, signerTitle, signerEmail, electronicSignature, today, planKey, pricingVariant, stripeCustomerId, stripeSubscriptionId, stripePriceId, navigate]);
 
-  // ── Preview text for the scrollable box ────────────────────────────────────
+  // ── Live-preview text (unchanged) ─────────────────────────────────────────
   const previewText = buildAgreementText({
     businessName: businessName || "[CLIENT BUSINESS NAME]",
-    planLabel,
-    monthlyPrice,
-    variantLabel,
-    signerName:          signerName          || "[AUTHORIZED REPRESENTATIVE NAME]",
-    signerTitle:         signerTitle         || "[TITLE]",
-    signerEmail:         signerEmail         || "[EMAIL]",
-    signature:           electronicSignature || "[ELECTRONIC SIGNATURE]",
+    planLabel, monthlyPrice, variantLabel,
+    signerName:   signerName          || "[AUTHORIZED REPRESENTATIVE NAME]",
+    signerTitle:  signerTitle         || "[TITLE]",
+    signerEmail:  signerEmail         || "[EMAIL]",
+    signature:    electronicSignature || "[ELECTRONIC SIGNATURE]",
     date: today,
   });
 
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: BG, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT }}>
-        <div style={{ color: GRAY, fontSize: 14 }}>Loading agreement…</div>
+        <div style={{ color: TEXT_MUT, fontSize: 14 }}>Loading agreement…</div>
       </div>
     );
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT, color: WHITE, padding: "32px 16px 64px" }}>
+    <div style={{ minHeight: "100vh", background: BG, fontFamily: FONT, color: TEXT, padding: isMobile ? "24px 16px 56px" : "40px 24px 72px" }}>
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
 
-        {/* Header */}
+        {/* Wordmark */}
         <div style={{ marginBottom: 28, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: GRAY, marginBottom: 8 }}>Step 1 of 2</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 6px", letterSpacing: "-0.5px" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: TEXT, letterSpacing: "-0.5px", marginBottom: 16 }}>
+            Smartemark
+          </div>
+
+          {/* Step pill */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 20, padding: "5px 14px", marginBottom: 16 }}>
+            <span style={{ width: 18, height: 18, borderRadius: "50%", background: BLUE, color: "#fff", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>1</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: BLUE }}>Sign Agreement</span>
+          </div>
+
+          <h1 style={{ fontSize: isMobile ? 20 : 24, fontWeight: 800, margin: "0 0 8px", color: TEXT, letterSpacing: "-0.3px" }}>
             Smartemark Marketing Services Agreement
           </h1>
-          <div style={{ fontSize: 13, color: GRAY }}>Review and sign before accessing your account.</div>
+          <p style={{ fontSize: 14, color: TEXT_MUT, margin: 0 }}>
+            Please review and sign before accessing your account.
+          </p>
         </div>
 
-        {/* Plan badge */}
+        {/* Selected plan card */}
         <div style={{
-          background: "#1e2940",
-          border: "1px solid #2a3a5c",
+          background: "#eff6ff",
+          border: "1px solid #bfdbfe",
           borderRadius: 12,
-          padding: "14px 20px",
+          padding: "16px 20px",
           marginBottom: 24,
           display: "flex",
           alignItems: "center",
@@ -583,61 +580,66 @@ export default function Agreement() {
           gap: 8,
         }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>
-              Your Selected Plan
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>
+              You Selected
             </div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: WHITE }}>
+            <div style={{ fontSize: isMobile ? 17 : 19, fontWeight: 800, color: TEXT }}>
               {planLabel} — ${monthlyPrice.toLocaleString()}/month
             </div>
           </div>
-          <div style={{ fontSize: 12, color: GRAY }}>{variantLabel}</div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "#2563eb", background: "#dbeafe", borderRadius: 6, padding: "4px 10px" }}>
+            {variantLabel}
+          </div>
         </div>
 
         {/* Agreement box */}
         <div style={{ marginBottom: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: GRAY, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: TEXT_MD }}>
               Agreement Text
             </div>
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              style={{ background: "none", border: "none", color: GREEN, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              style={{ background: "none", border: "none", color: BLUE, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, textDecoration: "underline", textUnderlineOffset: 2 }}
             >
               {expanded ? "Collapse" : "Expand Agreement"}
             </button>
           </div>
+
           <div style={{
-            background: "#16181d",
-            border: "1px solid #2e3138",
+            background: CARD,
+            border: `1px solid ${BORDER}`,
             borderRadius: 10,
-            padding: "16px 18px",
-            height: expanded ? "auto" : 320,
+            padding: isMobile ? "14px 14px" : "20px 24px",
+            height: expanded ? "auto" : (isMobile ? 360 : 420),
             overflowY: "auto",
-            fontFamily: "monospace",
-            fontSize: 12,
-            lineHeight: 1.75,
-            color: "#d1d5db",
+            fontFamily: FONT,
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: TEXT_MD,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}>
             {previewText}
           </div>
+
           {!expanded && (
-            <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, color: GRAY }}>
+            <div style={{ textAlign: "center", marginTop: 7, fontSize: 12, color: TEXT_MUT }}>
               Scroll to read the full agreement, or click "Expand Agreement" above.
             </div>
           )}
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 18 }}>
+        <form onSubmit={handleSubmit} style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 16 }}>
 
-          <div style={{ background: CARD, borderRadius: 14, padding: "24px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: WHITE, marginBottom: 4 }}>Client Information</div>
+          {/* Client information card */}
+          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: isMobile ? "20px 16px" : "24px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: TEXT, marginBottom: 2 }}>Client Information</div>
 
             <div>
-              <label style={labelStyle}>Business Name *</label>
+              <label style={labelStyle}>Business Name <span style={{ color: "#ef4444" }}>*</span></label>
               <input
                 type="text"
                 value={businessName}
@@ -648,9 +650,9 @@ export default function Agreement() {
               />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
               <div>
-                <label style={labelStyle}>Authorized Representative Name *</label>
+                <label style={labelStyle}>Authorized Representative Name <span style={{ color: "#ef4444" }}>*</span></label>
                 <input
                   type="text"
                   value={signerName}
@@ -673,7 +675,7 @@ export default function Agreement() {
             </div>
 
             <div>
-              <label style={labelStyle}>Email Address *</label>
+              <label style={labelStyle}>Email Address <span style={{ color: "#ef4444" }}>*</span></label>
               <input
                 type="email"
                 value={signerEmail}
@@ -691,26 +693,27 @@ export default function Agreement() {
             gap: 12,
             alignItems: "flex-start",
             cursor: "pointer",
-            background: CARD,
+            background: checked ? "#f0fdf4" : CARD,
             borderRadius: 12,
-            padding: "16px 18px",
-            border: checked ? `1px solid ${GREEN}` : "1px solid #3a3d45",
+            padding: isMobile ? "14px 14px" : "16px 20px",
+            border: checked ? `1px solid #86efac` : `1px solid ${BORDER}`,
+            transition: "border-color 0.15s, background 0.15s",
           }}>
             <input
               type="checkbox"
               checked={checked}
               onChange={(e) => setChecked(e.target.checked)}
-              style={{ marginTop: 2, width: 17, height: 17, accentColor: GREEN, flexShrink: 0, cursor: "pointer" }}
+              style={{ marginTop: 3, width: 16, height: 16, accentColor: GREEN, flexShrink: 0, cursor: "pointer" }}
             />
-            <span style={{ fontSize: 13, color: "#d1d5db", lineHeight: 1.6 }}>
+            <span style={{ fontSize: 13, color: TEXT_MD, lineHeight: 1.65 }}>
               By checking this box and typing my name below, I agree that I have read and accepted the Smartemark Marketing Services Agreement. I understand that typing my name below acts as my electronic signature.
             </span>
           </label>
 
-          {/* Electronic signature */}
-          <div style={{ background: CARD, borderRadius: 14, padding: "20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ ...labelStyle, fontSize: 13, textTransform: "none", color: WHITE }}>
-              Type your full legal name to sign electronically *
+          {/* Electronic signature card */}
+          <div style={{ background: CARD, border: `1px solid ${electronicSignature ? "#86efac" : BORDER}`, borderRadius: 14, padding: isMobile ? "16px 14px" : "20px 24px", display: "flex", flexDirection: "column", gap: 10, transition: "border-color 0.15s" }}>
+            <label style={{ fontSize: 14, fontWeight: 600, color: TEXT, display: "block", marginBottom: 2 }}>
+              Type your full legal name to sign electronically <span style={{ color: "#ef4444" }}>*</span>
             </label>
             <input
               type="text"
@@ -718,18 +721,25 @@ export default function Agreement() {
               onChange={(e) => setElectronicSignature(e.target.value)}
               placeholder="Full legal name"
               required
-              style={{ ...inputStyle, fontSize: 18, fontFamily: "Georgia, serif", borderColor: electronicSignature ? GREEN : "#3a3d45" }}
+              style={{
+                ...inputStyle,
+                fontSize: 18,
+                fontFamily: "Georgia, 'Times New Roman', serif",
+                borderColor: electronicSignature ? "#86efac" : BORDER_MD,
+                background: electronicSignature ? "#f0fdf4" : "#f9fafb",
+                letterSpacing: "0.02em",
+              }}
             />
             {electronicSignature && (
-              <div style={{ fontSize: 11, color: GRAY }}>
-                Signed as: <em style={{ color: WHITE }}>{electronicSignature}</em> — {today}
+              <div style={{ fontSize: 12, color: GREEN, fontWeight: 500 }}>
+                Signed as: <em style={{ color: TEXT_MD }}>{electronicSignature}</em> &nbsp;·&nbsp; {today}
               </div>
             )}
           </div>
 
           {/* Error */}
           {err && (
-            <div style={{ background: "#2d1515", border: "1px solid #7f1d1d", borderRadius: 8, padding: "12px 16px", color: "#fca5a5", fontSize: 13 }}>
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "12px 16px", color: "#dc2626", fontSize: 13 }}>
               {err}
             </div>
           )}
@@ -739,25 +749,27 @@ export default function Agreement() {
             type="submit"
             disabled={!canSubmit}
             style={{
-              background: canSubmit ? GREEN : "#2a2d33",
-              color: canSubmit ? "#000" : GRAY,
+              background: canSubmit ? BLUE : "#f3f4f6",
+              color: canSubmit ? "#ffffff" : "#9ca3af",
               border: "none",
-              borderRadius: 12,
-              padding: "16px 24px",
-              fontSize: 16,
-              fontWeight: 800,
+              borderRadius: 10,
+              padding: "15px 24px",
+              fontSize: 15,
+              fontWeight: 700,
               cursor: canSubmit ? "pointer" : "not-allowed",
-              letterSpacing: "0.02em",
+              letterSpacing: "0.01em",
+              width: "100%",
               transition: "background 0.15s",
             }}
           >
             {submitting ? "Saving…" : "I Agree & Continue to Intake"}
           </button>
 
-          <div style={{ fontSize: 11, color: GRAY, textAlign: "center", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 12, color: TEXT_MUT, textAlign: "center", lineHeight: 1.6 }}>
             This electronic signature is legally binding. Smartemark is William Knowles d/b/a Smartemark, 66 Mill Point Place, Texas.
           </div>
         </form>
+
       </div>
     </div>
   );
