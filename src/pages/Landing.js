@@ -194,8 +194,9 @@ function MetricTile({ label, value, trend }) {
 }
 
 // ─── Landing ──────────────────────────────────────────────────────────────────
-export default function Landing({ pricingPath }) {
+export default function Landing({ pricingPath, homePath }) {
   const activePricingPath = pricingPath || "/pricing";
+  const activeHomePath = homePath || "/";
   const [isMobile, setIsMobile]     = useState(window.innerWidth <= 920);
   const [openFaq, setOpenFaq]       = useState(-1);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -326,7 +327,7 @@ export default function Landing({ pricingPath }) {
             alignItems: "center",
           }}
         >
-          <a href="/" style={{ fontSize: 20, fontWeight: 700, color: TEXT, letterSpacing: -0.5, textDecoration: "none" }}>
+          <a href={activeHomePath} style={{ fontSize: 20, fontWeight: 700, color: TEXT, letterSpacing: -0.5, textDecoration: "none" }}>
             Smartemark
           </a>
 

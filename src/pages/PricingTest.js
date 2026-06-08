@@ -86,7 +86,7 @@ export default function PricingTest() {
     <Pricing
       pricingVariant="high_ticket_test"
       customPlans={HIGH_TICKET_PLANS}
-      homeRoute="/test"
+      homeRoute="/growth"
     />
   );
 }

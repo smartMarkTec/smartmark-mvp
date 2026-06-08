@@ -7947,7 +7947,7 @@ ${pendingTest ? `
                     letterSpacing: "0.01em",
                   }}
                 >
-                  <span style={{ fontSize: 15 }}>📄</span> Print Monthly Report
+                  <span style={{ fontSize: 15 }}>📄</span> Print Report
                 </button>
               </>
             );

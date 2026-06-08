@@ -99,6 +99,9 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const isGrowthVariant =
+    localStorage.getItem("sm_pricing_variant") === "high_ticket_test";
+
   const selectedPlan = useMemo(
     () =>
       String(
@@ -208,7 +211,7 @@ export default function Login() {
         return;
       }
 
-      navigate("/setup");
+      navigate(isGrowthVariant ? "/growth-pricing" : "/setup");
     } catch (error) {
       setErr(error?.message || "Could not log in.");
     } finally {
@@ -222,7 +225,7 @@ export default function Login() {
 
       {/* Top bar — Smartemark wordmark */}
       <div style={{ padding: "20px 28px" }}>
-        <a href="/" style={{ fontSize: 18, fontWeight: 700, color: TEXT, letterSpacing: -0.5, textDecoration: "none" }}>
+        <a href={isGrowthVariant ? "/growth" : "/"} style={{ fontSize: 18, fontWeight: 700, color: TEXT, letterSpacing: -0.5, textDecoration: "none" }}>
           Smartemark
         </a>
       </div>

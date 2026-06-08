@@ -1,6 +1,6 @@
 // src/App.js
 import React, { useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Pricing from "./pages/Pricing";
 import LandingTest from "./pages/LandingTest";
@@ -61,9 +61,11 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/test" element={<LandingTest />} />
+      <Route path="/growth" element={<LandingTest />} />
       <Route path="/pricing" element={<Pricing />} />
-      <Route path="/pricing-test" element={<PricingTest />} />
+      <Route path="/growth-pricing" element={<PricingTest />} />
+      <Route path="/test" element={<Navigate to="/growth" replace />} />
+      <Route path="/pricing-test" element={<Navigate to="/growth-pricing" replace />} />
       <Route path="/form" element={<FormPage />} />
       <Route path="/setup" element={<CampaignSetup />} />
       <Route path="/login" element={<Login />} />
