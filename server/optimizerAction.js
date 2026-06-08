@@ -659,11 +659,41 @@ async function executePrimaryTextRefresh({
   const campaignId = String(optimizerState.campaignId || '').trim();
   const accountId = String(optimizerState.accountId || '').replace(/^act_/, '').trim();
 
-  const copyResult = buildUpdatedPrimaryText({
+  let copyResult = buildUpdatedPrimaryText({
     optimizerState,
     latestDiagnosis: optimizerState.latestDiagnosis || null,
     latestMonitoringDecision: optimizerState.latestMonitoringDecision || null,
   });
+
+  // If context is missing, attempt to recover live ad copy directly from Meta before giving up.
+  // Current ad body is the most reliable grounding source — it's what the customer is running.
+  if (copyResult.needsContext) {
+    try {
+      const liveAds = await fetchCampaignAds({ campaignId, userToken, limit: 10 });
+      const liveAd = liveAds.find(
+        (item) => item?.creative?.object_story_spec?.link_data?.message
+      );
+      const liveAdBody = String(liveAd?.creative?.object_story_spec?.link_data?.message || '').trim();
+
+      if (liveAdBody) {
+        // Retry with the live ad copy injected as originalPrimaryText
+        const enhancedState = {
+          ...optimizerState,
+          businessBrief: {
+            ...(optimizerState?.businessBrief || {}),
+            originalPrimaryText: optimizerState?.businessBrief?.originalPrimaryText || liveAdBody,
+          },
+        };
+        copyResult = buildUpdatedPrimaryText({
+          optimizerState: enhancedState,
+          latestDiagnosis: optimizerState.latestDiagnosis || null,
+          latestMonitoringDecision: optimizerState.latestMonitoringDecision || null,
+        });
+      }
+    } catch (_fetchErr) {
+      // Swallow — if Meta fetch fails, fall through to the context-missing path below
+    }
+  }
 
   if (copyResult.needsContext) {
     console.warn('[optimizer action] update_primary_text skipped: insufficient campaign context for grounded copy', {
@@ -675,8 +705,8 @@ async function executePrimaryTextRefresh({
       actionType: 'update_primary_text',
       status: 'needs_context',
       reason:
-        'Campaign context is missing (businessName, industry, and originalBody are all empty). ' +
-        'Cannot generate on-brand copy without at least one of these fields. ' +
+        'Campaign context is missing and the live ad copy could not be recovered. ' +
+        'Cannot generate on-brand copy without businessName, industry, original copy, or campaign name. ' +
         'Re-launch the campaign or manually save business context to enable copy refresh.',
     });
   }

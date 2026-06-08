@@ -41,15 +41,19 @@ function buildUpdatedPrimaryText({ optimizerState = {}, latestDiagnosis = null, 
   );
   const idealCustomer = clean(brief.idealCustomer || ctx.idealCustomer);
   // brief.originalPrimaryText is the canonical key; brief.originalBody is the legacy key.
+  // Also check currentPrimaryText (set after each successful copy refresh) and
+  // latestCreativeMeta.body (from the most recent ad creative fetch) as live-copy fallbacks.
   const originalBody = clean(
     brief.originalPrimaryText || brief.originalBody ||
-    ctx.body || ctx.primaryText || ctx.adBody
+    ctx.body || ctx.primaryText || ctx.adBody ||
+    optimizerState?.currentPrimaryText ||
+    optimizerState?.latestCreativeMeta?.body
   );
 
-  // Safety guard: require at least businessName, industry, or originalBody.
-  // Without one of these, the generator has no campaign context and produces
-  // generic off-brand copy with no relation to the actual campaign.
-  const hasUsableContext = !!(businessName || industry || originalBody);
+  // Safety guard: require at least one grounded field.
+  // campaignName and niche are always set at launch, so virtually any enrolled campaign
+  // will pass this check. Only block when there is truly nothing to ground the copy on.
+  const hasUsableContext = !!(businessName || industry || originalBody || campaignName || niche);
   if (!hasUsableContext) {
     return {
       primaryText: null,
@@ -98,6 +102,11 @@ function buildUpdatedPrimaryText({ optimizerState = {}, latestDiagnosis = null, 
       // Extract the first two sentences of the original as the challenger hook.
       const sentences = originalBody.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
       primaryText = sentences.slice(0, 2).join(' ') + ctaSuffix;
+    } else if (niche || campaignName) {
+      // Last-resort: use niche/campaign name as a basic hook
+      const label = campaignName || niche;
+      const industryHook = niche ? `${niche.toLowerCase()} services` : label;
+      primaryText = `Looking for better ${industryHook}${locationSuffix}? ${label} has you covered.${ctaSuffix}`;
     }
   } else if (angle === 'soft_refresh') {
     // Softer discovery angle — good when there is not yet enough data to act on.
@@ -106,6 +115,9 @@ function buildUpdatedPrimaryText({ optimizerState = {}, latestDiagnosis = null, 
     } else if (originalBody) {
       const sentences = originalBody.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
       primaryText = 'Discover more. ' + sentences.slice(0, 2).join(' ') + ctaSuffix;
+    } else if (niche || campaignName) {
+      const label = campaignName || niche;
+      primaryText = `Discover what ${label} can do for you${locationSuffix}.${ctaSuffix}`;
     }
   } else {
     // clarity angle — clean, direct, grounded in original campaign positioning.
@@ -119,6 +131,7 @@ function buildUpdatedPrimaryText({ optimizerState = {}, latestDiagnosis = null, 
       const core = sentences.slice(0, 2).join(' ');
       primaryText = core + (resolvedCta && !core.includes(resolvedCta) ? ctaSuffix : '');
     } else {
+      // businessLabel already falls back to campaignName or 'this service', so this always produces something
       primaryText = `${businessLabel}${locationSuffix}.${audienceNote}${ctaSuffix}`;
     }
   }

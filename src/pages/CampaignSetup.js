@@ -1852,7 +1852,7 @@ function buildOptimizerHistoryItems(optimizerState) {
     .slice(0, 4);
 }
 
-function MarketerActionsCard({ summary, optimizerState, metrics }) {
+function MarketerActionsCard({ summary, optimizerState, metrics, setSetupTab }) {
   const safeSummary = summary || getFallbackPublicSummary();
   const _aiHistoryRaw = Array.isArray(optimizerState?.aiHistory) ? optimizerState.aiHistory : [];
   const history = _aiHistoryRaw.length > 0
@@ -1869,7 +1869,8 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
           kind:
             entry.type === 'diagnosis' ? 'Diagnosis'
             : entry.type === 'decision' ? 'Decision'
-            : entry.type === 'action' ? 'Action'
+            : entry.type === 'action'
+              ? (entry.executed === true && !entry.skipped && !entry.dryRun ? 'Action Made' : 'Action')
             : entry.type === 'daily_report' ? 'Daily Report'
             : 'Monitoring',
           title: entry.title || String(entry.actionType || entry.type || 'Update').replace(/_/g, ' '),
@@ -2142,9 +2143,10 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
                   const kindColors = {
                     Diagnosis:       { bg: "#f5f3ff", border: "#e9d5ff", badge: "#7c3aed" },
                     Decision:        { bg: "#eff6ff", border: "#bfdbfe", badge: "#1d4ed8" },
+                    "Action Made":   { bg: "#f0fdf4", border: "#86efac", badge: "#15803d" },
                     Action:          item.dryRun
                       ? { bg: "#fffbeb", border: "#fde68a", badge: "#b45309" }
-                      : { bg: "#f0fdf4", border: "#bbf7d0", badge: "#15803d" },
+                      : { bg: "#f1f5f9", border: "#cbd5e1", badge: "#64748b" },
                     "Daily Report":  { bg: "#f0fdf4", border: "#bbf7d0", badge: "#16a34a" },
                     Monitoring:      { bg: "#f8fafc", border: "#e2e8f0", badge: "#475569" },
                   };
@@ -2172,6 +2174,27 @@ function MarketerActionsCard({ summary, optimizerState, metrics }) {
                       {item.detail ? (
                         <div style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.6 }}>{item.detail}</div>
                       ) : null}
+                      {(item.kind === "Action Made" || item.kind === "Action") &&
+                        (String(item.rawType || "").includes("action")) &&
+                        (String(item.title || "").toLowerCase().includes("creative") ||
+                         String(item.title || "").toLowerCase().includes("variant") ||
+                         String(item.title || "").toLowerCase().includes("challenger") ||
+                         String(item.title || "").toLowerCase().includes("promote")) && (
+                        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                            Open the A/B Test tab to compare the original ad against the AI challenger.
+                          </div>
+                          {typeof setSetupTab === "function" && (
+                            <button
+                              type="button"
+                              onClick={() => setSetupTab("abtest")}
+                              style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+                            >
+                              View A/B Test →
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {item.dryRun && (
                         <div style={{ fontSize: 11, color: "#92400e", fontWeight: 500, marginTop: 6, fontStyle: "italic" }}>
                           Dry run — no live campaign change made
@@ -2623,6 +2646,266 @@ function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creative A/B Test Panel
+// Shows original ad vs AI challenger when a pendingCreativeTest exists.
+// ─────────────────────────────────────────────────────────────────────────────
+function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, setSetupTab, campaignCreatives }) {
+  const [testMetrics, setTestMetrics] = useState(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState(null);
+
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const pendingStatus = String(pending?.status || "").trim().toLowerCase();
+  const isLive = pendingStatus === "live";
+  const isStaged = pendingStatus === "staged";
+  const isReady = pendingStatus === "ready";
+
+  const controlAdIds = Array.isArray(pending?.controlAdIds) ? pending.controlAdIds.filter(Boolean) : [];
+  const candidateAdIds = Array.isArray(pending?.candidateAdIds) ? pending.candidateAdIds.filter(Boolean) : [];
+  const hasLiveAds = (isLive || isStaged) && (controlAdIds.length > 0 || candidateAdIds.length > 0);
+
+  useEffect(() => {
+    if (!hasLiveAds || !campaignId) return;
+    let cancelled = false;
+    setMetricsLoading(true);
+    setMetricsError(null);
+    const url = adminClientId
+      ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/creative-test-metrics?campaignId=${encodeURIComponent(campaignId)}`
+      : `/auth/facebook/adaccount/act_${encodeURIComponent(accountId || "")}/campaign/${encodeURIComponent(campaignId)}/creative-test-metrics`;
+    fetch(url, { credentials: "include" })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => {
+        if (!cancelled) {
+          if (j.ok) setTestMetrics(j);
+          else setMetricsError(j.error || "Could not load per-ad metrics.");
+        }
+      })
+      .catch((e) => { if (!cancelled) setMetricsError(e.message); })
+      .finally(() => { if (!cancelled) setMetricsLoading(false); });
+    return () => { cancelled = true; };
+  }, [hasLiveAds, campaignId, accountId, adminClientId]);
+
+  const controlBody = String(
+    optimizerState?.currentPrimaryText ||
+    optimizerState?.businessBrief?.originalPrimaryText ||
+    optimizerState?.businessBrief?.originalBody ||
+    optimizerState?.latestCreativeMeta?.body ||
+    campaignCreatives?.meta?.body || ""
+  ).trim();
+
+  const controlHeadline = String(
+    optimizerState?.currentHeadline ||
+    optimizerState?.businessBrief?.headline ||
+    campaignCreatives?.meta?.headline || ""
+  ).trim();
+
+  const controlImageUrl = toAbsoluteMedia(campaignCreatives?.images?.[0] || "");
+  const challengerImageUrl = toAbsoluteMedia(
+    (Array.isArray(pending?.imageUrls) ? pending.imageUrls[0] : "") || ""
+  );
+
+  const creativeGoal = String(pending?.creativeGoal || "").trim();
+  const generationReason = String(pending?.generationReason || "").trim();
+  const startedAt = String(pending?.startedAt || "").trim();
+
+  const originalMetrics = testMetrics?.original || null;
+  const challengerMetrics = testMetrics?.challenger || null;
+  const currentWinner = optimizerState?.currentWinner || testMetrics?.currentWinner || null;
+
+  const getConclusion = () => {
+    if (currentWinner) {
+      return { text: `Winner selected: ${currentWinner === "challenger" ? "AI challenger" : "Original ad"}`, color: "#16a34a" };
+    }
+    if (!pending) return { text: "No test active.", color: "#475569" };
+    if (isReady || (!isLive && !isStaged)) {
+      return { text: "Test pending launch — challenger creative is ready but not yet live in Meta.", color: "#b45309" };
+    }
+    const oImpr = Number(originalMetrics?.impressions || 0);
+    const cImpr = Number(challengerMetrics?.impressions || 0);
+    const oCtr = Number(originalMetrics?.ctr || 0);
+    const cCtr = Number(challengerMetrics?.ctr || 0);
+    if (oImpr < 500 || cImpr < 500) {
+      return { text: `Waiting for more data — need 500+ impressions per ad to compare. (Original: ${oImpr.toLocaleString()}, Challenger: ${cImpr.toLocaleString()})`, color: "#475569" };
+    }
+    if (cCtr >= oCtr * 1.2) {
+      return { text: `Challenger currently leading — AI creative CTR (${cCtr.toFixed(2)}%) is ahead of original (${oCtr.toFixed(2)}%).`, color: "#1d4ed8" };
+    }
+    if (oCtr >= cCtr * 1.2) {
+      return { text: `Original currently leading — original CTR (${oCtr.toFixed(2)}%) is ahead of challenger (${cCtr.toFixed(2)}%).`, color: "#475569" };
+    }
+    return { text: "Performance is close — gathering more signal before calling a direction.", color: "#475569" };
+  };
+  const conclusion = getConclusion();
+
+  const fmt = (v) => (v != null ? Number(v).toLocaleString() : "—");
+  const fmtCtr = (v) => (v != null ? `${Number(v).toFixed(2)}%` : "—");
+  const fmtMoney = (v) => (v != null ? `$${Number(v).toFixed(2)}` : "—");
+
+  const MetricRow = ({ label, value }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f1f5f9" }}>
+      <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{value}</span>
+    </div>
+  );
+
+  const AdCard = ({ title, badge, accentColor, imageUrl, headline, body, metrics, adIds, isPlaceholder, placeholderNote }) => (
+    <div style={{
+      background: "#fff",
+      border: `1px solid ${accentColor}`,
+      borderRadius: 16,
+      padding: 18,
+      flex: 1,
+      minWidth: 0,
+      display: "flex",
+      flexDirection: "column",
+      gap: 12,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 800, fontSize: 14, color: "#0f172a" }}>{title}</span>
+        {badge && (
+          <span style={{ background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
+            {badge.label}
+          </span>
+        )}
+      </div>
+
+      {imageUrl ? (
+        <img src={imageUrl} alt={`${title} creative`} style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 10, border: "1px solid #e2e8f0" }} />
+      ) : (
+        <div style={{ height: 100, background: "#f8fafc", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 12, border: "1px dashed #e2e8f0" }}>
+          {isPlaceholder ? "Creative pending" : "No image stored"}
+        </div>
+      )}
+
+      {headline && <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", lineHeight: 1.4 }}>{headline}</div>}
+      {body && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.55, maxHeight: 72, overflow: "hidden" }}>{body}</div>}
+      {placeholderNote && (
+        <div style={{ fontSize: 12, color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 10px", lineHeight: 1.5 }}>
+          {placeholderNote}
+        </div>
+      )}
+
+      {metricsLoading && <div style={{ fontSize: 12, color: "#94a3b8" }}>Loading metrics…</div>}
+      {!metricsLoading && metrics && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <MetricRow label="Impressions" value={fmt(metrics.impressions)} />
+          <MetricRow label="Clicks" value={fmt(metrics.clicks)} />
+          <MetricRow label="CTR" value={fmtCtr(metrics.ctr)} />
+          <MetricRow label="Spend" value={fmtMoney(metrics.spend)} />
+          <MetricRow label="CPC" value={fmtMoney(metrics.cpc)} />
+          {metrics.conversions > 0 && <MetricRow label="Conversions" value={fmt(metrics.conversions)} />}
+          {metrics.status && <MetricRow label="Status" value={metrics.status} />}
+        </div>
+      )}
+      {!metricsLoading && !metrics && hasLiveAds && !metricsError && (
+        <div style={{ fontSize: 12, color: "#94a3b8" }}>No per-ad metrics returned from Meta yet.</div>
+      )}
+
+      {adIds && adIds.length > 0 && (
+        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto", paddingTop: 4 }}>Ad ID: {adIds[0]}</div>
+      )}
+    </div>
+  );
+
+  if (!pending) {
+    return (
+      <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>A/B Test</div>
+          <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.6 }}>
+            Original ad vs AI challenger performance.
+          </div>
+        </div>
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 18, padding: 40, textAlign: "center" }}>
+          <div style={{ fontSize: 36, marginBottom: 14 }}>🧪</div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a", marginBottom: 8 }}>No A/B test active yet</div>
+          <div style={{ fontSize: 14, color: "#64748b", lineHeight: 1.7, maxWidth: 420, margin: "0 auto" }}>
+            When Smartemark creates a challenger creative, it will appear here. You'll see the original and AI-generated ad side-by-side with live impressions, CTR, spend, and CPC so you can judge whether the optimizer is improving performance.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Header */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>A/B Test</div>
+          <span style={{
+            background: isLive ? "#dcfce7" : isStaged ? "#fef9c3" : "#f1f5f9",
+            color: isLive ? "#16a34a" : isStaged ? "#b45309" : "#475569",
+            border: `1px solid ${isLive ? "#bbf7d0" : isStaged ? "#fde68a" : "#e2e8f0"}`,
+            borderRadius: 999, fontSize: 11, fontWeight: 700, padding: "3px 10px",
+          }}>
+            {isLive ? "Live" : isStaged ? "Staged (paused)" : isReady ? "Ready to launch" : "Pending"}
+          </span>
+        </div>
+        <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.5 }}>
+          Original ad vs AI challenger{startedAt ? ` · Test started ${new Date(startedAt).toLocaleDateString()}` : ""}
+        </div>
+        {(generationReason || creativeGoal) && (
+          <div style={{ background: "#f5f3ff", border: "1px solid #e9d5ff", borderRadius: 10, padding: "8px 14px", fontSize: 12, color: "#7c3aed", fontWeight: 600, display: "inline-block", alignSelf: "flex-start" }}>
+            Why this test: {generationReason || creativeGoal}
+          </div>
+        )}
+      </div>
+
+      {/* Two-card layout */}
+      <div style={{ display: "flex", gap: 16, flexDirection: isMobile ? "column" : "row", alignItems: "flex-start" }}>
+        <AdCard
+          title="Original Ad"
+          badge={null}
+          accentColor="rgba(93,89,234,0.16)"
+          imageUrl={testMetrics?.original?.thumbnailUrl ? toAbsoluteMedia(testMetrics.original.thumbnailUrl) : controlImageUrl}
+          headline={testMetrics?.original?.headline || controlHeadline}
+          body={testMetrics?.original?.body || controlBody}
+          metrics={originalMetrics}
+          adIds={controlAdIds}
+          isPlaceholder={false}
+        />
+        <AdCard
+          title="AI Challenger"
+          badge={{ label: "AI Generated", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" }}
+          accentColor="rgba(22,163,74,0.18)"
+          imageUrl={testMetrics?.challenger?.thumbnailUrl ? toAbsoluteMedia(testMetrics.challenger.thumbnailUrl) : challengerImageUrl}
+          headline={testMetrics?.challenger?.headline || controlHeadline}
+          body={testMetrics?.challenger?.body || (controlBody ? "Same messaging as original — challenger tests a new visual." : "")}
+          metrics={challengerMetrics}
+          adIds={candidateAdIds}
+          isPlaceholder={isReady}
+          placeholderNote={isReady ? "Challenger creative is staged and ready. It will be promoted to Meta on the next optimizer cycle." : null}
+        />
+      </div>
+
+      {/* Metrics error */}
+      {metricsError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#dc2626" }}>
+          Could not load per-ad metrics: {metricsError}
+        </div>
+      )}
+
+      {/* Conclusion */}
+      <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: "16px 20px" }}>
+        <div style={{ fontWeight: 800, fontSize: 13, color: "#64748b", marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>Conclusion</div>
+        <div style={{ fontWeight: 700, fontSize: 15, color: conclusion.color, lineHeight: 1.5 }}>{conclusion.text}</div>
+        {hasLiveAds && (
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, lineHeight: 1.6 }}>
+            Smartemark compares CTR and spend efficiency after 500+ impressions per ad before recommending a winner. Winner declaration is automatic once clear signal emerges.
+          </div>
+        )}
+      </div>
+
+      {/* Budget note */}
+      <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#1d4ed8", lineHeight: 1.6 }}>
+        <strong>Budget sharing:</strong> Budget is shared inside the same ad set. Meta may give more delivery to the ad it predicts will perform better. Smartemark compares performance after enough impressions accumulate before declaring a winner.
+      </div>
+    </div>
+  );
+}
 
 const CampaignSetup = () => {
 
@@ -3954,14 +4237,18 @@ useEffect(() => {
         }
         if (c.optimizerState) {
           newOptStates[c.id] = {
-            campaignId:      c.id,
-            campaignName:    c.name,
-            currentStatus:   c.status,
-            smArchived:      !!c.smArchived,
-            metricsSnapshot: snap || {},
-            publicSummary:   c.optimizerState.publicSummary   || null,
-            latestDiagnosis: c.optimizerState.latestDiagnosis || null,
-            latestAction:    c.optimizerState.latestAction    || null,
+            campaignId:         c.id,
+            campaignName:       c.name,
+            currentStatus:      c.status,
+            smArchived:         !!c.smArchived,
+            metricsSnapshot:    snap || {},
+            publicSummary:      c.optimizerState.publicSummary      || null,
+            latestDiagnosis:    c.optimizerState.latestDiagnosis    || null,
+            latestAction:       c.optimizerState.latestAction       || null,
+            latestDecision:     c.optimizerState.latestDecision     || null,
+            pendingCreativeTest: c.optimizerState.pendingCreativeTest || null,
+            currentWinner:      c.optimizerState.currentWinner      || null,
+            activeTestType:     c.optimizerState.activeTestType      || '',
           };
         }
       }
@@ -5959,6 +6246,12 @@ const selectedCampaignCreatives =
     subtitle: "Metrics, launch, management",
   },
   {
+    key: "abtest",
+    step: "AB",
+    title: "A/B Test",
+    subtitle: "Original vs AI challenger",
+  },
+  {
     key: "account",
     step: "04",
     title: "Account",
@@ -5966,6 +6259,9 @@ const selectedCampaignCreatives =
   },
 ].map((item) => {
       const active = setupTab === item.key;
+      const isAbTab = item.key === "abtest";
+      const abTestPending = isAbTab && !!selectedOptimizerState?.pendingCreativeTest;
+      const abTestLive = isAbTab && ["live", "staged"].includes(String(selectedOptimizerState?.pendingCreativeTest?.status || "").toLowerCase());
       return (
         <button
           key={item.key}
@@ -5981,33 +6277,56 @@ const selectedCampaignCreatives =
             textAlign: "left",
             borderRadius: 14,
             padding: isMobile ? "10px 4px" : "12px 12px",
-            border: active ? "1px solid rgba(93,89,234,0.22)" : "1px solid transparent",
+            border: active
+              ? "1px solid rgba(93,89,234,0.22)"
+              : abTestPending
+              ? "1px solid rgba(22,163,74,0.22)"
+              : "1px solid transparent",
             background: active
               ? "linear-gradient(120deg, #eef2ff 0%, #e4e8ff 100%)"
+              : abTestPending && !active
+              ? "rgba(240,253,244,0.6)"
               : "transparent",
             cursor: "pointer",
             transition: "all 180ms ease",
           }}
         >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: active
-                ? "linear-gradient(135deg, #5b57e8 0%, #6b66ff 100%)"
-                : "linear-gradient(135deg, #f1f5f9 0%, #e9ebf2 100%)",
-              color: active ? "#ffffff" : "#475569",
-              fontWeight: 900,
-              fontSize: 11,
-              boxShadow: active ? "0 2px 8px rgba(91,87,232,0.28)" : "none",
-            }}
-          >
-            {item.step}
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                minWidth: 32,
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: active
+                  ? "linear-gradient(135deg, #5b57e8 0%, #6b66ff 100%)"
+                  : abTestPending
+                  ? "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)"
+                  : "linear-gradient(135deg, #f1f5f9 0%, #e9ebf2 100%)",
+                color: active ? "#ffffff" : abTestPending ? "#16a34a" : "#475569",
+                fontWeight: 900,
+                fontSize: 11,
+                boxShadow: active ? "0 2px 8px rgba(91,87,232,0.28)" : "none",
+              }}
+            >
+              {item.step}
+            </div>
+            {abTestLive && (
+              <span style={{
+                position: "absolute",
+                top: -3,
+                right: -3,
+                width: 9,
+                height: 9,
+                borderRadius: "50%",
+                background: "#16a34a",
+                border: "2px solid #fff",
+                display: "block",
+              }} />
+            )}
           </div>
 
           {!isMobile && (
@@ -6025,13 +6344,13 @@ const selectedCampaignCreatives =
               </div>
               <div
                 style={{
-                  color: "#64748b",
+                  color: abTestLive ? "#16a34a" : abTestPending ? "#b45309" : "#64748b",
                   fontWeight: 700,
                   fontSize: 11,
                   lineHeight: 1.3,
                 }}
               >
-                {item.subtitle}
+                {abTestLive ? "Live test running" : abTestPending ? "Challenger ready" : item.subtitle}
               </div>
             </div>
           )}
@@ -7337,6 +7656,7 @@ const selectedCampaignCreatives =
           summary={selectedOptimizerSummary}
           optimizerState={selectedOptimizerState}
           metrics={metricsMap[selectedCampaignId]}
+          setSetupTab={setSetupTab}
         />
 
         <div
@@ -8561,6 +8881,34 @@ const selectedCampaignCreatives =
       </div>
     </div>
   </div>
+)}
+
+{setupTab === "abtest" && (
+  <>
+    <div
+      style={{
+        background: "linear-gradient(160deg, #ffffff 0%, #f7f8ff 50%, #f0f3ff 100%)",
+        border: "1px solid rgba(93,89,234,0.14)",
+        borderRadius: 22,
+        padding: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+        minHeight: 620,
+        boxShadow: "0 16px 48px rgba(91,87,232,0.10), inset 0 1px 0 rgba(255,255,255,0.95)",
+      }}
+    >
+      <CreativeABTestPanel
+        optimizerState={selectedOptimizerState}
+        campaignId={selectedCampaignId}
+        accountId={selectedAccount}
+        adminClientId={adminClientId}
+        isMobile={isMobile}
+        setSetupTab={setSetupTab}
+        campaignCreatives={selectedCampaignCreatives}
+      />
+    </div>
+  </>
 )}
 
 <ImageModal

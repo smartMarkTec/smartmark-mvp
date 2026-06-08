@@ -2500,6 +2500,75 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-debug'
       allowedActionTypes: ['continue_monitoring', 'update_primary_text', 'generate_single_creative_variant', 'generate_two_creative_variants', 'unpause_campaign', 'check_delivery_status'],
     };
 
+    // ── forceAction=1 mode ───────────────────────────────────────
+    if (String(req.query.forceAction || '').trim() === '1') {
+      const ownerKey = String(state?.ownerKey || '').trim();
+      const userToken = ownerKey ? getFbUserToken(ownerKey) : null;
+      if (!userToken) {
+        return res.status(401).json({ ok: false, error: 'forceAction: no Facebook token available for this campaign.', ownerKey: ownerKey || '(none)' });
+      }
+
+      // Patch in-memory state: clear cooldowns so decision logic fires
+      const patchedState = {
+        ...state,
+        // Nullify latestAction so standardCooldownActive returns false and _isNoOpAction is true
+        latestAction: null,
+        // Nullify copy change timestamps so lastCopyChangeAt safety-net doesn't block
+        lastCopyChangeAt: null,
+        lastManualCopyEditAt: null,
+        // Ensure impressions clear the standard gate (min 1500 bypass) if currently below
+        metricsSnapshot: {
+          ...(state.metricsSnapshot || {}),
+          impressions: Math.max(Number(state?.metricsSnapshot?.impressions || 0), 2000),
+        },
+      };
+
+      let forceDecision;
+      let forceActionResult;
+      let forceError = null;
+
+      try {
+        forceDecision = await buildDecisionAsync({ optimizerState: patchedState });
+        const stateWithDecision = { ...patchedState, latestDecision: forceDecision };
+        forceActionResult = await executeAction({ optimizerState: stateWithDecision, userToken });
+
+        // Persist the real action to DB (skip if monitoring-only)
+        const isContinue = forceActionResult?.actionType === 'continue_monitoring' || forceActionResult?.status === 'monitoring_only';
+        if (!isContinue) {
+          await updateBestKnownOptimizerCampaignState({
+            campaignId: normalizedCampaignId,
+            patch: { latestAction: forceActionResult },
+          });
+          await appendAiHistoryEntry(normalizedCampaignId, {
+            type: 'action',
+            timestamp: forceActionResult?.generatedAt || new Date().toISOString(),
+            title: String(forceActionResult?.actionType || 'force action').replace(/_/g, ' '),
+            summary: forceActionResult?.status || '',
+            reason: forceActionResult?.reason || '[forceAction debug]',
+            actionType: forceActionResult?.actionType || '',
+            dryRun: !!forceActionResult?.dryRun,
+            skipped: !!forceActionResult?.skipped,
+            source: 'forceAction_debug',
+          }).catch(() => {});
+        }
+      } catch (e) {
+        forceError = e?.message || String(e);
+      }
+
+      return res.json({
+        ok: !forceError,
+        _generatedAt: new Date().toISOString(),
+        _note: 'forceAction=1 mode: cooldowns bypassed, real optimizer decision + action executed.',
+        forceAction: {
+          ownerKey,
+          patchedMetrics: { impressions: patchedState.metricsSnapshot?.impressions, ctr: patchedState.metricsSnapshot?.ctr },
+          decision: forceDecision || null,
+          actionResult: forceActionResult || null,
+          error: forceError || null,
+        },
+      });
+    }
+
     return res.json({
       ok: true,
       _generatedAt: new Date().toISOString(),
@@ -2591,6 +2660,151 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-debug'
   } catch (err) {
     console.error('[optimizer-debug] error:', err?.message || err);
     return res.status(500).json({ ok: false, error: err?.message || 'Debug route failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /auth/facebook/adaccount/:accountId/campaign/:campaignId/creative-test-metrics
+// Per-ad insights for original vs AI challenger. Requires session OR debug key.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creative-test-metrics', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+
+    let userToken = null;
+    if (hasValidDebugKey(req)) {
+      const state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+      const ownerKey = String(state?.ownerKey || '').trim();
+      userToken = ownerKey ? getFbUserToken(ownerKey) : null;
+    } else {
+      const session = await requireSession(req);
+      if (!session.ok) return res.status(session.status).json({ ok: false, error: session.error });
+      const ownerKey = `user:${String(session.user.username).trim()}`;
+      userToken = getFbUserToken(ownerKey);
+    }
+    if (!userToken) return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook.' });
+
+    const state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    if (!state) return res.status(404).json({ ok: false, error: 'No optimizer state found for this campaign.' });
+
+    const pending = state?.pendingCreativeTest || null;
+    const pendingStatus = String(pending?.status || '').trim().toLowerCase();
+    const controlAdIds = Array.isArray(pending?.controlAdIds) ? pending.controlAdIds.filter(Boolean) : [];
+    const candidateAdIds = Array.isArray(pending?.candidateAdIds) ? pending.candidateAdIds.filter(Boolean) : [];
+
+    if (!controlAdIds.length && !candidateAdIds.length) {
+      return res.json({ ok: true, noLiveAds: true, status: pendingStatus, original: null, challenger: null, conclusion: 'no_live_ads' });
+    }
+
+    async function fetchAdMetrics(adId) {
+      try {
+        const [insightsRes, adRes] = await Promise.allSettled([
+          axios.get(`https://graph.facebook.com/${META_API_VERSION}/${adId}/insights`, {
+            params: { access_token: userToken, fields: 'impressions,clicks,spend,ctr,cpc,actions,reach', date_preset: 'maximum' },
+            timeout: 10000,
+          }),
+          axios.get(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, {
+            params: { access_token: userToken, fields: 'id,name,status,effective_status,creative{id,thumbnail_url,object_story_spec{link_data{message,name,call_to_action}}}' },
+            timeout: 10000,
+          }),
+        ]);
+        const row = insightsRes.status === 'fulfilled' && Array.isArray(insightsRes.value?.data?.data)
+          ? insightsRes.value.data.data[0] || {}
+          : {};
+        const adData = adRes.status === 'fulfilled' ? adRes.value?.data || {} : {};
+        const actions = Array.isArray(row.actions) ? row.actions : [];
+        const CONV = new Set(['lead','onsite_conversion.lead_grouped','offsite_conversion.fb_pixel_lead','omni_lead','purchase','offsite_conversion.fb_pixel_purchase']);
+        const conversions = actions.reduce((s, a) => CONV.has(String(a?.action_type||'').toLowerCase()) ? s + Number(a?.value||0) : s, 0);
+        const clicks = Number(row.clicks || 0);
+        const linkClicks = actions.reduce((s, a) => ['link_click','landing_page_view'].includes(String(a?.action_type||'').toLowerCase()) ? s + Number(a?.value||0) : s, 0);
+        const spend = Number(row.spend || 0);
+        const impressions = Number(row.impressions || 0);
+        const effectiveClicks = linkClicks > 0 ? linkClicks : clicks;
+        const cpc = Number(row.cpc || 0) || (effectiveClicks > 0 ? spend / effectiveClicks : 0);
+        return {
+          adId,
+          name: String(adData.name || '').trim(),
+          status: String(adData.effective_status || adData.status || '').trim(),
+          thumbnailUrl: String(adData.creative?.thumbnail_url || '').trim(),
+          headline: String(adData.creative?.object_story_spec?.link_data?.name || '').trim(),
+          body: String(adData.creative?.object_story_spec?.link_data?.message || '').trim(),
+          impressions,
+          clicks,
+          linkClicks,
+          spend: Number(spend.toFixed(2)),
+          ctr: Number(row.ctr || 0),
+          cpc: Number(cpc.toFixed(4)),
+          conversions,
+          reach: Number(row.reach || 0),
+        };
+      } catch (e) {
+        return { adId, error: e?.response?.data?.error?.message || e?.message || 'fetch failed' };
+      }
+    }
+
+    const [originalResults, challengerResults] = await Promise.all([
+      Promise.all(controlAdIds.slice(0, 2).map(fetchAdMetrics)),
+      Promise.all(candidateAdIds.slice(0, 2).map(fetchAdMetrics)),
+    ]);
+
+    const sumMetrics = (results) => {
+      const valid = results.filter((r) => !r.error);
+      if (!valid.length) return results[0] || null;
+      const totalImpr = valid.reduce((s, r) => s + r.impressions, 0);
+      const totalClicks = valid.reduce((s, r) => s + r.clicks, 0);
+      const totalLinkClicks = valid.reduce((s, r) => s + r.linkClicks, 0);
+      const totalSpend = valid.reduce((s, r) => s + r.spend, 0);
+      const effectiveClicks = totalLinkClicks > 0 ? totalLinkClicks : totalClicks;
+      return {
+        adId: valid[0].adId,
+        name: valid[0].name,
+        status: valid[0].status,
+        thumbnailUrl: valid[0].thumbnailUrl,
+        headline: valid[0].headline,
+        body: valid[0].body,
+        impressions: totalImpr,
+        clicks: totalClicks,
+        linkClicks: totalLinkClicks,
+        spend: Number(totalSpend.toFixed(2)),
+        ctr: totalImpr > 0 ? Number(((totalClicks / totalImpr) * 100).toFixed(4)) : 0,
+        cpc: effectiveClicks > 0 ? Number((totalSpend / effectiveClicks).toFixed(4)) : 0,
+        conversions: valid.reduce((s, r) => s + r.conversions, 0),
+        reach: valid.reduce((s, r) => s + r.reach, 0),
+      };
+    };
+
+    const original = sumMetrics(originalResults);
+    const challenger = sumMetrics(challengerResults);
+
+    const oImpr = Number(original?.impressions || 0);
+    const cImpr = Number(challenger?.impressions || 0);
+    const oCtr  = Number(original?.ctr || 0);
+    const cCtr  = Number(challenger?.ctr || 0);
+    const winner = state?.currentWinner || null;
+    let conclusion = 'waiting_for_data';
+    if (winner) {
+      conclusion = winner === 'challenger' ? 'challenger_won' : 'original_won';
+    } else if (oImpr >= 500 && cImpr >= 500) {
+      if (cCtr >= oCtr * 1.2) conclusion = 'challenger_leading';
+      else if (oCtr >= cCtr * 1.2) conclusion = 'original_leading';
+      else conclusion = 'too_close';
+    }
+
+    return res.json({
+      ok: true,
+      status: pendingStatus,
+      original,
+      challenger,
+      controlAdIds,
+      candidateAdIds,
+      conclusion,
+      currentWinner: winner,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[creative-test-metrics] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to load creative test metrics.' });
   }
 });
 

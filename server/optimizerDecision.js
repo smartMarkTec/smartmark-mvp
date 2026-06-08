@@ -314,7 +314,8 @@ function buildFallbackDecision({ optimizerState }) {
     const _isNoOpAction =
       !_latestActionType ||
       _latestActionType === 'continue_monitoring' ||
-      _latestActionType === 'monitoring_only';
+      _latestActionType === 'monitoring_only' ||
+      String(optimizerState?.latestAction?.status || '').trim() === 'needs_context';
 
     if (
       _hoursSinceChange !== null &&
@@ -544,6 +545,40 @@ function buildFallbackDecision({ optimizerState }) {
       reason =
         'Copy refresh already happened, so Smartemark should wait for new CTR signal before making another change.';
       confidence = 0.96;
+    } else if (
+      // Copy refresh was attempted but blocked due to missing context — escalate to a
+      // creative image test instead of repeating the same failed action endlessly.
+      lastActionType === 'update_primary_text' &&
+      lastActionStatus === 'needs_context' &&
+      standardTestGatePassed(optimizerState, 'low_ctr') &&
+      !standardCooldownActive(optimizerState)
+    ) {
+      decision = 'launch_creative_test';
+      actionType = isStandardTier(optimizerState)
+        ? 'generate_single_creative_variant'
+        : 'generate_two_creative_variants';
+      priority = 'high';
+      reason =
+        'Copy refresh could not run because campaign context was unavailable. ' +
+        'Smartemark will generate a fresh creative visual angle instead — this is the next effective lever for improving CTR.';
+      confidence = 0.85;
+    } else if (
+      // High-signal rule: 5 000+ impressions with persistently weak CTR and no
+      // creative-level action taken yet → skip copy refresh, go straight to creative test.
+      impressions >= 5000 &&
+      ctr < 0.8 &&
+      !lastActionType &&
+      standardTestGatePassed(optimizerState, 'low_ctr') &&
+      !standardCooldownActive(optimizerState)
+    ) {
+      decision = 'launch_creative_test';
+      actionType = isStandardTier(optimizerState)
+        ? 'generate_single_creative_variant'
+        : 'generate_two_creative_variants';
+      priority = 'high';
+      reason = `CTR has stayed at ${ctr.toFixed(2)}% after ${impressions.toLocaleString()} impressions — well below the 0.8% target. ` +
+        'With this much data and no prior optimization action, Smartemark is generating a fresh challenger creative to test a new visual angle.';
+      confidence = 0.9;
     } else if (!standardTestGatePassed(optimizerState, 'low_ctr') || standardCooldownActive(optimizerState)) {
       decision = 'hold_and_monitor';
       actionType = 'continue_monitoring';
@@ -839,7 +874,8 @@ async function buildDecisionAsync({ optimizerState }) {
     const _isNoOpAction =
       !_latestActionType ||
       _latestActionType === 'continue_monitoring' ||
-      _latestActionType === 'monitoring_only';
+      _latestActionType === 'monitoring_only' ||
+      String(optimizerState?.latestAction?.status || '').trim() === 'needs_context';
 
     if (_hoursSinceChange !== null) {
       const _m2 = optimizerState?.metricsSnapshot || {};
