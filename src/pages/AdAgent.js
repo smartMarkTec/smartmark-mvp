@@ -27,6 +27,7 @@ export default function AdAgent() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [agentCampaignId] = useState(() => (localStorage.getItem("sm_agent_campaign_id") || "").trim() || null);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -127,6 +128,7 @@ export default function AdAgent() {
             .slice(-9, -1)
             .map((m) => ({ role: m.role, content: m.content })),
           ...(_adminClientId ? { adminClientId: _adminClientId } : {}),
+          ...(agentCampaignId ? { selectedCampaignId: agentCampaignId } : {}),
         }),
       });
       const j = await r.json().catch(() => ({}));

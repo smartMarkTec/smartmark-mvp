@@ -1852,7 +1852,7 @@ function buildOptimizerHistoryItems(optimizerState) {
     .slice(0, 4);
 }
 
-function MarketerActionsCard({ summary, optimizerState, metrics, setSetupTab }) {
+function MarketerActionsCard({ summary, optimizerState, metrics, onViewABTest }) {
   const safeSummary = summary || getFallbackPublicSummary();
   const _aiHistoryRaw = Array.isArray(optimizerState?.aiHistory) ? optimizerState.aiHistory : [];
   const history = _aiHistoryRaw.length > 0
@@ -2184,10 +2184,10 @@ function MarketerActionsCard({ summary, optimizerState, metrics, setSetupTab }) 
                           <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
                             Open the A/B Test tab to compare the original ad against the AI challenger.
                           </div>
-                          {typeof setSetupTab === "function" && (
+                          {typeof onViewABTest === "function" && (
                             <button
                               type="button"
-                              onClick={() => setSetupTab("abtest")}
+                              onClick={onViewABTest}
                               style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
                             >
                               View A/B Test →
@@ -2651,7 +2651,7 @@ function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
 // Creative A/B Test Panel
 // Shows original ad vs AI challenger when a pendingCreativeTest exists.
 // ─────────────────────────────────────────────────────────────────────────────
-function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, setSetupTab, campaignCreatives }) {
+function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName }) {
   const [testMetrics, setTestMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState(null);
@@ -2809,11 +2809,24 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
     </div>
   );
 
+  const panelTitle = campaignName ? `Creative A/B Test for ${campaignName}` : "A/B Test";
+
+  if (!campaignId || campaignId === "__DRAFT__") {
+    return (
+      <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 18, padding: 40, textAlign: "center", color: "#64748b", fontSize: 14, fontWeight: 600 }}>
+          Select a campaign to view A/B test data.
+        </div>
+      </div>
+    );
+  }
+
   if (!pending) {
     return (
       <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>A/B Test</div>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
           <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.6 }}>
             Original ad vs AI challenger performance.
           </div>
@@ -2834,7 +2847,7 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {/* Header */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ color: "#111827", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>A/B Test</div>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
           <span style={{
             background: isLive ? "#dcfce7" : isStaged ? "#fef9c3" : "#f1f5f9",
             color: isLive ? "#16a34a" : isStaged ? "#b45309" : "#475569",
@@ -3270,6 +3283,7 @@ useEffect(() => {
   const [isPaused, setIsPaused] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [setupTab, setSetupTab] = useState("connect");
+  const [campaignSubtab, setCampaignSubtab] = useState("overview");
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
@@ -4320,6 +4334,9 @@ useEffect(() => {
     .catch(() => {});
   // eslint-disable-next-line
 }, [adminClientId, selectedCampaignId]);
+
+// Reset campaign subtab to overview when selection changes
+useEffect(() => { setCampaignSubtab("overview"); }, [selectedCampaignId]);
 
 // ── Admin-client exit guard: wipe ALL client-derived maps the instant adminClientId
 // transitions from a non-empty value to "". This fires even if exitClientMode had
@@ -6246,12 +6263,6 @@ const selectedCampaignCreatives =
     subtitle: "Metrics, launch, management",
   },
   {
-    key: "abtest",
-    step: "AB",
-    title: "A/B Test",
-    subtitle: "Original vs AI challenger",
-  },
-  {
     key: "account",
     step: "04",
     title: "Account",
@@ -6366,7 +6377,14 @@ const selectedCampaignCreatives =
         <button
           type="button"
           title={locked ? "Upgrade to use Ad Agent" : "Ad Agent — AI marketing assistant"}
-          onClick={() => navigate("/ad-agent")}
+          onClick={() => {
+            if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+              localStorage.setItem("sm_agent_campaign_id", String(selectedCampaignId).trim());
+            } else {
+              localStorage.removeItem("sm_agent_campaign_id");
+            }
+            navigate("/ad-agent");
+          }}
           style={{
             flex: isMobile ? 1 : "unset",
             display: "flex",
@@ -7652,13 +7670,65 @@ const selectedCampaignCreatives =
   <>
     {selectedCampaignId !== "__DRAFT__" ? (
       <>
-        <MarketerActionsCard
-          summary={selectedOptimizerSummary}
-          optimizerState={selectedOptimizerState}
-          metrics={metricsMap[selectedCampaignId]}
-          setSetupTab={setSetupTab}
-        />
+        {/* Campaign subtab bar */}
+        <div style={{ display: "flex", gap: 4, paddingBottom: 12, borderBottom: "1px solid #e5e7eb", marginBottom: 4 }}>
+          {[
+            { key: "overview", label: "Overview" },
+            { key: "actions", label: "AI Actions" },
+            { key: "abtest", label: "A/B Test" },
+          ].map((st) => {
+            const isActive = campaignSubtab === st.key;
+            const hasDot = st.key === "abtest" && !!selectedOptimizerState?.pendingCreativeTest;
+            return (
+              <button
+                key={st.key}
+                type="button"
+                onClick={() => setCampaignSubtab(st.key)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: isActive ? "#5b5cf0" : "#f1f5f9",
+                  color: isActive ? "#ffffff" : "#475569",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                {st.label}
+                {hasDot && (
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: isActive ? "rgba(255,255,255,0.7)" : "#16a34a", display: "inline-block", flexShrink: 0 }} />
+                )}
+              </button>
+            );
+          })}
+        </div>
 
+        {campaignSubtab === "actions" && (
+          <MarketerActionsCard
+            summary={selectedOptimizerSummary}
+            optimizerState={selectedOptimizerState}
+            metrics={metricsMap[selectedCampaignId]}
+            onViewABTest={() => setCampaignSubtab("abtest")}
+          />
+        )}
+
+        {campaignSubtab === "abtest" && (
+          <CreativeABTestPanel
+            optimizerState={selectedOptimizerState}
+            campaignId={selectedCampaignId}
+            accountId={selectedAccount}
+            adminClientId={adminClientId}
+            isMobile={isMobile}
+            campaignCreatives={selectedCampaignCreatives}
+            campaignName={selectedLiveCampaign?.name || ""}
+          />
+        )}
+
+        {campaignSubtab === "overview" && (
         <div
           style={{
             padding: "2px 0",
@@ -7721,6 +7791,7 @@ const selectedCampaignCreatives =
             );
           })()}
         </div>
+        )}
       </>
     ) : (
       <>
@@ -8881,34 +8952,6 @@ const selectedCampaignCreatives =
       </div>
     </div>
   </div>
-)}
-
-{setupTab === "abtest" && (
-  <>
-    <div
-      style={{
-        background: "linear-gradient(160deg, #ffffff 0%, #f7f8ff 50%, #f0f3ff 100%)",
-        border: "1px solid rgba(93,89,234,0.14)",
-        borderRadius: 22,
-        padding: 22,
-        display: "flex",
-        flexDirection: "column",
-        gap: 18,
-        minHeight: 620,
-        boxShadow: "0 16px 48px rgba(91,87,232,0.10), inset 0 1px 0 rgba(255,255,255,0.95)",
-      }}
-    >
-      <CreativeABTestPanel
-        optimizerState={selectedOptimizerState}
-        campaignId={selectedCampaignId}
-        accountId={selectedAccount}
-        adminClientId={adminClientId}
-        isMobile={isMobile}
-        setSetupTab={setSetupTab}
-        campaignCreatives={selectedCampaignCreatives}
-      />
-    </div>
-  </>
 )}
 
 <ImageModal

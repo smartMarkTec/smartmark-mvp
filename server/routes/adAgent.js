@@ -19,66 +19,109 @@ const AD_AGENT_SYSTEM =
   "choose services/specials to promote, improve ad angles, and understand setup steps. " +
   "Be concise, practical, and action-focused. Do not guarantee leads or calls. " +
   "Position Smartemark as helping with branding, local visibility, promoting specials, and getting more eyes on the business. " +
-  "If campaign metrics context is provided, use it to answer performance questions simply and clearly — explain metrics in plain language a business owner would understand. " +
-  "If metrics data is limited or missing, say so honestly rather than guessing.";
+  "IMPORTANT: When campaign metrics context is provided in the system messages, USE IT. " +
+  "Answer performance questions with the actual numbers provided — impressions, CTR, CPC, spend, clicks. " +
+  "Explain metrics in plain language a business owner would understand. " +
+  "If the AI optimizer has made a diagnosis or taken an action, mention it. " +
+  "If there is an active A/B test, mention it. " +
+  "Only say data is unavailable if the context explicitly says so.";
+
+// ── Campaign performance intent detection ─────────────────────────────────────
+function isCampaignPerformanceIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /how (is|are|did|has|was) my (campaign|ad|ads|marketing|campaign doing|ads doing)/i.test(s) ||
+    /campaign (performance|update|report|results|stats|status|numbers|doing)/i.test(s) ||
+    /how (are|is) (the|my|our) ads? (doing|performing|running)/i.test(s) ||
+    /(performance|results|stats|metrics|numbers|report) (for|on|of|about) (my|the|our) (campaign|ads?)/i.test(s) ||
+    /what('s| is| are) (my|the|our) (campaign|ad|ads?) (doing|showing|getting|results)/i.test(s) ||
+    /check (my|the|our) (campaign|ad|ads?) (performance|results|stats|metrics)/i.test(s) ||
+    /give me (a|an|my) (campaign|performance|ad|ads?) (update|report|summary|overview)/i.test(s) ||
+    /(impressions|clicks|ctr|cpc|spend|conversions).*campaign/i.test(s) ||
+    /campaign.*(\d|\$|%)/i.test(s)
+  );
+}
 
 // ── Campaign metrics context builder (read-only) ──────────────────────────────
-async function getCampaignContext(ownerKey) {
+async function getCampaignContext(ownerKey, selectedCampaignId) {
   try {
     await db.read();
     const allStates = db.data?.optimizer_campaign_state || [];
     const userStates = allStates.filter(
       (s) =>
         String(s?.ownerKey || '').trim() === String(ownerKey || '').trim() &&
-        !s?.smArchived
+        !s?.smArchived &&
+        !s?.hiddenFromHistory
     );
 
     if (!userStates.length) {
       return 'No active campaign metrics are available. If the user asks about campaign performance, say exactly: "I don\'t see active campaign metrics connected yet."';
     }
 
-    // Prefer active campaigns first, take up to 3
-    const sorted = [
-      ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() === 'ACTIVE'),
-      ...userStates.filter((s) => String(s?.currentStatus || '').toUpperCase() !== 'ACTIVE'),
-    ].slice(0, 3);
+    // Pick the campaign to highlight: prefer selectedCampaignId, then most recent ACTIVE, then any
+    let primary = null;
+    if (selectedCampaignId) {
+      primary = userStates.find((s) => String(s?.campaignId || '') === String(selectedCampaignId));
+    }
+    if (!primary) {
+      primary = userStates.find((s) => String(s?.currentStatus || '').toUpperCase() === 'ACTIVE') || userStates[0];
+    }
 
-    const lines = ['Current campaign data:'];
-    for (const s of sorted) {
+    // Build full context: primary campaign first, then others (up to 2 more)
+    const others = userStates.filter((s) => s !== primary).slice(0, 2);
+    const toReport = [primary, ...others].filter(Boolean);
+
+    const lines = [`Campaign data (${toReport.length} campaign${toReport.length !== 1 ? 's' : ''}):`];
+
+    for (const s of toReport) {
       const m = s.metricsSnapshot || {};
-      const name = s.campaignName || s.campaignId || 'Unnamed campaign';
-      const status = String(s.currentStatus || '').toUpperCase() || 'UNKNOWN';
+      const name = String(s.campaignName || s.campaignId || 'Unnamed campaign').trim();
+      const status = String(s.currentStatus || 'UNKNOWN').toUpperCase();
+      const isPrimary = s === primary;
 
-      const hasMetrics =
-        Number(m.impressions || 0) > 0 ||
-        Number(m.spend || 0) > 0 ||
-        Number(m.clicks || 0) > 0;
+      const impr  = Math.round(Number(m.impressions || 0));
+      const clicks = Number(m.clicks || 0);
+      const spend  = Number(m.spend || 0);
+      const ctr    = Number(m.ctr || 0);
+      const cpc    = Number(m.cpc || 0);
+      const cpm    = Number(m.cpm || 0);
+      const reach  = Math.round(Number(m.reach || 0));
+      const conv   = Number(m.conversions || 0);
 
-      if (!hasMetrics) {
-        lines.push(`- "${name}" (${status}): No metrics data yet.`);
-        continue;
-      }
-
-      const parts = [`"${name}" | Status: ${status}`];
-      if (m.impressions) parts.push(`Impressions: ${Math.round(Number(m.impressions)).toLocaleString()}`);
-      if (m.reach)       parts.push(`Reach: ${Math.round(Number(m.reach)).toLocaleString()}`);
-      if (m.clicks != null && m.clicks !== '') parts.push(`Clicks: ${m.clicks}`);
-      if (m.linkClicks)  parts.push(`Link clicks: ${m.linkClicks}`);
-      if (m.spend)       parts.push(`Spend: $${Number(m.spend).toFixed(2)}`);
-      if (m.ctr)         parts.push(`CTR: ${Number(m.ctr).toFixed(2)}%`);
-      if (m.cpc)         parts.push(`CPC: $${Number(m.cpc).toFixed(2)}`);
-      if (m.cpm)         parts.push(`CPM: $${Number(m.cpm).toFixed(2)}`);
-      const conv = Number(m.conversions || 0);
-      parts.push(`Conversions: ${conv}`);
+      const parts = [`"${name}"${isPrimary ? ' [selected]' : ''} | Status: ${status}`];
+      parts.push(`Impressions: ${impr.toLocaleString()}`);
+      if (reach > 0) parts.push(`Reach: ${reach.toLocaleString()}`);
+      parts.push(`Clicks: ${clicks}`);
+      parts.push(`Spend: $${spend.toFixed(2)}`);
+      parts.push(`CTR: ${ctr.toFixed(2)}%`);
+      if (cpc > 0) parts.push(`CPC: $${cpc.toFixed(2)}`);
+      if (cpm > 0) parts.push(`CPM: $${cpm.toFixed(2)}`);
       if (conv > 0) {
+        parts.push(`Conversions: ${conv}`);
         if (m.costPerConversion) parts.push(`Cost/Conv: $${Number(m.costPerConversion).toFixed(2)}`);
-        if (m.conversionRate)    parts.push(`Conv Rate: ${Number(m.conversionRate).toFixed(2)}%`);
       }
       lines.push('- ' + parts.join(' | '));
 
-      // Include AI optimizer summary if available
-      const summary = s.publicSummary?.summary || s.publicSummary?.headline || s.latestDiagnosis?.summary;
-      if (summary) lines.push(`  AI note: ${String(summary).slice(0, 200)}`);
+      // AI diagnosis
+      const diag = s.latestDiagnosis;
+      if (diag?.diagnosis) {
+        lines.push(`  AI Diagnosis: ${diag.diagnosis}${diag.reason ? ` — ${String(diag.reason).slice(0, 180)}` : ''}`);
+        if (diag.recommendedAction) lines.push(`  Recommended next action: ${diag.recommendedAction}`);
+      }
+
+      // Latest optimizer action
+      const action = s.latestAction;
+      if (action?.actionType && action.actionType !== 'continue_monitoring') {
+        const actionStatus = action.executed ? 'executed' : (action.status || 'pending');
+        lines.push(`  Last optimizer action: ${action.actionType} (${actionStatus})`);
+      }
+
+      // A/B test
+      const test = s.pendingCreativeTest;
+      if (test?.status) {
+        const testStatus = String(test.status).toLowerCase();
+        lines.push(`  A/B test: ${testStatus}${test.creativeGoal ? ` — goal: ${test.creativeGoal}` : ''}`);
+      }
     }
 
     return lines.join('\n');
@@ -847,7 +890,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       });
     }
 
-    const { message, history } = req.body || {};
+    const { message, history, selectedCampaignId } = req.body || {};
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ ok: false, error: 'Please provide a message.' });
     }
@@ -927,13 +970,25 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           .slice(-8)
       : [];
 
-    const campaignContext = await getCampaignContext(effectiveOwnerKey);
+    const safeCampaignId = selectedCampaignId && selectedCampaignId !== '__DRAFT__'
+      ? String(selectedCampaignId).trim()
+      : null;
+
+    const campaignContext = await getCampaignContext(effectiveOwnerKey, safeCampaignId);
+
+    // For campaign performance questions, add an explicit instruction so the model
+    // leads with the real numbers rather than giving a generic non-answer.
+    const isPerformanceQ = isCampaignPerformanceIntent(trimmed);
+    const performanceInstruction = isPerformanceQ && campaignContext
+      ? 'The user is asking about campaign performance. Use the campaign data in this context to give a direct, specific answer with the actual numbers. Lead with the key metrics (impressions, CTR, spend, CPC), then add a brief observation about what they mean. Keep it under 120 words.'
+      : null;
 
     const completion = await openaiClient.chat.completions.create({
       model: MODEL,
       messages: [
         { role: 'system', content: AD_AGENT_SYSTEM },
         ...(campaignContext ? [{ role: 'system', content: campaignContext }] : []),
+        ...(performanceInstruction ? [{ role: 'system', content: performanceInstruction }] : []),
         ...normalizedHistory,
         { role: 'user', content: trimmed },
       ],
