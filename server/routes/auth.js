@@ -4209,6 +4209,15 @@ if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
   }
 }
 
+// Admin bypass: TheBoss can read any client's optimizer state (read-only, state not modified)
+if (requestOwnerKey === `user:${ADMIN_BYPASS_USERNAME}`) {
+  return res.json({
+    ok: true,
+    accessMode: 'admin_bypass',
+    optimizerState: state,
+  });
+}
+
 return res.status(403).json({
   ok: false,
   error: 'You do not have access to this optimizer campaign state.',
