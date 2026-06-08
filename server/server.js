@@ -464,6 +464,10 @@ app.use("/api", adAgentRoutes);
 const premiumAdminRoutes = require("./routes/premiumAdmin");
 app.use("/api", premiumAdminRoutes);
 
+/* ✅ Marketing Services Agreement acceptance */
+const agreementRoutes = require("./routes/agreement");
+app.use("/api", agreementRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);

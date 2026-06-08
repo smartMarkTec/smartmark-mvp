@@ -1,6 +1,6 @@
 /* eslint-disable */
 // src/pages/PremiumIntake.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
@@ -124,6 +124,30 @@ export default function PremiumIntake() {
   const [form, setForm] = useState(EMPTY);
   const [step, setStep] = useState(1);
   const [authorized, setAuthorized] = useState(false);
+  const [agreementChecked, setAgreementChecked] = useState(false);
+
+  // Gate: non-token non-admin access requires a signed agreement
+  useEffect(() => {
+    if (isTokenMode || adminClientId) {
+      setAgreementChecked(true);
+      return;
+    }
+    (async () => {
+      try {
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        const res = await fetch("/api/agreement/status", {
+          credentials: "include",
+          headers: sid ? { "x-sm-sid": sid } : {},
+        });
+        const json = await res.json().catch(() => ({}));
+        if (json?.ok && !json?.signed && !json?.grandfathered) {
+          navigate("/agreement", { replace: true });
+          return;
+        }
+      } catch {}
+      setAgreementChecked(true);
+    })();
+  }, [isTokenMode, adminClientId, navigate]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -225,6 +249,14 @@ export default function PremiumIntake() {
   };
 
   const stepLabels = ["Business Info", "Campaign Strategy", "Contact & Auth"];
+
+  if (!agreementChecked) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8f9fc", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT }}>
+        <div style={{ color: "#6b7280", fontSize: 14 }}>Verifying agreement…</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#f8f9fc", fontFamily: FONT, padding: "32px 16px 80px" }}>

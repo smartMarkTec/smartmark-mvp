@@ -86,6 +86,20 @@ export default function PostCheckout() {
         console.warn("[post-checkout] sync failed:", e?.message);
       }
 
+      // Check agreement acceptance — all paid plans must sign before proceeding
+      try {
+        const smSid = (localStorage.getItem(SM_SID_LS_KEY) || "").trim();
+        const agreeRes = await fetch("/api/agreement/status", {
+          credentials: "include",
+          headers: smSid ? { "x-sm-sid": smSid } : {},
+        });
+        const agreeJson = await agreeRes.json().catch(() => ({}));
+        if (agreeJson?.ok && !agreeJson?.signed && !agreeJson?.grandfathered) {
+          navigate("/agreement", { replace: true });
+          return;
+        }
+      } catch {}
+
       // Premium customers who have not completed intake go to /premium-intake first
       if (String(targetPlanKey || "").toLowerCase() === "premium") {
         try {

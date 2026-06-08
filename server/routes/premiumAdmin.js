@@ -573,6 +573,19 @@ router.get('/admin/clients/:id', limitAdmin, requireAdmin, async (req, res) => {
         createdAt: user.createdAt || null,
         fbConnected,
         premiumIntake: user.premiumIntake || null,
+        agreement: user.agreement
+          ? {
+              agreementAccepted:  !!user.agreement.signedAt,
+              agreementVersion:   user.agreement.agreementVersion || null,
+              signedAt:           user.agreement.signedAt || null,
+              signerName:         user.agreement.signerName || null,
+              signerEmail:        user.agreement.signerEmail || null,
+              businessName:       user.agreement.businessName || null,
+              selectedPlan:       user.agreement.selectedPlan || null,
+              monthlyPrice:       user.agreement.monthlyPrice || null,
+              pricingVariant:     user.agreement.pricingVariant || null,
+            }
+          : null,
         onboarding: user.onboarding || defaultOnboarding(),
         metaPixel: user.metaPixel || null,
         campaigns,
