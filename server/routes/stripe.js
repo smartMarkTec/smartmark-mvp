@@ -88,6 +88,13 @@ const HIGH_TICKET_PRICE_MAP = {
 const NORMAL_MONTHLY_PRICE = { base: 249, deluxe: 495, premium: 749 };
 const HIGH_TICKET_MONTHLY_PRICE = { base: 495, deluxe: 995, premium: 1500 };
 
+// Non-blocking informational text shown below Stripe Checkout's pay button.
+const CHECKOUT_SUBMIT_TEXT =
+  "By subscribing, you understand Smartemark provides monthly marketing services. " +
+  "The current paid service period is non-refundable once service begins. " +
+  "You will review and sign the full Smartemark Marketing Services Agreement " +
+  "after checkout before onboarding starts.";
+
 const HIDDEN_FOUNDER_PRICE_META = {};
 function normalizePlanKey(raw) {
   return String(raw || "").trim().toLowerCase();
@@ -600,6 +607,7 @@ router.post("/create-checkout-session", async (req, res) => {
       billing_address_collection: "auto",
       success_url: successUrl,
       cancel_url: cancelUrl,
+      custom_text: { submit: { message: CHECKOUT_SUBMIT_TEXT } },
       metadata: sharedMeta,
       subscription_data: {
         metadata: { ...sharedMeta },
@@ -898,6 +906,7 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       billing_address_collection: "auto",
       success_url: `${clientUrl}/setup?checkout=success&session_id={CHECKOUT_SESSION_ID}&launch_intent=1&plan=${planKey}`,
       cancel_url: `${clientUrl}/setup?billing_cancelled=1&plan=${planKey}`,
+      custom_text: { submit: { message: CHECKOUT_SUBMIT_TEXT } },
       metadata: sharedMeta,
       subscription_data: {
         metadata: { ...sharedMeta },
