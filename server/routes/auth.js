@@ -4230,6 +4230,69 @@ return res.status(403).json({
   }
 });
 
+// POST /auth/facebook/adaccount/:accountId/campaign/:campaignId/update-campaign-context
+// Patches selectedMarket and/or businessBrief on optimizer state. Used by admin to set target market.
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/update-campaign-context', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    if (!normalizedCampaignId) {
+      return res.status(400).json({ ok: false, error: 'campaignId is required.' });
+    }
+
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    const requestUser = await findUserByOwnerKey(ownerKey);
+    if (!requestUser) {
+      return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+    }
+
+    const existing = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: 'No optimizer state found for this campaign.' });
+    }
+
+    // Only state owner or admin may update context
+    const stateOwner = String(existing.ownerKey || '').trim();
+    const requestOwnerKey = `user:${String(requestUser.username || '').trim()}`;
+    const isAdmin = requestOwnerKey === `user:${ADMIN_BYPASS_USERNAME}`;
+    if (!isAdmin && stateOwner && stateOwner !== requestOwnerKey) {
+      return res.status(403).json({ ok: false, error: 'Not authorized to update this campaign context.' });
+    }
+
+    const patch = {};
+
+    // selectedMarket: admin-supplied target market override used by creative generation
+    if (req.body?.selectedMarket && typeof req.body.selectedMarket === 'object') {
+      patch.selectedMarket = {
+        industry: String(req.body.selectedMarket.industry || '').trim(),
+        idealCustomer: String(req.body.selectedMarket.idealCustomer || '').trim(),
+        offerAngle: String(req.body.selectedMarket.offerAngle || '').trim(),
+        mainBenefit: String(req.body.selectedMarket.mainBenefit || '').trim(),
+        businessName: String(req.body.selectedMarket.businessName || '').trim(),
+      };
+    }
+
+    // businessBrief: structured brief fields — only patch provided keys
+    if (req.body?.businessBrief && typeof req.body.businessBrief === 'object') {
+      const incoming = req.body.businessBrief;
+      const current = existing.businessBrief || {};
+      patch.businessBrief = Object.assign({}, current, incoming);
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ ok: false, error: 'No valid fields to update (selectedMarket or businessBrief required).' });
+    }
+
+    await updateOptimizerCampaignState(normalizedCampaignId, patch);
+
+    return res.json({ ok: true, updated: Object.keys(patch) });
+  } catch (err) {
+    console.error('[auth] update-campaign-context error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Failed to update campaign context.' });
+  }
+});
+
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-state', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;

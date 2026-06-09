@@ -2651,10 +2651,14 @@ function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
 // Creative A/B Test Panel
 // Shows original ad vs AI challenger when a pendingCreativeTest exists.
 // ─────────────────────────────────────────────────────────────────────────────
-function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName }) {
+function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved }) {
   const [testMetrics, setTestMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState(null);
+  const [removeConfirm, setRemoveConfirm] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState(null);
+  const [removeSuccess, setRemoveSuccess] = useState(false);
 
   const pending = optimizerState?.pendingCreativeTest || null;
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
@@ -2809,6 +2813,32 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
     </div>
   );
 
+  const handleRemoveChallenger = async () => {
+    if (!campaignId) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      const r = await fetch("/api/ad-agent/remove-challenger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ campaignId }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) {
+        setRemoveError(j.error || "Could not remove challenger. Try again.");
+      } else {
+        setRemoveSuccess(true);
+        setRemoveConfirm(false);
+        if (onChallengerRemoved) onChallengerRemoved();
+      }
+    } catch (e) {
+      setRemoveError(e.message || "Network error.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   const panelTitle = campaignName ? `Creative A/B Test for ${campaignName}` : "A/B Test";
 
   if (!campaignId || campaignId === "__DRAFT__") {
@@ -2916,6 +2946,51 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#1d4ed8", lineHeight: 1.6 }}>
         <strong>Budget sharing:</strong> Budget is shared inside the same ad set. Meta may give more delivery to the ad it predicts will perform better. Smartemark compares performance after enough impressions accumulate before declaring a winner.
       </div>
+
+      {/* Remove Challenger */}
+      {!removeSuccess && (
+        <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
+          {!removeConfirm ? (
+            <button
+              onClick={() => setRemoveConfirm(true)}
+              style={{ background: "none", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 16px", fontSize: 12, color: "#dc2626", fontWeight: 700, cursor: "pointer" }}
+            >
+              Remove Challenger
+            </button>
+          ) : (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: "#dc2626" }}>Remove AI Challenger?</div>
+              <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+                This will pause the AI challenger ad on Meta and clear the current test. Your original ad stays live and untouched. You can ask the Ad Agent to generate a new challenger any time.
+              </div>
+              {removeError && (
+                <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>{removeError}</div>
+              )}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={handleRemoveChallenger}
+                  disabled={removing}
+                  style={{ background: "#dc2626", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 12, color: "#fff", fontWeight: 700, cursor: removing ? "not-allowed" : "pointer", opacity: removing ? 0.7 : 1 }}
+                >
+                  {removing ? "Removing…" : "Yes, Remove"}
+                </button>
+                <button
+                  onClick={() => { setRemoveConfirm(false); setRemoveError(null); }}
+                  disabled={removing}
+                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 14px", fontSize: 12, color: "#475569", fontWeight: 600, cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {removeSuccess && (
+        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#16a34a", fontWeight: 700 }}>
+          AI challenger removed. Your original ad is the only active ad. Ask the Ad Agent to generate a new challenger when ready.
+        </div>
+      )}
     </div>
   );
 }
@@ -7865,6 +7940,15 @@ ${pendingTest ? `
             isMobile={isMobile}
             campaignCreatives={selectedCampaignCreatives}
             campaignName={selectedLiveCampaign?.name || ""}
+            onChallengerRemoved={() => {
+              setOptimizerStateMap((prev) => ({
+                ...prev,
+                [selectedCampaignId]: {
+                  ...(prev[selectedCampaignId] || {}),
+                  pendingCreativeTest: null,
+                },
+              }));
+            }}
           />
         )}
 

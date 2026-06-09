@@ -9,6 +9,11 @@ const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
 const { META_API_VERSION } = require('../metaConfig');
+const {
+  findOptimizerCampaignStateByCampaignId,
+  updateOptimizerCampaignState,
+  appendAiHistoryEntry,
+} = require('../optimizerCampaignState');
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -39,6 +44,19 @@ function isCampaignPerformanceIntent(message) {
     /give me (a|an|my) (campaign|performance|ad|ads?) (update|report|summary|overview)/i.test(s) ||
     /(impressions|clicks|ctr|cpc|spend|conversions).*campaign/i.test(s) ||
     /campaign.*(\d|\$|%)/i.test(s)
+  );
+}
+
+// ── Wrong challenger / regeneration intent detection ──────────────────────────
+function isWrongChallengerIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /(wrong|bad|incorrect|off.?brand|not related|unrelated|irrelevant|weird|random|generic).*(creative|challenger|ad|image|visual)/i.test(s) ||
+    /(delete|remove|pause|kill|clear|reset|get rid of|undo).*(challenger|a\/b test|ab test|creative test|test ad)/i.test(s) ||
+    /(challenger|creative|test ad).*(wrong|bad|incorrect|not right|not related|unrelated|doesn.?t match|doesn.?t look|delete|remove|pause|clear)/i.test(s) ||
+    /regenerate.*(challenger|creative|ad|test)/i.test(s) ||
+    /(start|restart|redo|try again|replace).*(challenger|creative test|ab test|a\/b test)/i.test(s) ||
+    /this (creative|ad|challenger|image) is.*(wrong|not|off|bad|weird|generic|unrelated|incorrect)/i.test(s)
   );
 }
 
@@ -962,6 +980,19 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.json({ ok: true, reply: buildPixelReply(pixelResult) });
     }
 
+    // Wrong challenger intent — guide user to confirm removal via the A/B Test tab
+    if (isWrongChallengerIntent(trimmed)) {
+      const hasCampaign = !!safeCampaignId;
+      const reply = hasCampaign
+        ? 'Got it — I can remove the AI challenger from this campaign. To confirm the removal:\n\n' +
+          '1. Open the **A/B Test** tab for this campaign.\n' +
+          '2. Click **"Remove Challenger"** at the bottom of the tab.\n' +
+          '3. Confirm — only the AI challenger will be removed. Your original ad stays live and untouched.\n\n' +
+          'Once removed, I can generate a replacement challenger using the correct campaign context. Just say **"generate a new challenger"** after removing this one.'
+        : 'I can remove the AI challenger from your campaign. Please select a campaign first (use the campaign dropdown), then go to the **A/B Test** tab and click **"Remove Challenger"** to confirm. Your original ad will stay live and untouched.';
+      return res.json({ ok: true, reply });
+    }
+
     // Normal chat — with in-session history + read-only campaign metrics context
     const normalizedHistory = Array.isArray(history)
       ? history
@@ -1276,6 +1307,84 @@ router.delete('/ad-agent/history', limitChat, async (req, res) => {
   } catch (err) {
     console.error('[AdAgent] history DELETE error:', err?.message);
     return res.status(500).json({ ok: false, error: 'Could not clear history.' });
+  }
+});
+
+// POST /api/ad-agent/remove-challenger
+// Pauses all AI challenger ads for a campaign and clears pendingCreativeTest from optimizer state.
+router.post('/ad-agent/remove-challenger', limitChat, async (req, res) => {
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    const user = await findUserByOwnerKey(ownerKey);
+    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const safeCampaignId = String(req.body?.campaignId || req.query?.campaignId || '').trim();
+    if (!safeCampaignId) return res.status(400).json({ ok: false, error: 'campaignId is required.' });
+
+    // Locate the optimizer state for this campaign
+    const campaignState = await findOptimizerCampaignStateByCampaignId(safeCampaignId).catch(() => null);
+    if (!campaignState) {
+      return res.status(404).json({ ok: false, error: 'No optimizer state found for this campaign.' });
+    }
+
+    // Verify ownership (effective owner must match the state's ownerKey, or caller is admin)
+    const stateOwner = String(campaignState.ownerKey || '').trim();
+    const callerIsAdmin = effectiveOwnerKey !== ownerKey;
+    if (!callerIsAdmin && stateOwner && stateOwner !== effectiveOwnerKey) {
+      return res.status(403).json({ ok: false, error: 'Not authorized to modify this campaign.' });
+    }
+
+    const pending = campaignState.pendingCreativeTest || null;
+    const candidateAdIds = Array.isArray(pending?.candidateAdIds) ? pending.candidateAdIds.filter(Boolean) : [];
+
+    // Pause challenger ads on Meta if we have a token and ad IDs
+    const userToken = getFbUserToken(effectiveOwnerKey);
+    const pauseResults = [];
+    const pauseErrors = [];
+
+    if (userToken && candidateAdIds.length > 0) {
+      for (const adId of candidateAdIds) {
+        try {
+          const pauseRes = await axios.post(
+            `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+            { status: 'PAUSED' },
+            { params: { access_token: userToken } }
+          );
+          pauseResults.push({ adId, paused: true, response: pauseRes.data || null });
+        } catch (err) {
+          pauseErrors.push({ adId, error: err?.response?.data || err?.message || String(err) });
+        }
+      }
+    }
+
+    // Clear pendingCreativeTest from optimizer state
+    await updateOptimizerCampaignState(safeCampaignId, {
+      pendingCreativeTest: null,
+    });
+
+    // Log to AI history
+    await appendAiHistoryEntry(effectiveOwnerKey, {
+      role: 'assistant',
+      content: `Removed AI challenger for campaign ${safeCampaignId}. ${
+        candidateAdIds.length > 0
+          ? `Paused ${pauseResults.length} challenger ad(s).${pauseErrors.length > 0 ? ` ${pauseErrors.length} pause error(s) — check Meta Ads Manager.` : ''}`
+          : 'No challenger ad IDs were on record.'
+      }`,
+      timestamp: new Date().toISOString(),
+      actionType: 'remove_challenger',
+    });
+
+    return res.json({
+      ok: true,
+      paused: pauseResults,
+      errors: pauseErrors,
+      candidateAdIds,
+    });
+  } catch (err) {
+    console.error('[AdAgent] remove-challenger error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Could not remove challenger.' });
   }
 });
 

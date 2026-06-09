@@ -389,21 +389,43 @@ function inferBusinessContext(optimizerState) {
 
 function buildCreativeAnswers(optimizerState) {
   const brief = optimizerState?.businessBrief || {};
+  // businessContext holds the raw FormPage answers saved at launch time.
+  const ctx = optimizerState?.businessContext || {};
+  // selectedMarket is an admin-set override for a specific campaign target audience.
+  const mkt = optimizerState?.selectedMarket || {};
   const niche = String(optimizerState?.niche || '').trim();
 
-  // Map businessBrief fields to the answers format expected by buildAdPrompt().
-  // Fall back gracefully when individual fields are absent.
+  // Priority: selectedMarket > businessBrief > businessContext > niche fallback.
+  // This ensures that campaigns with incomplete businessBrief still produce
+  // on-brand creative rather than falling through to generic Smartemark copy.
   return {
-    businessName: String(brief.businessName || brief.brand || '').trim(),
-    industry:     String(brief.industry || brief.businessType || niche || '').trim(),
-    offer:        String(brief.offer || brief.promo || '').trim(),
-    mainBenefit:  String(brief.mainBenefit || brief.benefit || brief.details || '').trim(),
-    city:         String(brief.city || '').trim(),
-    state:        String(brief.state || '').trim(),
-    phone:        String(brief.phone || '').trim(),
-    website:      String(brief.website || brief.url || '').trim(),
-    idealCustomer: String(brief.idealCustomer || '').trim(),
-    cta:          String(brief.cta || '').trim(),
+    businessName: String(
+      mkt.businessName || brief.businessName || ctx.businessName || brief.brand || ctx.brand || ''
+    ).trim(),
+    industry: String(
+      mkt.industry ||
+      brief.industry || ctx.industry || ctx.businessType || ctx.niche ||
+      brief.businessType || brief.niche || niche || ''
+    ).trim(),
+    offer: String(
+      mkt.offerAngle ||
+      brief.offer || ctx.offer || ctx.currentSpecialOrOffer || ctx.promotionOffer || ctx.mainOffer ||
+      brief.promo || ''
+    ).trim(),
+    mainBenefit: String(
+      mkt.mainBenefit ||
+      brief.mainBenefit || ctx.mainBenefit || ctx.mainServices || ctx.serviceToPromoteFirst ||
+      ctx.customerProblem || brief.benefit || ctx.benefit || brief.details || ctx.details || ''
+    ).trim(),
+    city: String(brief.city || ctx.city || ctx.targetCities || '').trim(),
+    state: String(brief.state || ctx.state || '').trim(),
+    phone: String(brief.phone || ctx.mainPhone || ctx.phone || '').trim(),
+    website: String(brief.website || ctx.websiteUrl || ctx.website || brief.url || ctx.url || '').trim(),
+    idealCustomer: String(
+      mkt.idealCustomer ||
+      brief.idealCustomer || ctx.idealCustomer || ctx.targetAudience || ''
+    ).trim(),
+    cta: String(brief.cta || ctx.cta || ctx.ctaStyle || brief.ctaStyle || '').trim(),
   };
 }
 
@@ -816,6 +838,7 @@ async function executePrimaryTextRefresh({
 async function executeCreativeGeneration({
   optimizerState,
   actionType,
+  userToken = null,
 }) {
   const campaignId = String(optimizerState?.campaignId || '').trim();
   const plan = buildCreativeGenerationPlan({ optimizerState });
@@ -876,6 +899,37 @@ async function executeCreativeGeneration({
     variantCount,
     creativeGoal,
   });
+
+  // If key context fields are still empty, try to recover from the live Meta ad.
+  // This prevents the image generator from defaulting to generic "business" visuals
+  // when businessBrief is null (e.g. campaigns enrolled in optimizer after launch).
+  if (userToken && campaignId && (!answers.industry || !answers.businessName)) {
+    try {
+      const liveAds = await fetchCampaignAds({ campaignId, userToken, limit: 10 });
+      const controlAd = liveAds.find((ad) =>
+        !isAiChallengerAd(ad) &&
+        ad?.creative?.object_story_spec?.link_data
+      );
+      if (controlAd) {
+        const ld = controlAd.creative.object_story_spec.link_data;
+        const liveBody = String(ld.message || '').trim();
+        const liveHeadline = String(ld.name || ld.call_to_action?.value?.link_description || '').trim();
+        const liveLink = String(ld.link || '').trim();
+        if (liveBody && !answers.mainBenefit) answers.mainBenefit = liveBody.slice(0, 200);
+        if (liveHeadline && !answers.businessName) answers.businessName = liveHeadline.slice(0, 80);
+        if (liveLink && !answers.website) answers.website = liveLink;
+        console.log('[optimizer action] enriched creative answers from live Meta ad', {
+          campaignId,
+          hadIndustry: !!answers.industry,
+          hadBusinessName: !!answers.businessName,
+          liveBodyPreview: liveBody.slice(0, 60),
+        });
+      }
+    } catch (enrichErr) {
+      // Non-fatal — proceed with whatever context we have
+      console.warn('[optimizer action] live ad enrichment failed (non-fatal):', enrichErr?.message || enrichErr);
+    }
+  }
 
   const apiBase = getInternalApiBase();
 
@@ -1585,6 +1639,7 @@ async function executeAction({
     return await executeCreativeGeneration({
       optimizerState,
       actionType,
+      userToken,
     });
   }
 
