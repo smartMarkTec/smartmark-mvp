@@ -1339,6 +1339,14 @@ router.post('/ad-agent/remove-challenger', limitChat, async (req, res) => {
     const pending = campaignState.pendingCreativeTest || null;
     const candidateAdIds = Array.isArray(pending?.candidateAdIds) ? pending.candidateAdIds.filter(Boolean) : [];
 
+    console.log('[AdAgent] remove challenger request', {
+      campaignId: safeCampaignId,
+      effectiveOwnerKey,
+      isAdmin: callerIsAdmin,
+      candidateAdIdsCount: candidateAdIds.length,
+      pendingStatus: String(pending?.status || 'none'),
+    });
+
     // Pause challenger ads on Meta if we have a token and ad IDs
     const userToken = getFbUserToken(effectiveOwnerKey);
     const pauseResults = [];
@@ -1365,16 +1373,17 @@ router.post('/ad-agent/remove-challenger', limitChat, async (req, res) => {
     });
 
     // Log to AI history
-    await appendAiHistoryEntry(effectiveOwnerKey, {
-      role: 'assistant',
-      content: `Removed AI challenger for campaign ${safeCampaignId}. ${
-        candidateAdIds.length > 0
-          ? `Paused ${pauseResults.length} challenger ad(s).${pauseErrors.length > 0 ? ` ${pauseErrors.length} pause error(s) — check Meta Ads Manager.` : ''}`
-          : 'No challenger ad IDs were on record.'
-      }`,
+    await appendAiHistoryEntry(safeCampaignId, {
+      type: 'action',
       timestamp: new Date().toISOString(),
+      title: 'Removed AI challenger',
+      summary: candidateAdIds.length > 0
+        ? `Paused ${pauseResults.length} challenger ad(s).${pauseErrors.length > 0 ? ` ${pauseErrors.length} pause error(s).` : ''}`
+        : 'No challenger ad IDs were on record.',
+      reason: 'User requested removal of the AI challenger via the A/B Test tab.',
       actionType: 'remove_challenger',
-    });
+      source: 'user_manual',
+    }).catch(() => {});
 
     return res.json({
       ok: true,
