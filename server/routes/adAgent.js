@@ -14,6 +14,7 @@ const {
   updateOptimizerCampaignState,
   appendAiHistoryEntry,
 } = require('../optimizerCampaignState');
+const { executeAction } = require('../optimizerAction');
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -58,6 +59,92 @@ function isWrongChallengerIntent(message) {
     /(start|restart|redo|try again|replace).*(challenger|creative test|ab test|a\/b test)/i.test(s) ||
     /this (creative|ad|challenger|image) is.*(wrong|not|off|bad|weird|generic|unrelated|incorrect)/i.test(s)
   );
+}
+
+function isGenerateChallengerIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /(make|create|generate|build|write|do|run|launch|start|produce).{0,20}(another|new|fresh|replacement|another|second|a).{0,20}(challenger|a\/b test|ab test|creative test|test ad|ad variation|creative variant)/i.test(s) ||
+    /(another|new|fresh|replacement|second).{0,20}(challenger|a\/b test|ab test|creative test|test ad|ad variation|creative variant)/i.test(s) ||
+    /regenerate.{0,15}(challenger|creative|ad|test)/i.test(s) ||
+    /(yes|yeah|yep|sure|ok|okay|go ahead|do it|please).{0,30}(make|generate|create|launch|start|produce|run).{0,20}(challenger|creative|test|ad)/i.test(s) ||
+    /(yes|yeah|yep|sure|ok|okay|go ahead|please).{0,20}(another|new|one|it)/i.test(s) ||
+    /(create|generate|make|build|launch).{0,20}(replacement|substitute|new|better|improved).{0,20}(creative|ad|challenger|variant)/i.test(s) ||
+    /start.{0,20}(a new|another|fresh).{0,20}(test|a\/b|ab).{0,20}(ad|creative|challenger)?/i.test(s) ||
+    /\b(challenger|creative test|a\/b test|ab test|test ad)\b.{0,30}(again|please|now|next)/i.test(s)
+  );
+}
+
+// Extracts pendingCreativeTest patch from an executeAction result for creative generation.
+function buildCreativePatchFromResult(action) {
+  const result = action?.actionResult || null;
+  const imageUrls = Array.isArray(result?.imageUrls)
+    ? result.imageUrls.filter(Boolean)
+    : Array.isArray(result?.sourceGeneratedCreatives)
+    ? result.sourceGeneratedCreatives.filter(Boolean)
+    : [];
+  const sourceActionType = 'generate_single_creative_variant';
+  const generatedAt = String(action?.generatedAt || result?.generatedAt || new Date().toISOString()).trim();
+  const patch = {};
+
+  if (result?.pendingCreativeTest && typeof result.pendingCreativeTest === 'object') {
+    patch.pendingCreativeTest = {
+      ...result.pendingCreativeTest,
+      sourceActionType: String(result.pendingCreativeTest.sourceActionType || sourceActionType).trim(),
+    };
+  } else if (imageUrls.length) {
+    patch.pendingCreativeTest = {
+      status: 'ready',
+      sourceActionType,
+      variantCount: imageUrls.length,
+      creativeGoal: String(result?.creativeGoal || '').trim(),
+      generationReason: String(result?.generationReason || '').trim(),
+      generatedAt,
+      imageUrls,
+    };
+  }
+
+  if (imageUrls.length) {
+    patch.latestCreativeMeta = {
+      sourceActionType,
+      creativeGoal: String(result?.creativeGoal || '').trim(),
+      generationReason: String(result?.generationReason || '').trim(),
+      generatedAt,
+      imageUrls,
+    };
+  }
+
+  if (result?.candidateAdIds?.length || result?.controlAdIds?.length) {
+    if (patch.pendingCreativeTest) {
+      patch.pendingCreativeTest.candidateAdIds = Array.isArray(result.candidateAdIds) ? result.candidateAdIds.filter(Boolean) : [];
+      patch.pendingCreativeTest.controlAdIds = Array.isArray(result.controlAdIds) ? result.controlAdIds.filter(Boolean) : [];
+      if (result.promotionStatus) patch.pendingCreativeTest.status = String(result.promotionStatus).trim();
+    }
+  }
+
+  return patch;
+}
+
+function buildGenerateChallengerReply(actionResult) {
+  if (actionResult?.dryRun) {
+    return 'The optimizer is currently in dry-run mode — no real Meta actions are being taken. To enable live challenger generation, the account owner needs to disable dry-run mode in the server settings.';
+  }
+  const status = String(actionResult?.status || '').trim().toLowerCase();
+  if (actionResult?.skipped || status === 'skipped' || status === 'blocked_by_manual_override') {
+    return `The challenger generation was skipped: ${actionResult?.reason || 'unknown reason'}. Check the A/B Test tab or try again.`;
+  }
+  if (status === 'needs_context' || status === 'missing_context') {
+    return 'I started generating a challenger but the campaign is missing some context needed to build the right creative. Ask the account manager to update the campaign brief and try again.';
+  }
+  if (actionResult?.executed === true || status === 'completed' || status === 'promoted' || status === 'live' || status === 'staged') {
+    const isLive = String(actionResult?.actionResult?.promotionStatus || '').toLowerCase() === 'live';
+    const isStaged = String(actionResult?.actionResult?.promotionStatus || '').toLowerCase() === 'staged';
+    if (isLive || isStaged) {
+      return `Done — I generated and ${isLive ? 'launched' : 'staged'} a new AI challenger for this campaign. Check the **A/B Test** tab to see it running alongside your original ad.`;
+    }
+    return `Done — I generated a new AI challenger creative for this campaign and staged it in the **A/B Test** tab. It is ready to launch on the next optimizer cycle. Check the A/B Test tab to review it.`;
+  }
+  return `Something went wrong generating the challenger (${status || 'unknown error'}). Try again or check the campaign's optimizer state.`;
 }
 
 // ── Campaign metrics context builder (read-only) ──────────────────────────────
@@ -918,6 +1005,11 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
     const trimmed = message.trim().slice(0, 2000);
 
+    // Derive safeCampaignId early — used by all intent handlers below
+    const safeCampaignId = selectedCampaignId && selectedCampaignId !== '__DRAFT__'
+      ? String(selectedCampaignId).trim()
+      : null;
+
     // Pixel CREATE intent — must be checked before general pixel intent
     if (isPixelCreateIntent(trimmed)) {
       if (access !== 'pixel') {
@@ -993,6 +1085,105 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       return res.json({ ok: true, reply });
     }
 
+    // Generate challenger intent — execute generate_single_creative_variant via optimizer pipeline
+    if (isGenerateChallengerIntent(trimmed)) {
+      if (!safeCampaignId) {
+        return res.json({
+          ok: true,
+          reply: 'Select a campaign first (go back to the Campaigns tab and click Ad Agent from there), then ask me to generate a challenger.',
+        });
+      }
+
+      const campaignState = await findOptimizerCampaignStateByCampaignId(safeCampaignId).catch(() => null);
+      if (!campaignState) {
+        return res.json({
+          ok: true,
+          reply: 'I could not find an optimizer state for the selected campaign. Make sure the campaign is set up and try again.',
+        });
+      }
+
+      // Ownership check
+      const stateOwner = String(campaignState.ownerKey || '').trim();
+      const callerIsAdmin = effectiveOwnerKey !== ownerKey;
+      if (!callerIsAdmin && stateOwner && stateOwner !== effectiveOwnerKey) {
+        return res.json({ ok: true, reply: 'You are not authorized to modify that campaign.' });
+      }
+
+      // Block if a non-failed challenger already exists
+      const existingPending = campaignState.pendingCreativeTest;
+      const existingStatus = String(existingPending?.status || '').trim().toLowerCase();
+      if (existingPending && existingStatus !== 'failed' && existingStatus !== '') {
+        return res.json({
+          ok: true,
+          reply: `There's already an AI challenger in progress for this campaign (status: **${existingStatus || 'active'}**). Go to the **A/B Test** tab to review it. If it's the wrong one, click **Remove Challenger** first, then ask me to generate a new one.`,
+        });
+      }
+
+      // Check dry-run mode
+      const IS_DRY_RUN = String(process.env.SMARTEMARK_AI_OPERATOR_DRY_RUN || '').trim() === '1';
+      if (IS_DRY_RUN) {
+        return res.json({
+          ok: true,
+          reply: 'The optimizer is in dry-run mode — real Meta actions are paused. The account owner needs to disable `SMARTEMARK_AI_OPERATOR_DRY_RUN` in the server settings before challengers can be generated.',
+        });
+      }
+
+      // Require Meta token
+      const userToken = getFbUserToken(effectiveOwnerKey);
+      if (!userToken) {
+        return res.json({
+          ok: true,
+          reply: 'No Meta access token found. Please reconnect your Facebook account in Settings, then try again.',
+        });
+      }
+
+      // Inject a synthetic decision so executeAction dispatches to creative generation
+      const synthDecision = {
+        decision: 'launch_creative_test',
+        actionType: 'generate_single_creative_variant',
+        priority: 'high',
+        reason: 'User requested a replacement challenger via Ad Agent.',
+        requiresHumanApproval: false,
+        confidence: 0.95,
+        generatedAt: new Date().toISOString(),
+        mode: 'ad_agent_manual_v1',
+      };
+
+      const stateWithDecision = { ...campaignState, latestDecision: synthDecision };
+
+      let actionResult;
+      try {
+        actionResult = await executeAction({ optimizerState: stateWithDecision, userToken });
+      } catch (execErr) {
+        console.error('[AdAgent] generate-challenger executeAction error:', execErr?.message);
+        return res.json({
+          ok: true,
+          reply: `Challenger generation failed: ${execErr?.message || 'unknown error'}. Check the server logs or try again.`,
+        });
+      }
+
+      // Persist: save latestDecision, latestAction, and creative patch (pendingCreativeTest etc.)
+      const creativePatch = buildCreativePatchFromResult(actionResult);
+      await updateOptimizerCampaignState(safeCampaignId, {
+        latestDecision: synthDecision,
+        latestAction: actionResult,
+        ...creativePatch,
+      }).catch((e) => console.error('[AdAgent] generate-challenger state persist error:', e?.message));
+
+      // Append AI history entry
+      await appendAiHistoryEntry(safeCampaignId, {
+        type: 'action',
+        timestamp: actionResult?.generatedAt || new Date().toISOString(),
+        title: 'Generated replacement challenger',
+        summary: String(actionResult?.status || '').trim(),
+        reason: String(actionResult?.reason || synthDecision.reason).trim(),
+        actionType: 'generate_single_creative_variant',
+        source: 'ad_agent_manual',
+      }).catch(() => {});
+
+      return res.json({ ok: true, reply: buildGenerateChallengerReply(actionResult) });
+    }
+
     // Normal chat — with in-session history + read-only campaign metrics context
     const normalizedHistory = Array.isArray(history)
       ? history
@@ -1000,10 +1191,6 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
           .slice(-8)
       : [];
-
-    const safeCampaignId = selectedCampaignId && selectedCampaignId !== '__DRAFT__'
-      ? String(selectedCampaignId).trim()
-      : null;
 
     const campaignContext = await getCampaignContext(effectiveOwnerKey, safeCampaignId);
 
