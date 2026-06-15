@@ -46,8 +46,6 @@ const EMPTY = {
   mediaUploadNotes: "",
 };
 
-const STEP1_REQUIRED = ["businessName", "websiteUrl", "mainPhone", "serviceArea", "mainServices", "preferredAdBudget"];
-
 function Field({ label, name, placeholder, required, value, onChange, multiline, hint, type }) {
   return (
     <div style={{ marginBottom: 18 }}>
@@ -209,7 +207,6 @@ export default function PremiumIntake() {
     setUploadedFiles((p) => p.filter((f) => f.filename !== filename));
   };
 
-  const step1Valid = STEP1_REQUIRED.every((k) => String(form[k] || "").trim());
   const step3Valid = String(form.bestContactName || "").trim() && String(form.bestContactEmail || "").trim() && authorized;
 
   const handleSubmit = async (e) => {
@@ -316,7 +313,7 @@ export default function PremiumIntake() {
 
         {/* ── Step 1: Business Basics ── */}
         {step === 1 && (
-          <form onSubmit={(e) => { e.preventDefault(); if (step1Valid) setStep(2); }}>
+          <form onSubmit={(e) => { e.preventDefault(); setStep(2); }}>
             <div style={{ background: "white", border: `1px solid ${BORDER}`, borderRadius: 14, padding: "22px 24px", marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 14 }}>Business Information</div>
               <Field label="Business Name" value={form.businessName} onChange={set("businessName")} placeholder="e.g. Wilks HVAC & Plumbing" required />
@@ -348,10 +345,10 @@ export default function PremiumIntake() {
               <Field label="Call Forwarding Number" value={form.callForwardingNumber} onChange={set("callForwardingNumber")} placeholder="e.g. (832) 555-0100" hint="The real phone number ad calls should connect to." />
             </div>
 
-            <button type="submit" disabled={!step1Valid} style={{
-              width: "100%", padding: "14px", background: step1Valid ? "#111827" : "#e5e7eb",
-              color: step1Valid ? "#fff" : "#9ca3af", border: "none", borderRadius: 10,
-              fontWeight: 700, fontSize: 15, cursor: step1Valid ? "pointer" : "not-allowed", fontFamily: FONT,
+            <button type="submit" style={{
+              width: "100%", padding: "14px", background: "#111827",
+              color: "#fff", border: "none", borderRadius: 10,
+              fontWeight: 700, fontSize: 15, cursor: "pointer", fontFamily: FONT,
             }}>
               Continue →
             </button>
