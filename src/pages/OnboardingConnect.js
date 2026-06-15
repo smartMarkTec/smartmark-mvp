@@ -106,8 +106,11 @@ export default function OnboardingConnect() {
             <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 10px" }}>
               Your account is almost ready
             </h1>
+            <p style={{ fontSize: 14, color: TEXT_MUT, lineHeight: 1.6, margin: "0 0 8px" }}>
+              Please connect your Facebook account so we can get your ads set up.
+            </p>
             <p style={{ fontSize: 14, color: TEXT_MUT, lineHeight: 1.6, margin: "0 0 28px" }}>
-              We'll collect your campaign information directly from you, so there's no form to fill out right now. Please connect your Facebook account so we can get your ads set up.
+              We'll collect the campaign details from you directly and help you through the setup.
             </p>
           </>
         )}
