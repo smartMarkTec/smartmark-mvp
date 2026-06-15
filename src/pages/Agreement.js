@@ -33,7 +33,6 @@ function smFetch(path, opts = {}) {
 // ── Plan / routing maps (unchanged logic) ────────────────────────────────────
 const PLAN_LABEL    = { base: "Base", deluxe: "Deluxe", premium: "Premium", operator: "Premium", starter: "Base", pro: "Deluxe" };
 const VARIANT_LABEL = { high_ticket_test: "Growth Pricing", normal: "Standard Pricing" };
-const PLAN_REDIRECT = { premium: "/premium-intake", operator: "/premium-intake" };
 
 function fmt(date) {
   return new Date(date || Date.now()).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
@@ -468,7 +467,7 @@ export default function Agreement() {
 
         if (!json?.ok) { navigate("/pricing", { replace: true }); return; }
         if (!json.hasAccess) { navigate("/pricing", { replace: true }); return; }
-        if (json.signed) { navigate(PLAN_REDIRECT[json.planKey] || "/setup", { replace: true }); return; }
+        if (json.signed) { navigate("/onboarding", { replace: true }); return; }
 
         setPlanLabel(json.planLabel             || "Base");
         setMonthlyPrice(Number(json.monthlyPrice || 0));
@@ -513,7 +512,7 @@ export default function Agreement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!json?.ok) { setErr(json?.error || "Could not save agreement. Please try again."); return; }
-      navigate(PLAN_REDIRECT[planKey] || "/setup", { replace: true });
+      navigate("/onboarding", { replace: true });
     } catch {
       setErr("Network error. Please try again.");
     } finally {
@@ -762,7 +761,7 @@ export default function Agreement() {
               transition: "background 0.15s",
             }}
           >
-            {submitting ? "Saving…" : "I Agree & Continue to Intake"}
+            {submitting ? "Saving…" : "I Agree & Continue"}
           </button>
 
           <div style={{ fontSize: 12, color: TEXT_MUT, textAlign: "center", lineHeight: 1.6 }}>

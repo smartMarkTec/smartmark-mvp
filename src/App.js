@@ -25,6 +25,7 @@ import AdminClientDetail from "./pages/admin/AdminClientDetail";
 import AdminManageCampaign from "./pages/admin/AdminManageCampaign";
 import BookingConfirmed from "./pages/BookingConfirmed";
 import Agreement from "./pages/Agreement";
+import OnboardingConnect from "./pages/OnboardingConnect";
 
 function NotFound() {
   return (
@@ -79,6 +80,7 @@ function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/post-checkout" element={<PostCheckout />} />
       <Route path="/agreement" element={<Agreement />} />
+      <Route path="/onboarding" element={<OnboardingConnect />} />
       <Route path="/booking-confirmed" element={<BookingConfirmed />} />
       <Route path="/booked-call" element={<BookedCall />} />
       <Route path="/videos" element={<BookedCall />} />

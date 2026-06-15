@@ -65,7 +65,7 @@ export default function PostCheckout() {
   const [mismatchWarning, setMismatchWarning] = useState(""); // Case C warning
   const [statusMsg, setStatusMsg] = useState("");
 
-  // After register/login: sync the Stripe session to this account, then go to /setup.
+  // After register/login: sync the Stripe session to this account, then go to /onboarding.
   // Only called when the current browser session belongs to the checkout email account.
   const syncAndRedirect = useCallback(
     async (sid, targetPlanKey) => {
@@ -100,23 +100,7 @@ export default function PostCheckout() {
         }
       } catch {}
 
-      // Premium customers who have not completed intake go to /premium-intake first
-      if (String(targetPlanKey || "").toLowerCase() === "premium") {
-        try {
-          const smSid = (localStorage.getItem(SM_SID_LS_KEY) || "").trim();
-          const intakeRes = await fetch("/api/premium-intake/status", {
-            credentials: "include",
-            headers: smSid ? { "x-sm-sid": smSid } : {},
-          });
-          const intakeJson = await intakeRes.json().catch(() => ({}));
-          if (intakeJson?.ok && !intakeJson?.submitted) {
-            navigate("/premium-intake", { replace: true });
-            return;
-          }
-        } catch {}
-      }
-
-      navigate("/setup", { replace: true });
+      navigate("/onboarding", { replace: true });
     },
     [navigate]
   );
