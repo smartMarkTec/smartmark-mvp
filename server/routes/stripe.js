@@ -561,6 +561,9 @@ router.post("/create-checkout-session", async (req, res) => {
     const email = String(req.body?.email || "").trim() || undefined;
     const launchIntent = String(req.body?.launchIntent || "").trim() === "1";
     const pricingVariant = normalizePricingVariant(req.body?.pricingVariant);
+    const pricingMarket = ["service", "tech"].includes(String(req.body?.pricingMarket || "").trim())
+      ? String(req.body.pricingMarket).trim()
+      : "tech";
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
@@ -593,6 +596,7 @@ router.post("/create-checkout-session", async (req, res) => {
       billingLabel: PLAN_NAME_MAP[planKey],
       offerKey: pricingVariant === "high_ticket_test" ? `high_ticket_${planKey}` : `public_${planKey}`,
       pricingVariant,
+      pricingMarket,
       monthlyPrice: String(monthlyPrice),
       source: launchIntent ? "campaign_setup_launch_gate" : (pricingVariant === "high_ticket_test" ? "high_ticket_pricing_page" : "public_pricing_page"),
       sid: getSidFromReq(req) || "",
@@ -862,6 +866,9 @@ router.post("/create-checkout-session-auth", async (req, res) => {
 
     const planKey = normalizePlanKey(req.body?.plan);
     const pricingVariant = normalizePricingVariant(req.body?.pricingVariant);
+    const pricingMarket = ["service", "tech"].includes(String(req.body?.pricingMarket || "").trim())
+      ? String(req.body.pricingMarket).trim()
+      : "tech";
 
     if (!planKey || !PLAN_NAME_MAP[planKey]) {
       return res.status(400).json({
@@ -892,6 +899,7 @@ router.post("/create-checkout-session-auth", async (req, res) => {
       billingLabel: PLAN_NAME_MAP[planKey],
       offerKey: pricingVariant === "high_ticket_test" ? `high_ticket_${planKey}` : `public_${planKey}`,
       pricingVariant,
+      pricingMarket,
       monthlyPrice: String(monthlyPrice),
       source: "campaign_setup",
       sid: getSidFromReq(req) || "",

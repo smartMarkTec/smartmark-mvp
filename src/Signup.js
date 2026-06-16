@@ -54,6 +54,8 @@ async function authFetch(path, opts = {}) {
 }
 
 async function createCheckoutSession({ plan, founder = false, email, fullName }) {
+  const pricingVariant = (() => { try { return localStorage.getItem("sm_pricing_variant") || "normal"; } catch { return "normal"; } })();
+  const pricingMarket = (() => { try { return localStorage.getItem("sm_pricing_market") || "tech"; } catch { return "tech"; } })();
   const res = await fetch("/api/stripe/create-checkout-session", {
     method: "POST",
     headers: {
@@ -67,6 +69,8 @@ async function createCheckoutSession({ plan, founder = false, email, fullName })
       email,
       username: email,
       fullName,
+      pricingVariant,
+      pricingMarket,
     }),
   });
 

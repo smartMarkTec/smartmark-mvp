@@ -53,11 +53,13 @@ async function authFetch(path, opts = {}) {
 }
 
 async function createCheckoutSession({ plan }) {
+  const pricingVariant = (() => { try { return localStorage.getItem("sm_pricing_variant") || "normal"; } catch { return "normal"; } })();
+  const pricingMarket = (() => { try { return localStorage.getItem("sm_pricing_market") || "tech"; } catch { return "tech"; } })();
   const res = await fetch("/api/stripe/create-checkout-session-auth", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-sm-sid": ensureStoredSid() },
     credentials: "include",
-    body: JSON.stringify({ plan, launchIntent: "1" }),
+    body: JSON.stringify({ plan, launchIntent: "1", pricingVariant, pricingMarket }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json?.ok || !json?.url) {

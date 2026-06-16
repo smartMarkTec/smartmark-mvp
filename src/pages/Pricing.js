@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { trackEvent } from "../analytics/gaEvents";
 import { trackLead } from "../utils/metaPixel";
 
@@ -11,15 +11,18 @@ const TEXT = "#111827";
 const TEXT_SOFT = "#6b7280";
 const PURPLE = "#5d59ea";
 
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  return isMobile;
-};
+const LS_MARKET = "sm_pricing_market";
+
+const SERVICE_FEATURES = [
+  "Facebook ad strategy",
+  "Campaign setup",
+  "Ad creation",
+  "Testing different messages and angles",
+  "Campaign launch",
+  "Monitoring performance",
+  "Adjustments based on what's working",
+  "Clear updates/reporting",
+];
 
 const plans = [
   {
@@ -28,7 +31,7 @@ const plans = [
     price: "$249",
     cardTitle: "AI Campaign Manager",
     description:
-      "For business owners who want to use Smartemark themselves to create, launch, and monitor Facebook/Instagram ads.",
+      "The AI runs the campaign, but you operate it from your dashboard.",
     badge: null,
     featured: false,
     isDark: false,
@@ -51,7 +54,7 @@ const plans = [
     price: "$495",
     cardTitle: "AI Campaign Manager + AI Assistant",
     description:
-      "For business owners who want the Smartemark platform plus guided AI help with marketing decisions, offers, services, and campaign ideas.",
+      "The AI runs the campaign, and you also get the AI Assistant to guide you with ideas, specials, ad angles, and campaign direction.",
     badge: "Most Popular",
     featured: true,
     isDark: false,
@@ -75,7 +78,7 @@ const plans = [
     price: "$749",
     cardTitle: "Done-For-You AI Ad Management",
     description:
-      "For business owners who want our team to manage the campaign for them through Smartemark.",
+      "The AI runs the campaign, but we operate it for you. We handle setup, tracking, monitoring, and reporting.",
     badge: "Done For You",
     featured: false,
     isDark: true,
@@ -124,8 +127,19 @@ const faqs = [
   },
 ];
 
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+};
+
 const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isMobile = useIsMobile();
   const [loadingPlan, setLoadingPlan] = useState("");
   const [openFaq, setOpenFaq] = useState(null);
@@ -134,11 +148,52 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
   const activeVariant = variantProp || "normal";
   const activeHomeRoute = homeRoute || "/";
 
+  // Resolve market from URL param → localStorage → default
+  const rawMarket = searchParams.get("market");
+  const market =
+    rawMarket === "service" || rawMarket === "tech"
+      ? rawMarket
+      : (() => {
+          try {
+            const stored = localStorage.getItem(LS_MARKET);
+            return stored === "service" || stored === "tech" ? stored : "service";
+          } catch {
+            return "service";
+          }
+        })();
+
+  // Persist market to localStorage whenever it changes
   useEffect(() => {
     try {
-      trackEvent("view_pricing", { page: "pricing", pricingVariant: activeVariant });
+      localStorage.setItem(LS_MARKET, market);
     } catch {}
-  }, [activeVariant]);
+  }, [market]);
+
+  const switchMarket = (newMarket) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("market", newMarket);
+        return next;
+      },
+      { replace: false }
+    );
+  };
+
+  // The premium plan (used as the base for the service card)
+  const premiumPlan =
+    activePlans.find((p) => p.planKey === "premium") ||
+    activePlans[activePlans.length - 1];
+
+  useEffect(() => {
+    try {
+      trackEvent("view_pricing", {
+        page: "pricing",
+        pricingVariant: activeVariant,
+        pricingMarket: market,
+      });
+    } catch {}
+  }, [activeVariant, market]);
 
   const startCheckout = async (plan) => {
     if (!plan?.planKey) return;
@@ -148,6 +203,9 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
     try {
       localStorage.setItem("sm_selected_plan", plan.planKey);
       localStorage.setItem("sm_pricing_variant", activeVariant);
+      try {
+        localStorage.setItem(LS_MARKET, market);
+      } catch {}
 
       try {
         trackEvent("pricing_cta_click", {
@@ -155,6 +213,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
           plan: plan.name,
           planKey: plan.planKey,
           pricingVariant: activeVariant,
+          pricingMarket: market,
         });
       } catch {}
 
@@ -162,7 +221,11 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ plan: plan.planKey, pricingVariant: activeVariant }),
+        body: JSON.stringify({
+          plan: plan.planKey,
+          pricingVariant: activeVariant,
+          pricingMarket: market,
+        }),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -213,6 +276,9 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
         }
         .sm-plan-btn:hover {
           opacity: 0.88 !important;
+        }
+        .sm-market-tab:hover {
+          background: rgba(93,89,234,0.06) !important;
         }
       `}</style>
 
@@ -342,7 +408,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
           style={{
             textAlign: "center",
             margin: "0 auto",
-            marginBottom: isMobile ? 40 : 56,
+            marginBottom: isMobile ? 32 : 40,
             fontFamily: "'Lora', Georgia, serif",
             fontSize: isMobile ? "2.6rem" : "4rem",
             lineHeight: 1.08,
@@ -354,87 +420,107 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
           Pricing
         </h1>
 
-        {/* ── Pricing cards ── */}
+        {/* ── Market tabs ── */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
-            gap: isMobile ? 16 : 24,
-            alignItems: "stretch",
+            display: "flex",
+            justifyContent: "center",
+            gap: isMobile ? 8 : 10,
+            marginBottom: isMobile ? 40 : 52,
+            flexWrap: "wrap",
           }}
         >
-          {activePlans.map((plan) => {
-            const isLoading = loadingPlan === plan.planKey;
-            const dark = plan.isDark;
-            const cardText = dark ? "#f1f5f9" : TEXT;
-            const cardTextSoft = dark ? "rgba(241,245,249,0.58)" : TEXT_SOFT;
-
+          {[
+            { key: "service", label: "Service Businesses" },
+            { key: "tech", label: "Online / Tech Businesses" },
+          ].map(({ key, label }) => {
+            const isActive = market === key;
             return (
-              <div
-                key={plan.planKey}
+              <button
+                key={key}
+                className="sm-market-tab"
+                onClick={() => switchMarket(key)}
                 style={{
-                  position: "relative",
+                  padding: isMobile ? "9px 18px" : "10px 24px",
+                  borderRadius: 999,
+                  border: isActive
+                    ? "none"
+                    : "1.5px solid rgba(0,0,0,0.12)",
+                  background: isActive ? PURPLE : "transparent",
+                  color: isActive ? "#fff" : TEXT_SOFT,
+                  fontSize: isMobile ? 13 : 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                  transition: "background 0.15s, color 0.15s",
+                  letterSpacing: "-0.1px",
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Service Businesses plan card ── */}
+        {market === "service" && premiumPlan && (() => {
+          const dark = true;
+          const cardText = "#f1f5f9";
+          const cardTextSoft = "rgba(241,245,249,0.58)";
+          const isLoading = loadingPlan === premiumPlan.planKey;
+
+          return (
+            <div
+              style={{
+                maxWidth: 580,
+                margin: "0 auto",
+              }}
+            >
+              <div
+                style={{
                   borderRadius: 20,
-                  padding: isMobile ? "28px 22px 32px" : "36px 32px 40px",
-                  background: dark ? "#0f172a" : "white",
-                  border: dark
-                    ? "1px solid rgba(255,255,255,0.06)"
-                    : plan.featured
-                    ? "2px solid rgba(93,89,234,0.32)"
-                    : "1px solid rgba(0,0,0,0.08)",
-                  boxShadow: dark
-                    ? "0 12px 56px rgba(0,0,0,0.26)"
-                    : plan.featured
-                    ? "0 8px 44px rgba(93,89,234,0.12)"
-                    : "0 2px 18px rgba(0,0,0,0.06)",
+                  padding: isMobile ? "28px 22px 32px" : "40px 36px 44px",
+                  background: "#0f172a",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  boxShadow: "0 12px 56px rgba(0,0,0,0.26)",
                   display: "flex",
                   flexDirection: "column",
                 }}
               >
-                {/* Badge row — always reserves space to align cards */}
+                {/* Badge */}
                 <div style={{ marginBottom: 20, minHeight: 26 }}>
-                  {plan.badge && (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "4px 12px",
-                        borderRadius: 999,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: 0.4,
-                        ...(plan.featured
-                          ? {
-                              background: "rgba(93,89,234,0.10)",
-                              color: PURPLE,
-                              border: "1px solid rgba(93,89,234,0.18)",
-                            }
-                          : {
-                              background: "rgba(234,179,8,0.12)",
-                              color: "#d97706",
-                              border: "1px solid rgba(217,119,6,0.18)",
-                            }),
-                      }}
-                    >
-                      {plan.badge}
-                    </span>
-                  )}
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "4px 12px",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      background: "rgba(234,179,8,0.12)",
+                      color: "#d97706",
+                      border: "1px solid rgba(217,119,6,0.18)",
+                    }}
+                  >
+                    Done For You
+                  </span>
                 </div>
 
                 {/* Plan name */}
                 <div
                   style={{
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: 800,
                     color: cardText,
                     letterSpacing: "-0.3px",
                     marginBottom: 4,
                   }}
                 >
-                  {plan.name}
+                  Service Business Growth Plan
                 </div>
 
-                {/* Card title */}
+                {/* Subtitle */}
                 <div
                   style={{
                     fontSize: 14,
@@ -443,7 +529,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                     marginBottom: 20,
                   }}
                 >
-                  {plan.cardTitle}
+                  Done-for-you Facebook ads
                 </div>
 
                 {/* Price */}
@@ -457,21 +543,21 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                 >
                   <span
                     style={{
-                      fontSize: isMobile ? 46 : 52,
+                      fontSize: isMobile ? 46 : 56,
                       lineHeight: 1,
                       fontWeight: 800,
                       color: cardText,
                       letterSpacing: "-2px",
                     }}
                   >
-                    {plan.price}
+                    {premiumPlan.price}
                   </span>
                   <span
                     style={{
                       fontSize: 15,
                       color: cardTextSoft,
                       fontWeight: 500,
-                      paddingBottom: 8,
+                      paddingBottom: 10,
                     }}
                   >
                     /mo
@@ -486,27 +572,25 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                     color: cardTextSoft,
                     margin: "0 0 26px",
                     fontWeight: 400,
-                    minHeight: isMobile ? "auto" : 64,
                   }}
                 >
-                  {plan.description}
+                  For HVAC, plumbing, electrical, and local service businesses,
+                  this is our done-for-you Facebook ads service.
                 </p>
 
-                {/* CTA button */}
+                {/* CTA */}
                 <button
                   type="button"
                   className="sm-plan-btn"
-                  onClick={() => startCheckout(plan)}
+                  onClick={() => startCheckout(premiumPlan)}
                   disabled={!!loadingPlan}
                   style={{
                     width: "100%",
-                    padding: "13px 16px",
+                    padding: "14px 16px",
                     borderRadius: 10,
-                    border: dark
-                      ? "none"
-                      : "1.5px solid rgba(0,0,0,0.16)",
-                    background: dark ? "white" : "#111827",
-                    color: dark ? "#111827" : "white",
+                    border: "none",
+                    background: "white",
+                    color: "#111827",
                     fontSize: 15,
                     fontWeight: 700,
                     cursor: loadingPlan ? "not-allowed" : "pointer",
@@ -515,82 +599,334 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                     marginBottom: 28,
                   }}
                 >
-                  {isLoading ? "Continuing…" : plan.cta}
+                  {isLoading ? "Continuing…" : "Get Started"}
                 </button>
 
                 {/* Divider */}
                 <div
                   style={{
-                    borderTop: dark
-                      ? "1px solid rgba(255,255,255,0.09)"
-                      : "1px solid rgba(0,0,0,0.07)",
+                    borderTop: "1px solid rgba(255,255,255,0.09)",
                     marginBottom: 20,
                   }}
                 />
 
-                {/* Features */}
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: cardTextSoft,
-                      letterSpacing: 0.6,
-                      textTransform: "uppercase",
-                      marginBottom: 14,
-                    }}
-                  >
-                    What's included
-                  </div>
+                {/* Features label */}
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: cardTextSoft,
+                    letterSpacing: 0.6,
+                    textTransform: "uppercase",
+                    marginBottom: 14,
+                  }}
+                >
+                  What's included
+                </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-                    {plan.features.map((feat) => (
+                {/* Features */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 11, marginBottom: 24 }}>
+                  {SERVICE_FEATURES.map((feat) => (
+                    <div
+                      key={feat}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                      }}
+                    >
                       <div
-                        key={feat}
                         style={{
+                          flexShrink: 0,
+                          width: 18,
+                          height: 18,
+                          borderRadius: "50%",
+                          marginTop: 2,
                           display: "flex",
-                          alignItems: "flex-start",
-                          gap: 10,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "rgba(255,255,255,0.12)",
+                          color: "rgba(241,245,249,0.9)",
+                          fontSize: 10,
+                          fontWeight: 900,
                         }}
                       >
-                        <div
-                          style={{
-                            flexShrink: 0,
-                            width: 18,
-                            height: 18,
-                            borderRadius: "50%",
-                            marginTop: 2,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: dark
-                              ? "rgba(255,255,255,0.12)"
-                              : "rgba(93,89,234,0.10)",
-                            color: dark ? "rgba(241,245,249,0.9)" : PURPLE,
-                            fontSize: 10,
-                            fontWeight: 900,
-                          }}
-                        >
-                          ✓
-                        </div>
-                        <span
-                          style={{
-                            fontSize: 14,
-                            color: cardText,
-                            fontWeight: 400,
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          {feat}
-                        </span>
+                        ✓
                       </div>
-                    ))}
-                  </div>
+                      <span
+                        style={{
+                          fontSize: 14,
+                          color: cardText,
+                          fontWeight: 400,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {feat}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 3-day notice */}
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    background: "rgba(255,255,255,0.06)",
+                    borderRadius: 10,
+                    fontSize: 13,
+                    color: cardTextSoft,
+                    lineHeight: 1.6,
+                    fontStyle: "italic",
+                  }}
+                >
+                  Once you sign up and we have access to your Facebook account
+                  and campaign details, we can have your campaign up and running
+                  within 3 days.
                 </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Online / Tech Businesses — 3-plan grid ── */}
+        {market === "tech" && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+              gap: isMobile ? 16 : 24,
+              alignItems: "stretch",
+            }}
+          >
+            {activePlans.map((plan) => {
+              const isLoading = loadingPlan === plan.planKey;
+              const dark = plan.isDark;
+              const cardText = dark ? "#f1f5f9" : TEXT;
+              const cardTextSoft = dark ? "rgba(241,245,249,0.58)" : TEXT_SOFT;
+
+              return (
+                <div
+                  key={plan.planKey}
+                  style={{
+                    position: "relative",
+                    borderRadius: 20,
+                    padding: isMobile ? "28px 22px 32px" : "36px 32px 40px",
+                    background: dark ? "#0f172a" : "white",
+                    border: dark
+                      ? "1px solid rgba(255,255,255,0.06)"
+                      : plan.featured
+                      ? "2px solid rgba(93,89,234,0.32)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    boxShadow: dark
+                      ? "0 12px 56px rgba(0,0,0,0.26)"
+                      : plan.featured
+                      ? "0 8px 44px rgba(93,89,234,0.12)"
+                      : "0 2px 18px rgba(0,0,0,0.06)",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {/* Badge row */}
+                  <div style={{ marginBottom: 20, minHeight: 26 }}>
+                    {plan.badge && (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "4px 12px",
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.4,
+                          ...(plan.featured
+                            ? {
+                                background: "rgba(93,89,234,0.10)",
+                                color: PURPLE,
+                                border: "1px solid rgba(93,89,234,0.18)",
+                              }
+                            : {
+                                background: "rgba(234,179,8,0.12)",
+                                color: "#d97706",
+                                border: "1px solid rgba(217,119,6,0.18)",
+                              }),
+                        }}
+                      >
+                        {plan.badge}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Plan name */}
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 800,
+                      color: cardText,
+                      letterSpacing: "-0.3px",
+                      marginBottom: 4,
+                    }}
+                  >
+                    {plan.name}
+                  </div>
+
+                  {/* Card title */}
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: cardTextSoft,
+                      marginBottom: 20,
+                    }}
+                  >
+                    {plan.cardTitle}
+                  </div>
+
+                  {/* Price */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      gap: 4,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: isMobile ? 46 : 52,
+                        lineHeight: 1,
+                        fontWeight: 800,
+                        color: cardText,
+                        letterSpacing: "-2px",
+                      }}
+                    >
+                      {plan.price}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 15,
+                        color: cardTextSoft,
+                        fontWeight: 500,
+                        paddingBottom: 8,
+                      }}
+                    >
+                      /mo
+                    </span>
+                  </div>
+
+                  {/* Description */}
+                  <p
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 1.65,
+                      color: cardTextSoft,
+                      margin: "0 0 26px",
+                      fontWeight: 400,
+                      minHeight: isMobile ? "auto" : 64,
+                    }}
+                  >
+                    {plan.description}
+                  </p>
+
+                  {/* CTA button */}
+                  <button
+                    type="button"
+                    className="sm-plan-btn"
+                    onClick={() => startCheckout(plan)}
+                    disabled={!!loadingPlan}
+                    style={{
+                      width: "100%",
+                      padding: "13px 16px",
+                      borderRadius: 10,
+                      border: dark
+                        ? "none"
+                        : "1.5px solid rgba(0,0,0,0.16)",
+                      background: dark ? "white" : "#111827",
+                      color: dark ? "#111827" : "white",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: loadingPlan ? "not-allowed" : "pointer",
+                      opacity: loadingPlan && !isLoading ? 0.6 : 1,
+                      transition: "opacity 0.15s",
+                      marginBottom: 28,
+                    }}
+                  >
+                    {isLoading ? "Continuing…" : plan.cta}
+                  </button>
+
+                  {/* Divider */}
+                  <div
+                    style={{
+                      borderTop: dark
+                        ? "1px solid rgba(255,255,255,0.09)"
+                        : "1px solid rgba(0,0,0,0.07)",
+                      marginBottom: 20,
+                    }}
+                  />
+
+                  {/* Features */}
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: cardTextSoft,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        marginBottom: 14,
+                      }}
+                    >
+                      What's included
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                      {plan.features.map((feat) => (
+                        <div
+                          key={feat}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              flexShrink: 0,
+                              width: 18,
+                              height: 18,
+                              borderRadius: "50%",
+                              marginTop: 2,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: dark
+                                ? "rgba(255,255,255,0.12)"
+                                : "rgba(93,89,234,0.10)",
+                              color: dark ? "rgba(241,245,249,0.9)" : PURPLE,
+                              fontSize: 10,
+                              fontWeight: 900,
+                            }}
+                          >
+                            ✓
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 14,
+                              color: cardText,
+                              fontWeight: 400,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {feat}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── FAQ ── */}
         <div
