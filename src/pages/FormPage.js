@@ -950,6 +950,43 @@ export default function FormPage() {
       .catch(() => {});
   }, [adminClientId]);
 
+  /* In admin mode: when adminClientId changes from one client to another, reset all
+     form state immediately so stale context from the previous client never bleeds through.
+     Skips the first mount (prev is "") — only fires on a real client switch. */
+  useEffect(() => {
+    const prev = prevAdminClientIdRef.current;
+    prevAdminClientIdRef.current = adminClientId;
+
+    if (!adminClientId || !prev || prev === adminClientId) return;
+
+    setAnswers({});
+    setStep(0);
+    setChatHistory(INITIAL_CHAT);
+    setInput("");
+    setResult(null);
+    setImageUrls([]);
+    setActiveImage(0);
+    setImageUrl("");
+    setAwaitingReady(true);
+    setError("");
+    setGenerating(false);
+    setLoading(false);
+    setSideChatCount(0);
+    setHasGenerated(false);
+    setImageEditing(false);
+    setEditHeadline("");
+    setEditBody("");
+    setEditCTA("");
+    setMediaType("image");
+    setImageDataUrls([]);
+    setImgFail({});
+    setObjectiveStep("none");
+    setSelectedObjective(null);
+    setAiRecommendedObjective(null);
+    draftRestoredRef.current = false;
+    setContextStatus("loading");
+  }, [adminClientId]);
+
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
@@ -973,6 +1010,9 @@ export default function FormPage() {
   // The async context-load useEffect checks this before hydrating so it
   // never overwrites an in-progress form session.
   const draftRestoredRef = useRef(false);
+
+  // Tracks previous adminClientId so the change-reset effect can detect real changes.
+  const prevAdminClientIdRef = useRef("");
 
   // "idle"    → normal old-intake flow (no saved context)
   // "loading" → async context fetch in progress (admin mode starts here to prevent flash)
@@ -1222,6 +1262,9 @@ useEffect(() => {
 */
 useEffect(() => {
   try {
+    // In admin-client mode, never restore image cache — admin sessions always load fresh from API.
+    if (adminClientId) return;
+
     // If CampaignSetup marked drafts disabled after successful launch,
     // FormPage must be totally clean (no "in progress" remnants).
     if (isDraftDisabled()) {
@@ -1266,6 +1309,14 @@ useEffect(() => {
 
   /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
   useEffect(() => {
+    // In admin-client mode, never restore localStorage/sessionStorage drafts.
+    // Admin context is always loaded fresh from the server for the selected client.
+    // Draft keys are scoped to the admin user (not the client), so Joe's draft
+    // would otherwise bleed into Max's session and vice versa.
+    if (adminClientId) {
+      draftRestoredRef.current = false;
+      return;
+    }
     try {
       purgeLegacyDraftKeys();
 
@@ -1483,6 +1534,25 @@ useEffect(() => {
           return;
         }
 
+        // Safety guard: in admin mode, verify that the returned context actually belongs
+        // to the selected client. If the server returns fields we added for this check,
+        // validate them. A mismatch means we got someone else's data — refuse to hydrate.
+        if (aclId && json.clientOwnerKey && json.contextOwnerKey) {
+          if (json.clientOwnerKey !== json.contextOwnerKey) {
+            console.warn("[FormPage] Admin context ownership mismatch!", {
+              aclId,
+              clientOwnerKey: json.clientOwnerKey,
+              contextOwnerKey: json.contextOwnerKey,
+            });
+            setChatHistory([{
+              from: "gpt",
+              text: "⚠️ Campaign context mismatch detected. Please refresh or reopen this client.",
+            }]);
+            setContextStatus("missing");
+            return;
+          }
+        }
+
         const ctx = json.context;
 
         // Map saved context fields to FormPage answers structure
@@ -1537,8 +1607,8 @@ useEffect(() => {
     };
 
     loadSavedContext();
-    // eslint-disable-next-line
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminClientId]); // re-run whenever the selected admin client changes
 
 useEffect(() => {
   const draft = currentImageId ? getImageDraftById(currentImageId) : null;
@@ -1714,6 +1784,11 @@ const displayLink = normalizeUrlForCopy(
 /* Autosave */
 useEffect(() => {
   const t = setTimeout(() => {
+    // In admin-client mode, never write drafts to localStorage.
+    // Draft keys are scoped to the admin user, not the client, so saving here
+    // would cause cross-client leaks when the admin switches between clients.
+    if (adminClientId) return;
+
     // ✅ If campaign was launched, FormPage must NOT keep writing drafts (this causes ghost previews)
     if (isDraftDisabled()) {
       try {
@@ -1816,6 +1891,9 @@ useEffect(() => {
   useEffect(() => {
     const handler = () => {
       try {
+        // In admin-client mode, never write drafts — admin context is server-managed.
+        if (adminClientId) return;
+
         const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
         const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
         const mergedBody = activeDraft?.body || result?.body || "";

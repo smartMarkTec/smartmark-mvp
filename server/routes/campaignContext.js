@@ -255,17 +255,39 @@ router.get('/campaign-context', async (req, res) => {
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
       if (clientRecords[0]) {
-        return res.json({ ok: true, context: clientRecords[0], source: 'campaign_context', hasUsableContext: true });
+        return res.json({
+          ok: true,
+          context: clientRecords[0],
+          source: 'campaign_context',
+          hasUsableContext: true,
+          resolvedAdminClientId: adminClientId,
+          clientOwnerKey,
+          contextOwnerKey: String(clientRecords[0].ownerKey || ''),
+        });
       }
 
       // 2. Synthesize from premiumIntake
       const synthesized = synthesizeFromPremiumIntake(clientUser.premiumIntake);
       if (synthesized) {
-        return res.json({ ok: true, context: synthesized, source: 'premium_intake', hasUsableContext: true });
+        return res.json({
+          ok: true,
+          context: synthesized,
+          source: 'premium_intake',
+          hasUsableContext: true,
+          resolvedAdminClientId: adminClientId,
+          clientOwnerKey,
+          contextOwnerKey: clientOwnerKey,
+        });
       }
 
       // 3. If only the business name is known (from displayName / email), that's not enough
-      return res.json({ ok: true, context: null, hasUsableContext: false });
+      return res.json({
+        ok: true,
+        context: null,
+        hasUsableContext: false,
+        resolvedAdminClientId: adminClientId,
+        clientOwnerKey,
+      });
     }
 
     // ── Normal mode: return the logged-in user's own context ─────────────────
