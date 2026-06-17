@@ -21,10 +21,13 @@ const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const AD_AGENT_SYSTEM =
-  "You are Smartemark's Ad Agent. Help HVAC and local service businesses understand their campaign, " +
-  "choose services/specials to promote, improve ad angles, and understand setup steps. " +
-  "Be concise, practical, and action-focused. Do not guarantee leads or calls. " +
-  "Position Smartemark as helping with branding, local visibility, promoting specials, and getting more eyes on the business. " +
+  "You are Smartemark's senior Meta ads strategist. " +
+  "Use the saved customer intake, website, campaign notes, selected objective, creative preferences, and campaign history to give specific, actionable advice. " +
+  "Recommend practical Facebook/Instagram campaign strategy tailored to this specific business. " +
+  "Do not invent fake offers, fake guarantees, fake reviews, fake prices, or fake results. " +
+  "If information is missing, ask for it or list it as missing — do not make it up. " +
+  "If the user gives exact copy, headline, targeting, creative, or strategy instructions, follow them unless unsafe or impossible. " +
+  "Before suggesting any live Meta change, note that it will require approval. " +
   "IMPORTANT: When campaign metrics context is provided in the system messages, USE IT. " +
   "Answer performance questions with the actual numbers provided — impressions, CTR, CPC, spend, clicks. " +
   "Explain metrics in plain language a business owner would understand. " +
@@ -151,6 +154,21 @@ function buildGenerateChallengerReply(actionResult) {
 async function getCampaignContext(ownerKey, selectedCampaignId) {
   try {
     await db.read();
+
+    // ── Pull saved intake context (campaign intelligence layer) ──────────────
+    const allContexts = db.data?.campaign_contexts || [];
+    const userContexts = allContexts.filter(
+      (c) => String(c?.ownerKey || '').trim() === String(ownerKey || '').trim()
+    );
+    let intakeContext = null;
+    if (userContexts.length) {
+      // Prefer context linked to the selected campaign, else most recent
+      intakeContext =
+        (selectedCampaignId && userContexts.find((c) => String(c.campaignId || '') === String(selectedCampaignId))) ||
+        [...userContexts].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0];
+    }
+
+    // ── Pull campaign metrics (optimizer state) ──────────────────────────────
     const allStates = db.data?.optimizer_campaign_state || [];
     const userStates = allStates.filter(
       (s) =>
@@ -159,8 +177,18 @@ async function getCampaignContext(ownerKey, selectedCampaignId) {
         !s?.hiddenFromHistory
     );
 
-    if (!userStates.length) {
+    if (!userStates.length && !intakeContext) {
       return 'No active campaign metrics are available. If the user asks about campaign performance, say exactly: "I don\'t see active campaign metrics connected yet."';
+    }
+
+    // If we have intake context but no metrics yet, return intake only
+    if (!userStates.length && intakeContext) {
+      const parts = ['Customer intake context:'];
+      if (intakeContext.intakeText) parts.push(intakeContext.intakeText);
+      if (intakeContext.selectedObjectiveLabel) parts.push(`Selected objective: ${intakeContext.selectedObjectiveLabel} (${intakeContext.selectedObjectiveValue || ''})`);
+      if (intakeContext.creativePreference) parts.push(`Creative preference: ${intakeContext.creativePreference}`);
+      parts.push('No live campaign metrics yet.');
+      return parts.join('\n');
     }
 
     // Pick the campaign to highlight: prefer selectedCampaignId, then most recent ACTIVE, then any
@@ -226,6 +254,19 @@ async function getCampaignContext(ownerKey, selectedCampaignId) {
       if (test?.status) {
         const testStatus = String(test.status).toLowerCase();
         lines.push(`  A/B test: ${testStatus}${test.creativeGoal ? ` — goal: ${test.creativeGoal}` : ''}`);
+      }
+    }
+
+    // Append intake context if available
+    if (intakeContext) {
+      lines.push('');
+      lines.push('Customer intake context:');
+      if (intakeContext.intakeText) lines.push(intakeContext.intakeText);
+      if (intakeContext.selectedObjectiveLabel) {
+        lines.push(`Selected objective: ${intakeContext.selectedObjectiveLabel} (${intakeContext.selectedObjectiveValue || ''})`);
+      }
+      if (intakeContext.creativePreference) {
+        lines.push(`Creative preference: ${intakeContext.creativePreference}`);
       }
     }
 

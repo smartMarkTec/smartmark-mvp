@@ -29,6 +29,8 @@ const db = new Low(adapter, {
   smart_runs: [],
   creative_history: [],
   optimizer_campaign_state: [],
+  campaign_contexts: [],   // structured intake + objective per campaign session
+  ai_action_proposals: [], // approval-mode action queue
   tokens: {} // <= where we keep the FB token
 });
 

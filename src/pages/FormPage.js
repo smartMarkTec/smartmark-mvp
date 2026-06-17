@@ -963,6 +963,24 @@ export default function FormPage() {
   const [editCTA, setEditCTA] = useState("");
   const [editLink, setEditLink] = useState("");
 
+  // Objective recommendation step (Phase 2: campaign intelligence layer)
+  // "none" = not started | "choosing" = cards shown | "chosen" = user picked one
+  const [objectiveStep, setObjectiveStep] = useState("none");
+  const [selectedObjective, setSelectedObjective] = useState(null);
+  const [aiRecommendedObjective, setAiRecommendedObjective] = useState(null);
+
+  // True once the draft-restore useEffect finds valid saved data.
+  // The async context-load useEffect checks this before hydrating so it
+  // never overwrites an in-progress form session.
+  const draftRestoredRef = useRef(false);
+
+  const handleSelectObjective = (obj) => {
+    setSelectedObjective(obj);
+    setObjectiveStep("chosen");
+    deliverQuestion(
+      `Got it — **${obj.label}** selected as your campaign objective.\n\n${obj.launchSupported ? "This objective supports direct campaign launch." : "This objective is available for planning. Website Traffic campaigns support live launch today."}\n\nNow let's build your creative. Choose how you'd like to proceed below.`
+    );
+  };
 
   const abs = toAbsoluteMedia;
 
@@ -1299,6 +1317,7 @@ useEffect(() => {
           lsRemove(FORM_DRAFT_KEY);
         } else {
           const data = formWrap.data || {};
+          draftRestoredRef.current = true; // block context-load from overwriting this session
 
           setAnswers(data.answers || {});
           setStep(data.step ?? 0);
@@ -1372,6 +1391,7 @@ useEffect(() => {
           : [];
 
         if (imgs.length) {
+          draftRestoredRef.current = true; // block context-load from overwriting this session
           setImageUrls(imgs);
           setActiveImage(0);
           setImageUrl(imgs[0] || "");
@@ -1406,6 +1426,81 @@ useEffect(() => {
     } catch {}
 
     } catch {}
+    // eslint-disable-next-line
+  }, []);
+
+  /* ── Load saved campaign context on mount (skips intake when data exists) ── */
+  useEffect(() => {
+    const loadSavedContext = async () => {
+      // If a valid draft was already restored, don't overwrite the in-progress session
+      if (draftRestoredRef.current) return;
+
+      try {
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        const res = await fetch("/api/campaign-context", {
+          credentials: "include",
+          headers: sid ? { "x-sm-sid": sid } : {},
+        });
+        if (!res.ok) return;
+        const json = await res.json().catch(() => ({}));
+        if (!json.ok || !json.context) return;
+
+        const ctx = json.context;
+        // Need at least a business name or industry to be useful
+        if (!ctx.businessName && !ctx.industry) return;
+
+        // Map saved context fields to FormPage answers structure
+        const hydratedAnswers = {
+          url:           ctx.websiteUrl    || "",
+          phone:         ctx.phoneNumber   || "",
+          industry:      ctx.industry      || "",
+          businessName:  ctx.businessName  || "",
+          city:          ctx.city          || "",
+          state:         ctx.state         || "",
+          idealCustomer: ctx.idealCustomer || "",
+          hasOffer:      ctx.offer ? "yes" : "",
+          offer:         ctx.offer         || "",
+          mainBenefit:   ctx.mainBenefit   || "",
+          cta:           ctx.cta           || "Call now",
+        };
+
+        // Compute objective recommendation from the loaded answers
+        const rec = recommendObjective(hydratedAnswers);
+
+        // Restore a previously selected objective if one was saved
+        const savedObj = ctx.selectedObjectiveValue
+          ? (CAMPAIGN_OBJECTIVES.find((o) => o.value === ctx.selectedObjectiveValue) || null)
+          : null;
+
+        // Set the active context key so navigate() passes the right key to /setup
+        const ctxKey = ctx.ctxKey || buildCtxKey(hydratedAnswers);
+        setActiveCtx(ctxKey);
+
+        // Apply all state in one pass
+        setAnswers(hydratedAnswers);
+        setStep(CONVO_QUESTIONS.length); // jump past all intake questions
+        setAwaitingReady(false);
+        setObjectiveStep(savedObj ? "chosen" : "choosing");
+        setAiRecommendedObjective({
+          ...rec,
+          reason: ctx.objectiveRecommendationReason || rec.reason,
+        });
+        if (savedObj) setSelectedObjective(savedObj);
+
+        // Build the welcome message
+        const bizName  = ctx.businessName || "your business";
+        const areaStr  = ctx.serviceArea  ||
+          [ctx.city, ctx.state].filter(Boolean).join(", ");
+
+        const welcomeMsg = savedObj
+          ? `I loaded your campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nYour selected objective is **${savedObj.label}**. Choose your creative format below to get started.`
+          : `I loaded your campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nBased on what you provided, I recommend the **${rec.label}** objective — ${rec.reason}\n\nSelect an objective below, or choose a different one.`;
+
+        setChatHistory([{ from: "gpt", text: welcomeMsg }]);
+      } catch {}
+    };
+
+    loadSavedContext();
     // eslint-disable-next-line
   }, []);
 
@@ -1818,6 +1913,17 @@ useEffect(() => {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
+      // If the objective card panel is still open, keep user there
+      if (objectiveStep === "choosing") {
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "user", text: value },
+          { from: "gpt", text: "Please choose a campaign objective from the options above before we continue." },
+        ]);
+        setInput("");
+        return;
+      }
+
       if (!hasGenerated && !copyGenerated && isGenerateTrigger(value)) {
         if (creativeSource === "ai_image") {
           if (!canRunImageGen()) {
@@ -2012,8 +2118,14 @@ useEffect(() => {
       }
 
       if (!CONVO_QUESTIONS[nextStep]) {
-        deliverQuestion("Are you ready for me to generate your campaign? (yes/no)");
+        // All intake questions answered — recommend an objective before ad generation
+        const rec = recommendObjective(newAnswers);
+        setAiRecommendedObjective(rec);
+        setObjectiveStep("choosing");
         setStep(nextStep);
+        deliverQuestion(
+          `Great — I have everything I need to build your campaign.\n\nBased on your goal, I recommend the **${rec.label}** objective — ${rec.reason}\n\nSelect an objective below, or keep my recommendation.`
+        );
         return;
       }
 
@@ -3195,6 +3307,49 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
+      {/* ── Objective cards (shown after all intake questions answered) ── */}
+      {objectiveStep === "choosing" && (
+        <div style={{ width: "100%", padding: "16px 18px 8px 18px" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7785", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Choose your campaign objective
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {CAMPAIGN_OBJECTIVES.map((obj) => {
+              const isRec = aiRecommendedObjective?.value === obj.value;
+              const isSel = selectedObjective?.value === obj.value;
+              return (
+                <button
+                  key={obj.value}
+                  onClick={() => handleSelectObjective(obj)}
+                  style={{
+                    position: "relative",
+                    background: isSel ? "#5d59ea" : isRec ? "#f0efff" : "#f7f8fe",
+                    border: isSel ? "2px solid #5d59ea" : isRec ? "2px solid #5d59ea" : "2px solid #e4e7ec",
+                    borderRadius: 14,
+                    padding: "14px 14px 12px 14px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {isRec && !isSel && (
+                    <div style={{ position: "absolute", top: 8, right: 8, background: "#5d59ea", color: "#fff", fontSize: 9, fontWeight: 900, borderRadius: 6, padding: "2px 6px", letterSpacing: 0.4 }}>
+                      AI PICK
+                    </div>
+                  )}
+                  <div style={{ fontSize: 22, marginBottom: 4 }}>{obj.icon}</div>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: isSel ? "#fff" : "#1a1a2e", marginBottom: 3 }}>{obj.label}</div>
+                  <div style={{ fontSize: 12, color: isSel ? "rgba(255,255,255,0.85)" : "#6b7785", lineHeight: 1.4 }}>{obj.description}</div>
+                  {!obj.launchSupported && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: isSel ? "rgba(255,255,255,0.7)" : "#9aa6b2", fontStyle: "italic" }}>Planning only</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           width: "100%",
@@ -3265,6 +3420,21 @@ async function generatePosterBPair(runToken) {
                 localStorage.removeItem("smartmark_last_image_url");
                 localStorage.removeItem("smartmark_last_fb_video_id");
               } catch {}
+              // Save campaign context before navigating (fire-and-forget)
+              try {
+                fetch("/api/campaign-context/save", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({
+                    ctxKey,
+                    answers,
+                    selectedObjective: selectedObjective || aiRecommendedObjective || null,
+                    creativePreference: "upload_video",
+                  }),
+                }).catch(() => {});
+              } catch {}
+
               navigate("/setup", {
                 state: {
                   ctxKey,
@@ -3277,6 +3447,7 @@ async function generatePosterBPair(runToken) {
                   body: mergedBody,
                   imageOverlayCTA: mergedCTA,
                   answers,
+                  selectedObjective: selectedObjective || aiRecommendedObjective || null,
                   ...(adminClientId ? {
                     adminClientId,
                     adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
@@ -3341,6 +3512,21 @@ async function generatePosterBPair(runToken) {
               localStorage.removeItem("smartmark_last_fb_video_id");
             } catch {}
 
+            // Save campaign context before navigating (fire-and-forget)
+            try {
+              fetch("/api/campaign-context/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  ctxKey,
+                  answers,
+                  selectedObjective: selectedObjective || aiRecommendedObjective || null,
+                  creativePreference: "ai_image",
+                }),
+              }).catch(() => {});
+            } catch {}
+
             navigate("/setup", {
               state: {
                 ctxKey,
@@ -3350,6 +3536,7 @@ async function generatePosterBPair(runToken) {
                 imageOverlayCTA: mergedCTA,
                 answers,
                 mediaSelection: "image",
+                selectedObjective: selectedObjective || aiRecommendedObjective || null,
                 ...(adminClientId ? {
                   adminClientId,
                   adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
@@ -3392,3 +3579,89 @@ const CONVO_QUESTIONS = [
   { key: "mainBenefit", question: "What's the main benefit or service you want the ad to highlight?" },
   { key: "cta", question: "What do you want people to do after seeing this ad? (e.g. Call now, Schedule service, Request a quote, Book a demo, Visit website)" },
 ];
+
+/* ===== Campaign objectives ===== */
+const CAMPAIGN_OBJECTIVES = [
+  {
+    value: "OUTCOME_LEADS",
+    label: "Leads",
+    icon: "📋",
+    description: "Collect contact info from interested people.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+  {
+    value: "OUTCOME_TRAFFIC",
+    label: "Traffic",
+    icon: "🌐",
+    description: "Send people to your website or landing page.",
+    launchSupported: true,
+    planningSupported: true,
+  },
+  {
+    value: "OUTCOME_AWARENESS",
+    label: "Awareness",
+    icon: "📣",
+    description: "Reach new people and build brand recognition.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+  {
+    value: "OUTCOME_ENGAGEMENT",
+    label: "Engagement",
+    icon: "💬",
+    description: "Get likes, comments, shares, and messages.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+  {
+    value: "OUTCOME_SALES",
+    label: "Sales",
+    icon: "🛒",
+    description: "Drive purchases on your website or app.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+  {
+    value: "OUTCOME_APP_PROMOTION",
+    label: "App Promotion",
+    icon: "📱",
+    description: "Get more installs or engagement for your app.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+];
+
+/* ===== Rule-based objective recommendation ===== */
+function recommendObjective(answers = {}) {
+  const cta = String(answers.cta || "").toLowerCase();
+  const industry = String(answers.industry || "").toLowerCase();
+
+  // Lead-focused CTAs
+  if (/quote|estimate|consult|inquiry|contact|form|apply|sign.?up|free trial/i.test(cta)) {
+    return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_LEADS"), reason: "Your CTA is lead-focused — collecting contact info fits best." };
+  }
+
+  // Sales / e-commerce
+  if (/buy|shop|order|purchase|checkout|cart/i.test(cta) || /ecommerce|e-commerce|retail|store|shop/i.test(industry)) {
+    return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_SALES"), reason: "Your CTA and industry point to direct sales." };
+  }
+
+  // App installs
+  if (/app|download|install/i.test(cta) || /app|software|saas/i.test(industry)) {
+    return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_APP_PROMOTION"), reason: "Your business or CTA suggests an app promotion campaign." };
+  }
+
+  // Engagement / social
+  if (/follow|like|comment|share|message|dm/i.test(cta)) {
+    return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_ENGAGEMENT"), reason: "Your CTA is engagement-focused." };
+  }
+
+  // Awareness / branding
+  if (/learn more|awareness|brand|discover|introduce/i.test(cta)) {
+    return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_AWARENESS"), reason: "Your CTA is awareness-oriented." };
+  }
+
+  // Default: Traffic (also the only launchSupported option)
+  return { ...CAMPAIGN_OBJECTIVES.find((o) => o.value === "OUTCOME_TRAFFIC"), reason: "Driving traffic to your website is a strong default for most businesses." };
+}

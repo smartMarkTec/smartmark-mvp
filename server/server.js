@@ -468,6 +468,10 @@ app.use("/api", premiumAdminRoutes);
 const agreementRoutes = require("./routes/agreement");
 app.use("/api", agreementRoutes);
 
+/* ✅ Campaign context + AI action proposals */
+const campaignContextRoutes = require("./routes/campaignContext");
+app.use("/api", campaignContextRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);
