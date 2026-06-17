@@ -42,8 +42,69 @@ function ownerKeyFromReq(req) {
 
 async function ensureData() {
   await db.read();
-  db.data.campaign_contexts  ||= [];
+  db.data.campaign_contexts   ||= [];
   db.data.ai_action_proposals ||= [];
+  db.data.users               ||= [];
+  db.data.sessions            ||= [];
+}
+
+// ── Admin helpers ─────────────────────────────────────────────────────────────
+const ADMIN_USERNAME = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+
+function isAdminOwnerKey(ownerKey) {
+  if (!ownerKey || !ownerKey.startsWith('user:')) return false;
+  const username = ownerKey.slice('user:'.length).trim();
+  const user = (db.data?.users || []).find(
+    (u) => String(u?.username || '').trim() === username
+  );
+  if (!user) return false;
+  return user.role === 'admin' || String(user.username || '').trim() === ADMIN_USERNAME;
+}
+
+// Resolve a client user by email/username passed as adminClientId.
+// Returns null if not found.
+function resolveClientUser(adminClientId) {
+  const id = String(adminClientId || '').trim();
+  if (!id) return null;
+  return (db.data?.users || []).find(
+    (u) =>
+      String(u?.username || '').trim() === id ||
+      String(u?.email    || '').trim() === id
+  ) || null;
+}
+
+// Build a synthesized campaign context from a user's premiumIntake.
+function synthesizeFromPremiumIntake(pi) {
+  if (!pi || (!pi.businessName && !pi.mainServices)) return null;
+  const offer = [pi.currentSpecialOrOffer, pi.promotionOffer].filter(Boolean)[0] || '';
+  const serviceArea = pi.serviceArea || pi.targetCities || '';
+  return {
+    source: 'premium_intake',
+    businessName:   pi.businessName || '',
+    websiteUrl:     pi.websiteUrl   || '',
+    phoneNumber:    pi.mainPhone || pi.bestContactPhone || '',
+    industry:       pi.mainServices || '',
+    city:  '',
+    state: '',
+    serviceArea,
+    idealCustomer:  pi.idealCustomer || '',
+    offer,
+    mainBenefit:    pi.businessDifferentiator || pi.mainServices || '',
+    cta:            'Call now',
+    intakeText: [
+      pi.businessName           ? `Business: ${pi.businessName}`                       : null,
+      pi.mainServices           ? `Services: ${pi.mainServices}`                       : null,
+      serviceArea               ? `Service area: ${serviceArea}`                       : null,
+      pi.idealCustomer          ? `Ideal customer: ${pi.idealCustomer}`                : null,
+      offer                     ? `Offer: ${offer}`                                    : null,
+      pi.businessDifferentiator ? `What makes us different: ${pi.businessDifferentiator}` : null,
+      pi.websiteUrl             ? `Website: ${pi.websiteUrl}`                          : null,
+    ].filter(Boolean).join('\n'),
+    selectedObjectiveLabel: null,
+    selectedObjectiveValue: null,
+    objectiveRecommendationReason: null,
+    creativePreference: null,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,8 +115,8 @@ async function ensureData() {
 router.post('/campaign-context/save', async (req, res) => {
   try {
     await ensureData();
-    const ownerKey = ownerKeyFromReq(req);
-    if (!ownerKey) {
+    const callerOwnerKey = ownerKeyFromReq(req);
+    if (!callerOwnerKey) {
       return res.status(401).json({ ok: false, error: 'Not authenticated.' });
     }
 
@@ -66,7 +127,20 @@ router.post('/campaign-context/save', async (req, res) => {
       creativePreference,
       generatedCopy,
       campaignId,
+      adminClientId,
     } = req.body || {};
+
+    // Admin-client mode: save under the client's ownerKey, not the admin's
+    let ownerKey = callerOwnerKey;
+    if (adminClientId) {
+      if (!isAdminOwnerKey(callerOwnerKey)) {
+        return res.status(403).json({ ok: false, error: 'Admin access required.' });
+      }
+      const clientUser = resolveClientUser(String(adminClientId).trim());
+      if (clientUser) {
+        ownerKey = `user:${String(clientUser.username || '').trim()}`;
+      }
+    }
 
     const now = new Date().toISOString();
 
@@ -162,7 +236,39 @@ router.get('/campaign-context', async (req, res) => {
     }
 
     const { campaignId, ctxKey } = req.query;
+    const adminClientId = String(req.query.adminClientId || '').trim();
 
+    // ── Admin-client mode: look up the selected client's context ─────────────
+    if (adminClientId) {
+      if (!isAdminOwnerKey(ownerKey)) {
+        return res.status(403).json({ ok: false, error: 'Admin access required.' });
+      }
+      const clientUser = resolveClientUser(adminClientId);
+      if (!clientUser) {
+        return res.json({ ok: true, context: null, hasUsableContext: false });
+      }
+      const clientOwnerKey = `user:${String(clientUser.username || '').trim()}`;
+
+      // 1. Most recent campaign_context for the client
+      const clientRecords = db.data.campaign_contexts
+        .filter((c) => String(c.ownerKey || '') === clientOwnerKey)
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+      if (clientRecords[0]) {
+        return res.json({ ok: true, context: clientRecords[0], source: 'campaign_context', hasUsableContext: true });
+      }
+
+      // 2. Synthesize from premiumIntake
+      const synthesized = synthesizeFromPremiumIntake(clientUser.premiumIntake);
+      if (synthesized) {
+        return res.json({ ok: true, context: synthesized, source: 'premium_intake', hasUsableContext: true });
+      }
+
+      // 3. If only the business name is known (from displayName / email), that's not enough
+      return res.json({ ok: true, context: null, hasUsableContext: false });
+    }
+
+    // ── Normal mode: return the logged-in user's own context ─────────────────
     let records = db.data.campaign_contexts.filter(
       (c) => String(c.ownerKey || '') === ownerKey
     );
@@ -177,50 +283,19 @@ router.get('/campaign-context', async (req, res) => {
       if (byCtx) return res.json({ ok: true, context: byCtx, source: 'campaign_context' });
     }
 
-    // Return most recent campaign_context record
     const sorted = [...records].sort(
       (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
     );
-
     if (sorted[0]) return res.json({ ok: true, context: sorted[0], source: 'campaign_context' });
 
-    // Fallback: synthesize context from the user's premiumIntake record
+    // Fallback: synthesize from the user's own premiumIntake
     if (ownerKey.startsWith('user:')) {
       const username = ownerKey.slice('user:'.length);
       const user = (db.data.users || []).find(
         (u) => String(u?.username || '').trim() === username
       );
-      const pi = user?.premiumIntake;
-      if (pi && (pi.businessName || pi.mainServices)) {
-        const offer = [pi.currentSpecialOrOffer, pi.promotionOffer].filter(Boolean)[0] || '';
-        const serviceArea = pi.serviceArea || pi.targetCities || '';
-        const synthesized = {
-          source: 'premium_intake',
-          businessName: pi.businessName || '',
-          websiteUrl: pi.websiteUrl || '',
-          phoneNumber: pi.mainPhone || pi.bestContactPhone || '',
-          industry: pi.mainServices || '',
-          city: '',
-          state: '',
-          serviceArea,
-          idealCustomer: pi.idealCustomer || '',
-          offer,
-          mainBenefit: pi.businessDifferentiator || pi.mainServices || '',
-          cta: 'Call now',
-          intakeText: [
-            pi.businessName   ? `Business: ${pi.businessName}`           : null,
-            pi.mainServices   ? `Services: ${pi.mainServices}`           : null,
-            serviceArea       ? `Service area: ${serviceArea}`           : null,
-            pi.idealCustomer  ? `Ideal customer: ${pi.idealCustomer}`    : null,
-            offer             ? `Offer: ${offer}`                        : null,
-            pi.businessDifferentiator ? `What makes us different: ${pi.businessDifferentiator}` : null,
-            pi.websiteUrl     ? `Website: ${pi.websiteUrl}`              : null,
-          ].filter(Boolean).join('\n'),
-          selectedObjectiveLabel: null,
-          selectedObjectiveValue: null,
-          objectiveRecommendationReason: null,
-          creativePreference: null,
-        };
+      const synthesized = synthesizeFromPremiumIntake(user?.premiumIntake);
+      if (synthesized) {
         return res.json({ ok: true, context: synthesized, source: 'premium_intake' });
       }
     }

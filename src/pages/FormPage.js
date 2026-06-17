@@ -974,6 +974,21 @@ export default function FormPage() {
   // never overwrites an in-progress form session.
   const draftRestoredRef = useRef(false);
 
+  // "idle"    → normal old-intake flow (no saved context)
+  // "loading" → async context fetch in progress (admin mode starts here to prevent flash)
+  // "loaded"  → context was found and hydrated
+  // "missing" → admin mode, client has no usable intake yet
+  const [contextStatus, setContextStatus] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("adminClientId")
+        ? "loading"
+        : "idle";
+    } catch { return "idle"; }
+  });
+
+  // When true, bypass missing-intake empty state and show the old chat intake
+  const [manualFormMode, setManualFormMode] = useState(false);
+
   const handleSelectObjective = (obj) => {
     setSelectedObjective(obj);
     setObjectiveStep("chosen");
@@ -1433,21 +1448,42 @@ useEffect(() => {
   useEffect(() => {
     const loadSavedContext = async () => {
       // If a valid draft was already restored, don't overwrite the in-progress session
-      if (draftRestoredRef.current) return;
+      if (draftRestoredRef.current) {
+        setContextStatus("idle");
+        return;
+      }
+
+      // Read adminClientId directly from URL — avoids stale-closure on useMemo value
+      let aclId = "";
+      try {
+        aclId = new URLSearchParams(window.location.search).get("adminClientId") || "";
+      } catch {}
 
       try {
         const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-        const res = await fetch("/api/campaign-context", {
+        const apiUrl = aclId
+          ? `/api/campaign-context?adminClientId=${encodeURIComponent(aclId)}`
+          : "/api/campaign-context";
+
+        const res = await fetch(apiUrl, {
           credentials: "include",
           headers: sid ? { "x-sm-sid": sid } : {},
         });
-        if (!res.ok) return;
+
+        if (!res.ok) {
+          setContextStatus(aclId ? "missing" : "idle");
+          return;
+        }
+
         const json = await res.json().catch(() => ({}));
-        if (!json.ok || !json.context) return;
+
+        // No usable context — show missing-intake empty state for admin, old intake for normal users
+        if (!json.ok || !json.context || (!json.context.businessName && !json.context.industry)) {
+          setContextStatus(aclId ? "missing" : "idle");
+          return;
+        }
 
         const ctx = json.context;
-        // Need at least a business name or industry to be useful
-        if (!ctx.businessName && !ctx.industry) return;
 
         // Map saved context fields to FormPage answers structure
         const hydratedAnswers = {
@@ -1472,11 +1508,9 @@ useEffect(() => {
           ? (CAMPAIGN_OBJECTIVES.find((o) => o.value === ctx.selectedObjectiveValue) || null)
           : null;
 
-        // Set the active context key so navigate() passes the right key to /setup
         const ctxKey = ctx.ctxKey || buildCtxKey(hydratedAnswers);
         setActiveCtx(ctxKey);
 
-        // Apply all state in one pass
         setAnswers(hydratedAnswers);
         setStep(CONVO_QUESTIONS.length); // jump past all intake questions
         setAwaitingReady(false);
@@ -1487,17 +1521,19 @@ useEffect(() => {
         });
         if (savedObj) setSelectedObjective(savedObj);
 
-        // Build the welcome message
-        const bizName  = ctx.businessName || "your business";
-        const areaStr  = ctx.serviceArea  ||
-          [ctx.city, ctx.state].filter(Boolean).join(", ");
+        const bizName = ctx.businessName || "your business";
+        const areaStr = ctx.serviceArea || [ctx.city, ctx.state].filter(Boolean).join(", ");
+        const isAdmin = !!aclId;
 
         const welcomeMsg = savedObj
-          ? `I loaded your campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nYour selected objective is **${savedObj.label}**. Choose your creative format below to get started.`
-          : `I loaded your campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nBased on what you provided, I recommend the **${rec.label}** objective — ${rec.reason}\n\nSelect an objective below, or choose a different one.`;
+          ? `I loaded the campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nYour selected objective is **${savedObj.label}**. Choose your creative format below to get started.`
+          : `I loaded the campaign details for **${bizName}**${areaStr ? ` in ${areaStr}` : ""}.\n\nBased on what ${isAdmin ? "we have" : "you provided"}, I recommend the **${rec.label}** objective — ${rec.reason}\n\nSelect an objective below, or choose a different one.`;
 
         setChatHistory([{ from: "gpt", text: welcomeMsg }]);
-      } catch {}
+        setContextStatus("loaded");
+      } catch {
+        setContextStatus(aclId ? "missing" : "idle");
+      }
     };
 
     loadSavedContext();
@@ -2760,77 +2796,141 @@ async function generatePosterBPair(runToken) {
             gap: 12,
           }}
         >
-          {chatHistory.slice(-40).map((msg, i) => {
-            const isGPT = msg.from === "gpt";
-            return (
-                <div
-                key={i}
-                style={{
-                  alignSelf: isGPT ? "flex-start" : "flex-end",
-                  color: isGPT ? "#262331" : "#1f1a2d",
-                  background: isGPT ? "rgba(255,255,255,0.92)" : "rgba(233,228,255,0.96)",
-                  border: `1px solid ${EDGE}`,
-                  borderRadius: 20,
-                  padding: "12px 15px",
-                  maxWidth: "85%",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
-                  fontWeight: 500,
-                  lineHeight: 1.55,
-                }}
-              >
-                {msg.text}
+          {/* ── Context loading state (admin mode: prevents "Are you ready?" flash) ── */}
+          {contextStatus === "loading" ? (
+            <div style={{ alignSelf: "flex-start", color: "#7a728f", fontWeight: 600, fontSize: 15, padding: "10px 4px" }}>
+              Loading campaign details…
+            </div>
+          ) : contextStatus === "missing" && !manualFormMode ? (
+            /* ── Missing intake empty state ── */
+            <div style={{ padding: "8px 4px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ fontWeight: 800, fontSize: 17, color: "#1a1a2e" }}>
+                Campaign intake needed
               </div>
-            );
-          })}
-
-          {/* Typewriter bubble — AI reply being revealed progressively */}
-          {!!typingMsg && (
-            <div
-              style={{
-                alignSelf: "flex-start",
-                color: "#262331",
-                background: "rgba(255,255,255,0.92)",
-                border: `1px solid ${EDGE}`,
-                borderRadius: 20,
-                padding: "12px 15px",
-                maxWidth: "85%",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
-                fontWeight: 500,
-                lineHeight: 1.55,
-              }}
-            >
-              {typingMsg.slice(0, typingIdx)}
-              <span style={{ opacity: 0.4 }}>▍</span>
+              <div style={{ fontSize: 14, color: "#6b7785", lineHeight: 1.6 }}>
+                We don't have enough campaign details for this client yet. Complete the intake first so Smartemark can recommend the right objective and generate stronger ads.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+                <button
+                  onClick={() => {
+                    const dest = adminClientId
+                      ? `/premium-intake?adminClientId=${encodeURIComponent(adminClientId)}`
+                      : "/premium-intake";
+                    navigate(dest);
+                  }}
+                  style={{
+                    background: "linear-gradient(135deg, #4c63ff 0%, #5f56eb 100%)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 12,
+                    padding: "13px 20px",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  Open Intake Form
+                </button>
+                <button
+                  onClick={() => {
+                    setManualFormMode(true);
+                    setContextStatus("idle");
+                    setAwaitingReady(true);
+                    setStep(0);
+                    setChatHistory(INITIAL_CHAT);
+                  }}
+                  style={{
+                    background: "transparent",
+                    color: "#6b7785",
+                    border: "1px solid #d4d8e0",
+                    borderRadius: 12,
+                    padding: "11px 20px",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  Continue Manually
+                </button>
+              </div>
             </div>
-          )}
+          ) : (
+            <>
+              {chatHistory.slice(-40).map((msg, i) => {
+                const isGPT = msg.from === "gpt";
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      alignSelf: isGPT ? "flex-start" : "flex-end",
+                      color: isGPT ? "#262331" : "#1f1a2d",
+                      background: isGPT ? "rgba(255,255,255,0.92)" : "rgba(233,228,255,0.96)",
+                      border: `1px solid ${EDGE}`,
+                      borderRadius: 20,
+                      padding: "12px 15px",
+                      maxWidth: "85%",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                      fontWeight: 500,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                );
+              })}
 
-          {/* Thinking bubble — shown while waiting for GPT response */}
-          {chatIsThinking && !typingMsg && (
-            <div
-              style={{
-                alignSelf: "flex-start",
-                color: "#7d7794",
-                background: "rgba(255,255,255,0.88)",
-                border: `1px solid ${EDGE}`,
-                borderRadius: 20,
-                padding: "12px 18px",
-                maxWidth: "85%",
-                boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
-                fontWeight: 500,
-                fontSize: "1.2rem",
-                letterSpacing: "0.12em",
-              }}
-            >
-              •••
-            </div>
+              {/* Typewriter bubble — AI reply being revealed progressively */}
+              {!!typingMsg && (
+                <div
+                  style={{
+                    alignSelf: "flex-start",
+                    color: "#262331",
+                    background: "rgba(255,255,255,0.92)",
+                    border: `1px solid ${EDGE}`,
+                    borderRadius: 20,
+                    padding: "12px 15px",
+                    maxWidth: "85%",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                    fontWeight: 500,
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {typingMsg.slice(0, typingIdx)}
+                  <span style={{ opacity: 0.4 }}>▍</span>
+                </div>
+              )}
+
+              {/* Thinking bubble — shown while waiting for GPT response */}
+              {chatIsThinking && !typingMsg && (
+                <div
+                  style={{
+                    alignSelf: "flex-start",
+                    color: "#7d7794",
+                    background: "rgba(255,255,255,0.88)",
+                    border: `1px solid ${EDGE}`,
+                    borderRadius: 20,
+                    padding: "12px 18px",
+                    maxWidth: "85%",
+                    boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                    fontWeight: 500,
+                    fontSize: "1.2rem",
+                    letterSpacing: "0.12em",
+                  }}
+                >
+                  •••
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {!loading && (
+        {!loading && contextStatus !== "loading" && !(contextStatus === "missing" && !manualFormMode) && (
                <form
             onSubmit={handleUserInput}
             style={{
@@ -3431,6 +3531,7 @@ async function generatePosterBPair(runToken) {
                     answers,
                     selectedObjective: selectedObjective || aiRecommendedObjective || null,
                     creativePreference: "upload_video",
+                    ...(adminClientId ? { adminClientId } : {}),
                   }),
                 }).catch(() => {});
               } catch {}
@@ -3523,6 +3624,7 @@ async function generatePosterBPair(runToken) {
                   answers,
                   selectedObjective: selectedObjective || aiRecommendedObjective || null,
                   creativePreference: "ai_image",
+                  ...(adminClientId ? { adminClientId } : {}),
                 }),
               }).catch(() => {});
             } catch {}
