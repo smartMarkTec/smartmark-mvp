@@ -1032,9 +1032,37 @@ export default function FormPage() {
   const handleSelectObjective = (obj) => {
     setSelectedObjective(obj);
     setObjectiveStep("chosen");
+
+    const launchNote = obj.launchSupported
+      ? "This objective supports direct campaign launch."
+      : "This objective is available for planning. Website Traffic campaigns support live launch today.";
+
     deliverQuestion(
-      `Got it — **${obj.label}** selected as your campaign objective.\n\n${obj.launchSupported ? "This objective supports direct campaign launch." : "This objective is available for planning. Website Traffic campaigns support live launch today."}\n\nNow let's build your creative. Choose how you'd like to proceed below.`
+      `Great — **${obj.label}** selected as your campaign objective.\n\n${launchNote}\n\nNow let's build your creative. Choose how you'd like to proceed below.`
     );
+
+    // Save objective under the correct ownerKey (admin-client-safe, fire-and-forget)
+    try {
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      fetch("/api/campaign-context/save", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(sid ? { "x-sm-sid": sid } : {}),
+        },
+        body: JSON.stringify({
+          ctxKey: getActiveCtx(),
+          answers,
+          selectedObjective: {
+            label: obj.label,
+            value: obj.value,
+            reason: aiRecommendedObjective?.reason || "",
+          },
+          ...(adminClientId ? { adminClientId } : {}),
+        }),
+      }).catch(() => {});
+    } catch {}
   };
 
   const abs = toAbsoluteMedia;
@@ -2027,14 +2055,51 @@ useEffect(() => {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-      // If the objective card panel is still open, keep user there
+      // Objective card panel is open — answer questions freely, only block generate triggers
       if (objectiveStep === "choosing") {
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "user", text: value },
-          { from: "gpt", text: "Please choose a campaign objective from the options above before we continue." },
-        ]);
-        setInput("");
+        if (isGenerateTrigger(value)) {
+          setChatHistory((ch) => [
+            ...ch,
+            { from: "gpt", text: "Choose a campaign objective from the cards above first, then I'll get to work on your ads." },
+          ]);
+          return;
+        }
+
+        // Answer the question via GPT with objective context
+        setChatIsThinking(true);
+        (async () => {
+          try {
+            const recLabel = aiRecommendedObjective?.label || "Traffic";
+            const recReason = aiRecommendedObjective?.reason || "";
+            const bizName = answers?.businessName || "this business";
+            const systemMsg = `You are a smart ad campaign assistant. The user has completed intake for ${bizName}. You have recommended the ${recLabel} campaign objective${recReason ? ` because: ${recReason}` : ""}. Available objectives: Traffic (launch-supported today), Leads, Awareness, Engagement, Sales, App Promotion (planning only). Answer the user's question helpfully in 2-4 sentences, then end with a short prompt to choose an objective from the cards shown.`;
+            const history = [
+              { role: "system", content: systemMsg },
+              ...chatHistory.slice(-6).map((m) => ({
+                role: m.from === "gpt" ? "assistant" : "user",
+                content: m.text,
+              })),
+              { role: "user", content: value },
+            ];
+            const res = await fetch(`${API_BASE}/gpt-chat`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "omit",
+              body: JSON.stringify({ message: value, history }),
+            });
+            const data = await res.json().catch(() => ({}));
+            setChatIsThinking(false);
+            if (data?.reply) {
+              setTypingIdx(0);
+              setTypingMsg(data.reply);
+            } else {
+              setChatHistory((ch) => [...ch, { from: "gpt", text: "Select an objective from the cards above to continue." }]);
+            }
+          } catch {
+            setChatIsThinking(false);
+            setChatHistory((ch) => [...ch, { from: "gpt", text: "Select an objective from the cards above to continue." }]);
+          }
+        })();
         return;
       }
 
@@ -3008,6 +3073,73 @@ async function generatePosterBPair(runToken) {
           )}
         </div>
 
+        {/* ── Objective cards — inline between messages and input, always visible ── */}
+        {objectiveStep === "choosing" && contextStatus !== "missing" && (
+          <div style={{ width: "100%", padding: "10px 0 6px" }}>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#8e87b0",
+              marginBottom: 8,
+              textTransform: "uppercase",
+              letterSpacing: 0.8,
+              textAlign: "center",
+            }}>
+              Choose your campaign objective
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 7 }}>
+              {CAMPAIGN_OBJECTIVES.map((obj) => {
+                const isRec = aiRecommendedObjective?.value === obj.value;
+                const isSel = selectedObjective?.value === obj.value;
+                return (
+                  <button
+                    key={obj.value}
+                    onClick={() => handleSelectObjective(obj)}
+                    style={{
+                      position: "relative",
+                      background: isSel ? "#5d59ea" : isRec ? "#f0efff" : "#f7f8fe",
+                      border: isSel ? "2px solid #5d59ea" : isRec ? "2px solid #5d59ea" : "2px solid #e4e7ec",
+                      borderRadius: 13,
+                      padding: "10px 10px 9px 10px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      transition: "all 0.15s",
+                      fontFamily: MODERN_FONT,
+                    }}
+                  >
+                    {isRec && !isSel && (
+                      <div style={{
+                        position: "absolute",
+                        top: 6,
+                        right: 7,
+                        background: "#5d59ea",
+                        color: "#fff",
+                        fontSize: 8,
+                        fontWeight: 900,
+                        borderRadius: 5,
+                        padding: "2px 5px",
+                        letterSpacing: 0.4,
+                      }}>
+                        AI PICK
+                      </div>
+                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                      <span style={{ fontSize: 16 }}>{obj.icon}</span>
+                      <span style={{ fontWeight: 800, fontSize: 12.5, color: isSel ? "#fff" : "#1a1a2e" }}>{obj.label}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: isSel ? "rgba(255,255,255,0.82)" : "#6b7785", lineHeight: 1.38, marginBottom: 4 }}>
+                      {obj.description}
+                    </div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: isSel ? "rgba(255,255,255,0.65)" : obj.launchSupported ? "#2cb67d" : "#a8afc0" }}>
+                      {obj.launchSupported ? "✓ Launch supported" : "Planning only"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {!loading && contextStatus !== "loading" && !(contextStatus === "missing" && !manualFormMode) && (
                <form
             onSubmit={handleUserInput}
@@ -3485,49 +3617,6 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
-      {/* ── Objective cards (shown after all intake questions answered) ── */}
-      {objectiveStep === "choosing" && (
-        <div style={{ width: "100%", padding: "16px 18px 8px 18px" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7785", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Choose your campaign objective
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {CAMPAIGN_OBJECTIVES.map((obj) => {
-              const isRec = aiRecommendedObjective?.value === obj.value;
-              const isSel = selectedObjective?.value === obj.value;
-              return (
-                <button
-                  key={obj.value}
-                  onClick={() => handleSelectObjective(obj)}
-                  style={{
-                    position: "relative",
-                    background: isSel ? "#5d59ea" : isRec ? "#f0efff" : "#f7f8fe",
-                    border: isSel ? "2px solid #5d59ea" : isRec ? "2px solid #5d59ea" : "2px solid #e4e7ec",
-                    borderRadius: 14,
-                    padding: "14px 14px 12px 14px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {isRec && !isSel && (
-                    <div style={{ position: "absolute", top: 8, right: 8, background: "#5d59ea", color: "#fff", fontSize: 9, fontWeight: 900, borderRadius: 6, padding: "2px 6px", letterSpacing: 0.4 }}>
-                      AI PICK
-                    </div>
-                  )}
-                  <div style={{ fontSize: 22, marginBottom: 4 }}>{obj.icon}</div>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: isSel ? "#fff" : "#1a1a2e", marginBottom: 3 }}>{obj.label}</div>
-                  <div style={{ fontSize: 12, color: isSel ? "rgba(255,255,255,0.85)" : "#6b7785", lineHeight: 1.4 }}>{obj.description}</div>
-                  {!obj.launchSupported && (
-                    <div style={{ marginTop: 6, fontSize: 11, color: isSel ? "rgba(255,255,255,0.7)" : "#9aa6b2", fontStyle: "italic" }}>Planning only</div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       <div
         style={{
           width: "100%",
@@ -3763,14 +3852,6 @@ const CONVO_QUESTIONS = [
 /* ===== Campaign objectives ===== */
 const CAMPAIGN_OBJECTIVES = [
   {
-    value: "OUTCOME_LEADS",
-    label: "Leads",
-    icon: "📋",
-    description: "Collect contact info from interested people.",
-    launchSupported: false,
-    planningSupported: true,
-  },
-  {
     value: "OUTCOME_TRAFFIC",
     label: "Traffic",
     icon: "🌐",
@@ -3779,10 +3860,18 @@ const CAMPAIGN_OBJECTIVES = [
     planningSupported: true,
   },
   {
+    value: "OUTCOME_LEADS",
+    label: "Leads",
+    icon: "📋",
+    description: "Collect calls, forms, or interested prospects.",
+    launchSupported: false,
+    planningSupported: true,
+  },
+  {
     value: "OUTCOME_AWARENESS",
     label: "Awareness",
     icon: "📣",
-    description: "Reach new people and build brand recognition.",
+    description: "Get more people familiar with the business.",
     launchSupported: false,
     planningSupported: true,
   },
@@ -3790,7 +3879,7 @@ const CAMPAIGN_OBJECTIVES = [
     value: "OUTCOME_ENGAGEMENT",
     label: "Engagement",
     icon: "💬",
-    description: "Get likes, comments, shares, and messages.",
+    description: "Get messages, comments, or interactions.",
     launchSupported: false,
     planningSupported: true,
   },
@@ -3798,7 +3887,7 @@ const CAMPAIGN_OBJECTIVES = [
     value: "OUTCOME_SALES",
     label: "Sales",
     icon: "🛒",
-    description: "Drive purchases on your website or app.",
+    description: "Drive purchases or direct conversions.",
     launchSupported: false,
     planningSupported: true,
   },
@@ -3806,7 +3895,7 @@ const CAMPAIGN_OBJECTIVES = [
     value: "OUTCOME_APP_PROMOTION",
     label: "App Promotion",
     icon: "📱",
-    description: "Get more installs or engagement for your app.",
+    description: "Promote app installs or app actions.",
     launchSupported: false,
     planningSupported: true,
   },
