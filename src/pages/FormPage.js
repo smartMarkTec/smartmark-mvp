@@ -982,6 +982,7 @@ export default function FormPage() {
     setImgFail({});
     setObjectiveStep("none");
     setSelectedObjective(null);
+    setPendingObjective(null);
     setAiRecommendedObjective(null);
     draftRestoredRef.current = false;
     setContextStatus("loading");
@@ -1000,10 +1001,14 @@ export default function FormPage() {
   const [editCTA, setEditCTA] = useState("");
   const [editLink, setEditLink] = useState("");
 
-  // Objective recommendation step (Phase 2: campaign intelligence layer)
-  // "none" = not started | "choosing" = cards shown | "chosen" = user picked one
+  // Objective recommendation step
+  // "none"       = not started
+  // "choosing"   = cards shown, waiting for user to click one
+  // "confirming" = user clicked a card, awaiting Confirm / Change Different
+  // "chosen"     = objective confirmed, move to creative selection
   const [objectiveStep, setObjectiveStep] = useState("none");
   const [selectedObjective, setSelectedObjective] = useState(null);
+  const [pendingObjective, setPendingObjective] = useState(null); // clicked but not confirmed
   const [aiRecommendedObjective, setAiRecommendedObjective] = useState(null);
 
   // True once the draft-restore useEffect finds valid saved data.
@@ -1029,19 +1034,30 @@ export default function FormPage() {
   // When true, bypass missing-intake empty state and show the old chat intake
   const [manualFormMode, setManualFormMode] = useState(false);
 
-  const handleSelectObjective = (obj) => {
+  // Step 1 — user clicks a card: stage it for confirmation, do NOT finalize yet
+  const handleClickObjective = (obj) => {
+    setPendingObjective(obj);
+    setObjectiveStep("confirming");
+  };
+
+  // Step 2 — user confirms: finalize selection, save, proceed
+  const handleConfirmObjective = () => {
+    const obj = pendingObjective;
+    if (!obj) return;
+
     setSelectedObjective(obj);
     setObjectiveStep("chosen");
+    setPendingObjective(null);
 
     const launchNote = obj.launchSupported
       ? "This objective supports direct campaign launch."
       : "This objective is available for planning. Website Traffic campaigns support live launch today.";
 
     deliverQuestion(
-      `Great — **${obj.label}** selected as your campaign objective.\n\n${launchNote}\n\nNow let's build your creative. Choose how you'd like to proceed below.`
+      `Great — **${obj.label}** confirmed as your campaign objective.\n\n${launchNote}\n\nHow would you like to create your ad creative?`
     );
 
-    // Save objective under the correct ownerKey (admin-client-safe, fire-and-forget)
+    // Save under correct ownerKey — admin-client-safe, fire-and-forget
     try {
       const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
       fetch("/api/campaign-context/save", {
@@ -1063,6 +1079,12 @@ export default function FormPage() {
         }),
       }).catch(() => {});
     } catch {}
+  };
+
+  // Step 3 (optional) — user wants to pick a different objective
+  const handleChangeObjective = () => {
+    setPendingObjective(null);
+    setObjectiveStep("choosing");
   };
 
   const abs = toAbsoluteMedia;
@@ -2055,6 +2077,21 @@ useEffect(() => {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
+      // Intercept change-objective requests in any post-intake state
+      const isChangeObjectiveRequest = /change.*objective|different.*objective|pick another.*objective|wrong.*objective|switch.*objective|re-?choose|re-?select.*objective|go back.*objective|another.*option/i.test(value);
+      if (isChangeObjectiveRequest && (objectiveStep === "chosen" || objectiveStep === "confirming" || objectiveStep === "choosing")) {
+        setPendingObjective(null);
+        setObjectiveStep("choosing");
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "No problem — choose a different objective below." }]);
+        return;
+      }
+
+      // In confirming state, handle plain inputs as side conversation
+      if (objectiveStep === "confirming") {
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "Use the buttons below to confirm or change your objective selection." }]);
+        return;
+      }
+
       // Objective card panel is open — answer questions freely, only block generate triggers
       if (objectiveStep === "choosing") {
         if (isGenerateTrigger(value)) {
@@ -2223,6 +2260,10 @@ useEffect(() => {
       }
 
       if (hasGenerated || copyGenerated) {
+        await handleSideChat(value, null);
+      } else if (contextStatus === "loaded") {
+        // In the modern saved-context flow there is no yes/no gating —
+        // generation starts via buttons, so just answer the question.
         await handleSideChat(value, null);
       } else {
         const readyPrompt = creativeSource === "ai_image"
@@ -2845,8 +2886,8 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
-      {/* ── Creative type picker ─────────────────────────────────────────── */}
-      <div style={{ width: "100%", maxWidth: 760, marginTop: 18, marginBottom: 0, padding: "0 0 0 0", boxSizing: "border-box" }}>
+      {/* ── Creative type picker — hidden in saved-context flow (inline panel handles it) ── */}
+      <div style={{ width: "100%", maxWidth: 760, marginTop: 18, marginBottom: 0, padding: "0 0 0 0", boxSizing: "border-box", display: contextStatus === "loaded" ? "none" : undefined }}>
         <div style={{ background: "rgba(255,255,255,0.92)", borderRadius: 18, border: "1.5px solid #e8e4f4", boxShadow: "0 2px 16px rgba(66,54,120,0.07)", padding: "18px 22px" }}>
           <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a22", marginBottom: 12 }}>
             What kind of ad creative do you want to use?
@@ -3073,70 +3114,154 @@ async function generatePosterBPair(runToken) {
           )}
         </div>
 
-        {/* ── Objective cards — inline between messages and input, always visible ── */}
-        {objectiveStep === "choosing" && contextStatus !== "missing" && (
-          <div style={{ width: "100%", padding: "10px 0 6px" }}>
-            <div style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "#8e87b0",
-              marginBottom: 8,
-              textTransform: "uppercase",
-              letterSpacing: 0.8,
-              textAlign: "center",
-            }}>
-              Choose your campaign objective
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 7 }}>
-              {CAMPAIGN_OBJECTIVES.map((obj) => {
-                const isRec = aiRecommendedObjective?.value === obj.value;
-                const isSel = selectedObjective?.value === obj.value;
-                return (
+        {/* ══ Objective / Creative inline panel ══════════════════════════════ */}
+        {contextStatus !== "missing" && objectiveStep !== "none" && (
+          <div style={{ width: "100%", padding: "8px 0 4px", fontFamily: MODERN_FONT }}>
+
+            {/* ── choosing: show all 6 objective cards ── */}
+            {objectiveStep === "choosing" && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8e87b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8, textAlign: "center" }}>
+                  Choose your campaign objective
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 7 }}>
+                  {CAMPAIGN_OBJECTIVES.map((obj) => {
+                    const isRec = aiRecommendedObjective?.value === obj.value;
+                    return (
+                      <button
+                        key={obj.value}
+                        onClick={() => handleClickObjective(obj)}
+                        style={{
+                          position: "relative",
+                          background: isRec ? "#f0efff" : "#f7f8fe",
+                          border: isRec ? "2px solid #5d59ea" : "2px solid #e4e7ec",
+                          borderRadius: 13,
+                          padding: "10px 10px 9px 10px",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "all 0.15s",
+                          fontFamily: MODERN_FONT,
+                        }}
+                      >
+                        {isRec && (
+                          <div style={{ position: "absolute", top: 6, right: 7, background: "#5d59ea", color: "#fff", fontSize: 8, fontWeight: 900, borderRadius: 5, padding: "2px 5px", letterSpacing: 0.4 }}>
+                            AI PICK
+                          </div>
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                          <span style={{ fontSize: 16 }}>{obj.icon}</span>
+                          <span style={{ fontWeight: 800, fontSize: 12.5, color: "#1a1a2e" }}>{obj.label}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#6b7785", lineHeight: 1.38, marginBottom: 4 }}>{obj.description}</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: obj.launchSupported ? "#2cb67d" : "#a8afc0" }}>
+                          {obj.launchSupported ? "✓ Launch supported" : "Planning only"}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* ── confirming: show the selected card + Confirm / Change buttons ── */}
+            {objectiveStep === "confirming" && pendingObjective && (
+              <div style={{ background: "#f4f2ff", border: "2px solid #5d59ea", borderRadius: 16, padding: "16px 18px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#5d59ea", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                  Confirm objective
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 26 }}>{pendingObjective.icon}</span>
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: 16, color: "#1a1a2e" }}>{pendingObjective.label}</div>
+                    <div style={{ fontSize: 12, color: "#6b7785", marginTop: 1 }}>{pendingObjective.description}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: pendingObjective.launchSupported ? "#2cb67d" : "#9aa6b2", marginBottom: 14 }}>
+                  {pendingObjective.launchSupported ? "✓ Launch supported" : "Planning only"}
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button
-                    key={obj.value}
-                    onClick={() => handleSelectObjective(obj)}
-                    style={{
-                      position: "relative",
-                      background: isSel ? "#5d59ea" : isRec ? "#f0efff" : "#f7f8fe",
-                      border: isSel ? "2px solid #5d59ea" : isRec ? "2px solid #5d59ea" : "2px solid #e4e7ec",
-                      borderRadius: 13,
-                      padding: "10px 10px 9px 10px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      transition: "all 0.15s",
-                      fontFamily: MODERN_FONT,
-                    }}
+                    onClick={handleConfirmObjective}
+                    style={{ flex: 1, minWidth: 130, background: "#5d59ea", color: "#fff", border: "none", borderRadius: 11, padding: "11px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: MODERN_FONT }}
                   >
-                    {isRec && !isSel && (
-                      <div style={{
-                        position: "absolute",
-                        top: 6,
-                        right: 7,
-                        background: "#5d59ea",
-                        color: "#fff",
-                        fontSize: 8,
-                        fontWeight: 900,
-                        borderRadius: 5,
-                        padding: "2px 5px",
-                        letterSpacing: 0.4,
-                      }}>
-                        AI PICK
-                      </div>
-                    )}
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-                      <span style={{ fontSize: 16 }}>{obj.icon}</span>
-                      <span style={{ fontWeight: 800, fontSize: 12.5, color: isSel ? "#fff" : "#1a1a2e" }}>{obj.label}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: isSel ? "rgba(255,255,255,0.82)" : "#6b7785", lineHeight: 1.38, marginBottom: 4 }}>
-                      {obj.description}
-                    </div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: isSel ? "rgba(255,255,255,0.65)" : obj.launchSupported ? "#2cb67d" : "#a8afc0" }}>
-                      {obj.launchSupported ? "✓ Launch supported" : "Planning only"}
-                    </div>
+                    Confirm Objective
                   </button>
-                );
-              })}
-            </div>
+                  <button
+                    onClick={handleChangeObjective}
+                    style={{ flex: 1, minWidth: 130, background: "#fff", color: "#5d59ea", border: "2px solid #5d59ea", borderRadius: 11, padding: "11px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: MODERN_FONT }}
+                  >
+                    Choose Different
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── chosen: show confirmed objective + Change button + creative format cards ── */}
+            {objectiveStep === "chosen" && selectedObjective && (
+              <>
+                {/* Confirmed objective pill */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "#f0efff", border: "2px solid #5d59ea", borderRadius: 12, padding: "10px 14px", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>{selectedObjective.icon}</span>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#8e87b0", textTransform: "uppercase", letterSpacing: 0.5 }}>Objective</div>
+                      <div style={{ fontWeight: 800, fontSize: 13.5, color: "#1a1a2e" }}>{selectedObjective.label}</div>
+                    </div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: selectedObjective.launchSupported ? "#2cb67d" : "#9aa6b2", marginLeft: 4 }}>
+                      {selectedObjective.launchSupported ? "✓ Launch" : "Planning"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleChangeObjective}
+                    style={{ background: "none", color: "#5d59ea", border: "1.5px solid #5d59ea", borderRadius: 9, padding: "5px 12px", fontWeight: 700, fontSize: 11.5, cursor: "pointer", whiteSpace: "nowrap", fontFamily: MODERN_FONT }}
+                  >
+                    Change
+                  </button>
+                </div>
+
+                {/* Creative format cards */}
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8e87b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8, textAlign: "center" }}>
+                  How would you like to create your ad?
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[
+                    { id: "ai_image",     label: "Generate AI image", icon: "✨", desc: "Smartemark designs your ad" },
+                    { id: "upload_photo", label: "Upload my photo",   icon: "📷", desc: "Your photo, AI writes copy" },
+                    { id: "upload_video", label: "Upload my video",   icon: "🎬", desc: "Your video, AI writes copy" },
+                  ].map(({ id, label, icon, desc }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => handleCreativeSourceChange(id)}
+                      style={{
+                        flex: 1,
+                        minWidth: 90,
+                        padding: "10px 10px",
+                        borderRadius: 12,
+                        border: creativeSource === id ? "2px solid #5d59ea" : "1.5px solid #e0dced",
+                        background: creativeSource === id ? "#f0eeff" : "#fafafe",
+                        color: creativeSource === id ? "#4c3db0" : "#5a5a6e",
+                        fontWeight: 700,
+                        fontSize: 12,
+                        cursor: "pointer",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-start",
+                        gap: 3,
+                        textAlign: "left",
+                        transition: "border-color 0.15s, background 0.15s",
+                        fontFamily: MODERN_FONT,
+                      }}
+                    >
+                      <span style={{ fontSize: 17 }}>{icon}</span>
+                      <span style={{ fontWeight: 800 }}>{label}</span>
+                      <span style={{ fontWeight: 500, fontSize: 10.5, color: creativeSource === id ? "#6c63d4" : "#9990b8" }}>{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
           </div>
         )}
 
