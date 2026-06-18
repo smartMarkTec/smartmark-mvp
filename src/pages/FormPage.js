@@ -900,6 +900,7 @@ export default function FormPage() {
   const videoInputRef = React.useRef(null);
 
   const [creativeSource, setCreativeSource] = useState("ai_image"); // "ai_image" | "upload_photo" | "upload_video"
+  const [awaitingAiImageConfirm, setAwaitingAiImageConfirm] = useState(false); // waiting for yes/no after "Generate AI Image" card click
   const [copyGenerated, setCopyGenerated] = useState(false); // true once copy-only generation ran for upload modes
 
   const [result, setResult] = useState(null);
@@ -2051,6 +2052,28 @@ useEffect(() => {
     setChatHistory((ch) => [...ch, { from: "user", text: value }]);
     setInput("");
 
+    // ── AI image generation confirmation gate ────────────────────────────────
+    // Fires only after the user clicks "Generate AI Image" and before any other
+    // input is processed. Upload photo/video paths are not affected.
+    if (awaitingAiImageConfirm) {
+      const isYes = /^(yes|yep|yeah|sure|ok|okay|generate|do it|go ahead|please|y)$/i.test(value);
+      const isNo  = /^(no|nope|nah|don'?t|skip|not now|not yet|cancel|n)$/i.test(value);
+      if (isYes) {
+        setAwaitingAiImageConfirm(false);
+        triggerAiImageGeneration();
+        return;
+      }
+      if (isNo) {
+        setAwaitingAiImageConfirm(false);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "No problem. You can upload your own photo or video instead." }]);
+        return;
+      }
+      // Unclear answer — re-ask
+      setChatHistory((ch) => [...ch, { from: "gpt", text: 'Reply "yes" to generate an AI image, or "no" to use your own photo or video.' }]);
+      return; // awaitingAiImageConfirm stays true
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     // awaitingReady only gates the intro — never once questions have started (step > 0)
     if (awaitingReady && step === 0) {
       if (
@@ -2142,91 +2165,10 @@ useEffect(() => {
 
       if (!hasGenerated && !copyGenerated && isGenerateTrigger(value)) {
         if (creativeSource === "ai_image") {
-          if (!canRunImageGen()) {
-            const msg = quotaMessage();
-            setError(msg);
-            setChatHistory((ch) => [...ch, { from: "gpt", text: msg }]);
-            return;
-          }
-
-          // ✅ Track the key action: generating creatives
-          trackEvent("generate_creatives", {
-            page: "form",
-            action: "initial",
-          });
-
-          bumpImageGenCount();
-
-          // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
-          clearDraftDisabled();
-
-          const nextCtx = buildCtxKey(answers || {});
-          setActiveCtx(nextCtx);
-          purgeCreativeDraftKeys();
-
-          // also clear image cache for the new run so nothing "ghosts" in
-          try {
-            lsRemove(IMAGE_CACHE_KEY);
-            lsRemove(IMAGE_DRAFTS_KEY);
-          } catch {}
-
-          // ✅ Reset preview state so nothing stale can show
-          setResult(null);
-          setImageUrls([]);
-          setActiveImage(0);
-          setImageUrl("");
-          setHasGenerated(false);
-          setImageEditing(false);
-          setImageDataUrls([]);
-          setImgFail({});
-
-          setLoading(true);
-          setGenerating(true);
-
-          setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
-
-          const swapThinkingTimer = setTimeout(() => {
-            setChatHistory((ch) => {
-              const next = [...ch];
-              for (let i = next.length - 1; i >= 0; i--) {
-                if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
-                  next[i] = {
-                    ...next[i],
-                    text: "This could take about a minute — generating your previews…",
-                  };
-                  break;
-                }
-              }
-              return next;
-            });
-          }, 700);
-
-          setTimeout(async () => {
-            const token = getRandomString();
-            try {
-              setImageUrls([]);
-              setImageUrl("");
-            } catch {}
-
-            try {
-              await warmBackend();
-              await generatePosterBPair(token);
-
-              setChatHistory((ch) => [
-                ...ch,
-                { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." },
-              ]);
-              setHasGenerated(true);
-            } catch (err) {
-              console.error("generation failed:", err);
-              setError("Generation failed (server cold or busy). Try again in a few seconds.");
-            } finally {
-              clearTimeout(swapThinkingTimer);
-              setGenerating(false);
-              setLoading(false);
-            }
-          }, 80);
-
+          // Generation is handled via triggerAiImageGeneration() — either called
+          // directly from the confirm gate above (when user typed "yes" after the card
+          // prompt) or from here when the user types a generate trigger phrase.
+          triggerAiImageGeneration();
           return;
         }
 
@@ -2497,20 +2439,85 @@ async function generatePosterBPair(runToken) {
     }
   }
 
+  // Extracted generation logic so it can be called from the confirmation handler
+  // and from the existing generate-trigger path without duplicating code.
+  function triggerAiImageGeneration() {
+    if (!canRunImageGen()) {
+      const msg = quotaMessage();
+      setError(msg);
+      setChatHistory((ch) => [...ch, { from: "gpt", text: msg }]);
+      return;
+    }
+    trackEvent("generate_creatives", { page: "form", action: "initial" });
+    bumpImageGenCount();
+    clearDraftDisabled();
+    const nextCtx = buildCtxKey(answers || {});
+    setActiveCtx(nextCtx);
+    purgeCreativeDraftKeys();
+    try { lsRemove(IMAGE_CACHE_KEY); lsRemove(IMAGE_DRAFTS_KEY); } catch {}
+    setResult(null);
+    setImageUrls([]);
+    setActiveImage(0);
+    setImageUrl("");
+    setHasGenerated(false);
+    setImageEditing(false);
+    setImageDataUrls([]);
+    setImgFail({});
+    setLoading(true);
+    setGenerating(true);
+    setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
+    const swapThinkingTimer = setTimeout(() => {
+      setChatHistory((ch) => {
+        const next = [...ch];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
+            next[i] = { ...next[i], text: "This could take about a minute — generating your previews…" };
+            break;
+          }
+        }
+        return next;
+      });
+    }, 700);
+    setTimeout(async () => {
+      const token = getRandomString();
+      try { setImageUrls([]); setImageUrl(""); } catch {}
+      try {
+        await warmBackend();
+        await generatePosterBPair(token);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." }]);
+        setHasGenerated(true);
+      } catch (err) {
+        console.error("generation failed:", err);
+        setError("Generation failed (server cold or busy). Try again in a few seconds.");
+      } finally {
+        clearTimeout(swapThinkingTimer);
+        setGenerating(false);
+        setLoading(false);
+      }
+    }, 80);
+  }
+
   function handleCreativeSourceChange(newSource) {
-    if (newSource === creativeSource) return;
+    // Allow re-clicking "ai_image" even when already selected so the prompt re-appears.
+    if (newSource === creativeSource && newSource !== "ai_image") return;
+
     setCreativeSource(newSource);
+
     if (newSource === "ai_image") {
       setMediaType("image");
       setCopyGenerated(false);
-      // Don't reset uploadedVideoUrl — user can keep it if they switch back later
+      // Prompt for confirmation — do not start generation immediately.
+      setAwaitingAiImageConfirm(true);
+      deliverQuestion("Do you want me to generate an AI image for this ad?");
     } else if (newSource === "upload_video") {
+      setAwaitingAiImageConfirm(false);
       setUploadedVideoUrl("");
       setUploadedVideoMeta(null);
       setVideoUploadError("");
       setMediaType("video");
       setCopyGenerated(false);
     } else if (newSource === "upload_photo") {
+      setAwaitingAiImageConfirm(false);
       setUploadedVideoUrl("");
       setUploadedVideoMeta(null);
       setVideoUploadError("");
