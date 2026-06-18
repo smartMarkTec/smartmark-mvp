@@ -3333,9 +3333,41 @@ useEffect(() => {
   };
 }, []);
 
+// Server-side FB status verification: fixes rehydration when localStorage flag is
+// missing (different device, cleared cache) or when the token expired server-side.
+useEffect(() => {
+  let cancelled = false;
+  authFetch('/facebook/status')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (cancelled || !data) return;
+      if (data.expired) {
+        localStorage.removeItem(FB_CONN_KEY);
+        if (!cancelled) { setFbConnected(false); setFbExpired(true); }
+        return;
+      }
+      if (data.connected) {
+        if (!cancelled) setFbExpired(false);
+        // Repair localStorage flag if it was missing (e.g. different browser/device)
+        try {
+          const raw = localStorage.getItem(FB_CONN_KEY);
+          if (!raw) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+        } catch {}
+        if (!cancelled) setFbConnected(true);
+      }
+    })
+    .catch(() => {});
+  return () => { cancelled = true; };
+  // eslint-disable-next-line
+}, []);
+
 
 
   const [adAccounts, setAdAccounts] = useState([]);
+  const [fbExpired, setFbExpired] = useState(false);
+  const [metaDraft, setMetaDraft] = useState(null);
+  const [draftCreatingState, setDraftCreatingState] = useState(null);
+  const [draftError, setDraftError] = useState(null);
 
   const defaultStart = useMemo(() => {
     const d = new Date(Date.now() + 10 * 60 * 1000);
@@ -4239,6 +4271,27 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [fbConnected, pages.length]);
 
+// Load saved selection from server — authoritative fallback when localStorage is empty
+// (different device, cleared cache, or namespace mismatch after Stripe/OAuth redirect).
+useEffect(() => {
+  if (adminClientId) return;
+  if (!fbConnected) return;
+  const sid = getStoredSid();
+  const headers = sid ? { 'x-sm-sid': sid } : {};
+  fetch(`/api/facebook/selection${adminClientId ? `?adminClientId=${encodeURIComponent(adminClientId)}` : ''}`, {
+    credentials: 'include',
+    headers,
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (!data?.ok) return;
+      if (data.adAccountId) setSelectedAccount((prev) => prev || String(data.adAccountId).replace(/^act_/, ''));
+      if (data.pageId) setSelectedPageId((prev) => prev || String(data.pageId));
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected]);
+
   // ✅ Admin-client mode: when the selected client changes, immediately clear any stale
   // FB/account state from the previous client, then load fresh data for the new client.
   // Uses admin wrapper routes — no client token is exposed to the frontend.
@@ -4894,6 +4947,30 @@ useEffect(() => {
   } catch {}
 }, [adminClientId, selectedPageId, pages, fbConnected, resolvedUser]);
 
+// Persist selection to server so it survives cross-device / cross-browser refreshes.
+// Fires whenever a valid account+page pair is selected while connected.
+useEffect(() => {
+  if (adminClientId) return;
+  if (!fbConnected || !selectedAccount) return;
+  const sid = getStoredSid();
+  const headers = { 'Content-Type': 'application/json' };
+  if (sid) headers['x-sm-sid'] = sid;
+  const accountName = (adAccounts.find((a) => String(a.id).replace(/^act_/, '') === selectedAccount) || {}).name || '';
+  const pageName = (pages.find((p) => String(p.id) === selectedPageId) || {}).name || '';
+  fetch('/api/facebook/selection', {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({
+      adAccountId: selectedAccount,
+      pageId: selectedPageId || '',
+      adAccountName: accountName,
+      pageName,
+    }),
+  }).catch(() => {});
+  // eslint-disable-next-line
+}, [selectedAccount, selectedPageId, fbConnected, adminClientId]);
+
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
   if (!campaignId || !selectedAccount || campaignId === "__DRAFT__") return;
@@ -5380,6 +5457,86 @@ function isValidHttpUrl(u) {
     return false;
   }
 }
+
+// Creates a PAUSED campaign/adset/ad on Meta for review before committing to a live launch.
+const handleCreateDraft = async () => {
+  if (!fbConnected || !selectedAccount || !selectedPageId) return;
+  setDraftCreatingState("creating");
+  setDraftError(null);
+
+  try {
+    const imageUrls = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
+    const rawImage = imageUrls[0] || "";
+    // Convert relative/same-origin URLs to absolute Render URLs so Meta can fetch them
+    const imageUrl = rawImage && !/^data:/i.test(rawImage)
+      ? rawImage.replace(/^\//, `${RENDER_MEDIA_ORIGIN}/`)
+      : "";
+
+    const sid = getStoredSid();
+    const headers = { "Content-Type": "application/json" };
+    if (sid) headers["x-sm-sid"] = sid;
+
+    const r = await fetch("/api/facebook/create-draft", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({
+        adAccountId: selectedAccount,
+        pageId: selectedPageId,
+        imageUrl: imageUrl || "",
+        primaryText: previewCopy?.body || body || "",
+        headline: previewCopy?.headline || headline || "",
+        destinationUrl: previewCopy?.link || inferredLink || "",
+        dailyBudget: parseFloat(budget) || 5,
+        campaignName: form.campaignName || previewCopy?.headline || "Draft Review",
+        adminClientId: adminClientId || "",
+      }),
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || "Draft creation failed");
+
+    setMetaDraft(data.draft);
+    setDraftCreatingState(null);
+  } catch (err) {
+    setDraftError(String(err?.message || "Draft creation failed"));
+    setDraftCreatingState(null);
+  }
+};
+
+// Activates the already-created PAUSED draft — transitions it to a live campaign.
+const handleLaunchDraft = async () => {
+  if (!metaDraft?.id) return;
+  setDraftCreatingState("launching");
+  setDraftError(null);
+
+  try {
+    const sid = getStoredSid();
+    const headers = { "Content-Type": "application/json" };
+    if (sid) headers["x-sm-sid"] = sid;
+
+    const r = await fetch("/api/facebook/launch-draft", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({
+        draftId: metaDraft.id,
+        adminClientId: adminClientId || "",
+      }),
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || "Launch failed");
+
+    setMetaDraft(data.draft);
+    setDraftCreatingState(null);
+    setLaunched(true);
+    setLaunchResult(data);
+  } catch (err) {
+    setDraftError(String(err?.message || "Launch failed"));
+    setDraftCreatingState(null);
+  }
+};
 
 const handleLaunch = async () => {
   if (!billingInfo?.hasAccess) {
@@ -6798,10 +6955,16 @@ ${pendingTest ? `
 
           <div style={{ textAlign: "center", maxWidth: 560 }}>
             <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, marginBottom: 8 }}>
-              {fbConnected ? "Facebook Ads Connected" : "Connect your ad account"}
+              {fbExpired
+                ? "Facebook connection expired — reconnect"
+                : fbConnected
+                ? "Facebook Ads Connected"
+                : "Connect your ad account"}
             </div>
             <div style={{ color: "#64748b", fontWeight: 700, fontSize: 15, lineHeight: 1.7 }}>
-              {fbConnected
+              {fbExpired
+                ? "Your Facebook token has expired. Click below to reconnect and restore access."
+                : fbConnected
                 ? "Your Meta connection is active. Smartemark can now read campaign data, monitor performance, and manage optimization decisions."
                 : "Start here first. Once connected, you’ll be able to review creatives and finish campaign setup."}
             </div>
@@ -6899,55 +7062,120 @@ ${pendingTest ? `
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
 
-          <div
-            style={{
-              width: "100%",
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
-              gap: 14,
-              maxWidth: 680,
-            }}
-          >
-            <div
-              style={{
-                background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
-                border: "1px solid rgba(93,89,234,0.12)",
-                borderRadius: 16,
-                padding: 18,
-                boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
-              }}
-            >
-              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                Ad Accounts
+          {/* ── Account + Page dropdowns ── */}
+          {fbConnected && (
+            <div style={{ width: "100%", maxWidth: 680, display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Ad Account dropdown */}
+              <div
+                style={{
+                  background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+                  border: "1px solid rgba(93,89,234,0.12)",
+                  borderRadius: 16,
+                  padding: 18,
+                  boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
+                }}
+              >
+                <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 8 }}>
+                  AD ACCOUNT ({adAccounts.length} found)
+                </div>
+                {adAccounts.length > 0 ? (
+                  <select
+                    value={selectedAccount}
+                    onChange={(e) => setSelectedAccount(String(e.target.value).replace(/^act_/, ""))}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(93,89,234,0.2)",
+                      background: "#f7f8ff",
+                      color: "#0f172a",
+                      fontWeight: 700,
+                      fontSize: 14,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {adAccounts.map((a) => {
+                      const id = String(a.id || "").replace(/^act_/, "");
+                      const status = Number(a.account_status);
+                      const statusLabel = status === 1 ? "" : status === 2 ? " ⚠ Disabled" : status === 3 ? " ⚠ Unsettled" : " ⚠ Not Active";
+                      return (
+                        <option key={id} value={id}>
+                          {a.name ? `${a.name} (${id})${statusLabel}` : `ID: ${id}${statusLabel}`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                ) : (
+                  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                    {selectedAccount ? `Account ID: ${selectedAccount}` : "Loading ad accounts…"}
+                  </div>
+                )}
+                {/* Payment method warning */}
+                {(() => {
+                  const acct = adAccounts.find((a) => String(a.id).replace(/^act_/, "") === selectedAccount);
+                  if (!acct) return null;
+                  const status = Number(acct.account_status);
+                  if (status === 1) return null;
+                  return (
+                    <div style={{
+                      marginTop: 10,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "#fffbeb",
+                      border: "1px solid #fcd34d",
+                      color: "#92400e",
+                      fontWeight: 700,
+                      fontSize: 12,
+                    }}>
+                      ⚠ Payment method needed before launch — this ad account is not active (status {status}).
+                    </div>
+                  );
+                })()}
               </div>
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 24, marginBottom: 10 }}>
-                {adAccounts.length}
-              </div>
-              <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-                {selectedAccount ? `Selected: ${selectedAccount}` : "Choose your ad account in the Campaign tab"}
-              </div>
-            </div>
 
-            <div
-              style={{
-                background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
-                border: "1px solid rgba(93,89,234,0.12)",
-                borderRadius: 16,
-                padding: 18,
-                boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
-              }}
-            >
-              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                Facebook Pages
-              </div>
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 24, marginBottom: 10 }}>
-                {pages.length}
-              </div>
-              <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-                {selectedPageId ? "Page selected" : "Select a page in the Campaign tab"}
+              {/* Page dropdown */}
+              <div
+                style={{
+                  background: "linear-gradient(145deg, #ffffff 0%, #f7f8ff 100%)",
+                  border: "1px solid rgba(93,89,234,0.12)",
+                  borderRadius: 16,
+                  padding: 18,
+                  boxShadow: "0 4px 14px rgba(91,87,232,0.06)",
+                }}
+              >
+                <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 8 }}>
+                  FACEBOOK PAGE ({pages.length} found)
+                </div>
+                {pages.length > 0 ? (
+                  <select
+                    value={selectedPageId}
+                    onChange={(e) => setSelectedPageId(String(e.target.value))}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(93,89,234,0.2)",
+                      background: "#f7f8ff",
+                      color: "#0f172a",
+                      fontWeight: 700,
+                      fontSize: 14,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {pages.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name ? `${p.name} (${p.id})` : `Page ID: ${p.id}`}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                    {selectedPageId ? `Page ID: ${selectedPageId}` : "Loading pages…"}
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
         </div>
       </>
     )}
@@ -8350,10 +8578,119 @@ ${pendingTest ? `
             </div>
           )}
 
+          {/* ── Draft / Review flow ── */}
+          {fbConnected && selectedAccount && selectedPageId && !metaDraft?.status && metaDraft?.status !== "launched" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {draftError && (
+                <div style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: "#fff1f2",
+                  border: "1px solid #ffd6d6",
+                  color: "#b42318",
+                  fontWeight: 700,
+                  fontSize: 13,
+                }}>
+                  {draftError}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleCreateDraft}
+                disabled={draftCreatingState === "creating" || !budget || isNaN(parseFloat(budget)) || parseFloat(budget) < 3}
+                style={{
+                  width: "100%",
+                  border: "1px solid #dbe4ff",
+                  borderRadius: 14,
+                  padding: "13px 16px",
+                  background: draftCreatingState === "creating" ? "#e0e7ff" : "#eef2ff",
+                  color: "#4f46e5",
+                  fontWeight: 900,
+                  fontSize: 14,
+                  cursor: draftCreatingState === "creating" ? "not-allowed" : "pointer",
+                }}
+              >
+                {draftCreatingState === "creating" ? "Creating draft in Meta…" : "Create Draft for Review"}
+              </button>
+              <div style={{ color: "#94a3b8", fontWeight: 600, fontSize: 12, textAlign: "center" }}>
+                Creates a paused campaign in your Meta Ads Manager so you can review before going live.
+              </div>
+            </div>
+          )}
+
+          {/* Draft review panel (shown after draft is created) */}
+          {metaDraft && metaDraft.status === "draft_review" && (
+            <div style={{
+              border: "1px solid #dbe4ff",
+              borderRadius: 14,
+              padding: 18,
+              background: "#f7f9ff",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ color: "#111827", fontWeight: 900, fontSize: 15 }}>Draft Created for Review</div>
+                <div style={{ padding: "4px 10px", borderRadius: 999, background: "#fef9c3", color: "#854d0e", fontWeight: 800, fontSize: 11 }}>
+                  PAUSED — NOT LIVE
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {[
+                  ["Ad Account", metaDraft.adAccountId],
+                  ["Page ID", metaDraft.pageId],
+                  ["Campaign ID", metaDraft.metaCampaignId],
+                  ["Ad Set ID", metaDraft.metaAdSetId],
+                  ["Ad ID", metaDraft.metaAdId],
+                  ["Status", "PAUSED — ready for review"],
+                ].map(([label, val]) => (
+                  <div key={label}>
+                    <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 10 }}>{label}</div>
+                    <div style={{ color: "#111827", fontWeight: 700, fontSize: 12, wordBreak: "break-all" }}>{val || "—"}</div>
+                  </div>
+                ))}
+              </div>
+
+              {metaDraft.metaManagerUrl && (
+                <a
+                  href={metaDraft.metaManagerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "block",
+                    textAlign: "center",
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    background: "#ffffff",
+                    border: "1px solid #dbe4ff",
+                    color: "#4f46e5",
+                    fontWeight: 800,
+                    fontSize: 13,
+                    textDecoration: "none",
+                  }}
+                >
+                  Open in Meta Ads Manager ↗
+                </a>
+              )}
+
+              {draftError && (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fff1f2", border: "1px solid #ffd6d6", color: "#b42318", fontWeight: 700, fontSize: 12 }}>
+                  {draftError}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
-            onClick={handleLaunch}
+            onClick={
+              metaDraft?.status === "draft_review"
+                ? handleLaunchDraft
+                : handleLaunch
+            }
             disabled={
               loading ||
+              draftCreatingState === "launching" ||
               !(
                 fbConnected &&
                 selectedAccount &&
@@ -8370,6 +8707,7 @@ ${pendingTest ? `
               padding: "14px 16px",
               background:
                 loading ||
+                draftCreatingState === "launching" ||
                 !(
                   fbConnected &&
                   selectedAccount &&
@@ -8385,6 +8723,7 @@ ${pendingTest ? `
               fontSize: 15,
               cursor:
                 loading ||
+                draftCreatingState === "launching" ||
                 !(
                   fbConnected &&
                   selectedAccount &&
@@ -8397,7 +8736,13 @@ ${pendingTest ? `
                   : "pointer",
             }}
           >
-            {loading ? "Working..." : "Launch Campaign"}
+            {draftCreatingState === "launching"
+              ? "Activating…"
+              : loading
+              ? "Working..."
+              : metaDraft?.status === "draft_review"
+              ? "Launch Campaign"
+              : "Launch Campaign"}
           </button>
         </div>
       </>

@@ -475,6 +475,10 @@ app.use("/api", campaignContextRoutes);
 const twilioRoutes = require("./routes/twilio");
 app.use("/api", twilioRoutes);
 
+/* ✅ Facebook selection persistence + draft campaign creation/launch */
+const facebookRoutes = require("./routes/facebook");
+app.use("/api", facebookRoutes);
+
 const landingLeadsRoutes = require("./routes/landingLeads");
 app.use("/api", landingLeadsRoutes);
 

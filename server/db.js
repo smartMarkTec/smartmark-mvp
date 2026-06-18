@@ -34,6 +34,8 @@ const db = new Low(adapter, {
   call_tracking_events: [], // Twilio inbound call log
   call_recordings: [],      // Twilio recording metadata (orphans when no matching call event)
   landing_leads: [],        // Schedule Service form submissions
+  fb_selections: [],        // saved Facebook ad account + page per ownerKey
+  campaign_drafts: [],      // PAUSED Meta campaigns created for review before launch
   tokens: {} // <= where we keep the FB token
 });
 
