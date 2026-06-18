@@ -49,7 +49,7 @@ const LANDING_PAGES = {
     ],
     mainWebsiteUrl: "https://aspen93.godaddysites.com",
     primaryButtonText: "Call Now: (713) 882-2767",
-    secondaryButtonText: "Visit Main Website",
+    secondaryButtonText: "Home",
     metaPixelId: null,
     logo: null,
     backgroundImage: null,
