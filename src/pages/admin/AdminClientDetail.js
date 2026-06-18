@@ -2,6 +2,7 @@
 // src/pages/admin/AdminClientDetail.js
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import LANDING_PAGES from "../../data/landingPages";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const TEXT = "#111827";
@@ -21,6 +22,59 @@ const CHECKLIST_LABELS = {
   campaign_launched:         "Campaign launched",
   monthly_report_sent:       "Monthly performance report sent",
 };
+
+// Fields whose status is derived from /api/admin/tracking-status rather than manual toggle
+const AUTO_DERIVED_FIELDS = new Set(["meta_pixel_setup", "call_tracking_setup", "conversion_tracking_setup"]);
+
+const AUTO_FIELD_CHECKS = {
+  meta_pixel_setup:          (ts) => ts?.checks?.metaPixelConfigured,
+  call_tracking_setup:       (ts) => ts?.checks?.twilioNumberConfigured,
+  conversion_tracking_setup: (ts) => ts?.checks?.pageViewEventConfigured && ts?.checks?.contactEventConfigured && ts?.checks?.leadEventConfigured,
+};
+
+function generateReadinessText(ts) {
+  if (!ts) return "No tracking data available for this client.";
+  const c = ts.checks;
+  const lines = [];
+
+  lines.push(ts.launchReady
+    ? `✅ ${ts.businessName} appears ready to launch.`
+    : `⚠️ ${ts.businessName} is not yet fully ready to launch.`);
+  lines.push("");
+
+  lines.push("Tracking & Setup:");
+  lines.push(c.metaPixelConfigured
+    ? `  ✓ Meta Pixel configured (ID: ${ts.metaPixelId})`
+    : "  ✗ Meta Pixel not configured");
+  lines.push((c.pageViewEventConfigured && c.contactEventConfigured && c.leadEventConfigured)
+    ? "  ✓ Pixel events wired (PageView, Contact, Lead)"
+    : "  ✗ One or more pixel events not configured");
+  lines.push(c.twilioNumberConfigured
+    ? `  ✓ Call tracking number configured (${ts.twilioNumber})`
+    : "  ✗ Call tracking not configured");
+  lines.push(c.leadFormEndpointConfigured
+    ? "  ✓ Lead form endpoint ready"
+    : "  ✗ Lead form endpoint not configured");
+  lines.push("");
+
+  lines.push("Activity:");
+  lines.push(c.hasReceivedLeads
+    ? `  ✓ ${ts.recentActivity.totalLeads} lead(s) received — last: ${ts.recentActivity.latestLeadAt ? new Date(ts.recentActivity.latestLeadAt).toLocaleString() : "—"}`
+    : "  ○ No leads received yet");
+  lines.push(c.hasReceivedCalls
+    ? `  ✓ ${ts.recentActivity.totalCalls} call(s) received — last: ${ts.recentActivity.latestCallAt ? new Date(ts.recentActivity.latestCallAt).toLocaleString() : "—"}`
+    : "  ○ No calls received yet");
+
+  if (!ts.launchReady) {
+    const missing = Object.entries(c).filter(([, v]) => !v).map(([k]) => k.replace(/_/g, " "));
+    if (missing.length) {
+      lines.push("");
+      lines.push(`Incomplete checks: ${missing.join(", ")}`);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 function Card({ title, children }) {
   return (
@@ -80,6 +134,8 @@ export default function AdminClientDetail() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [retryLoading, setRetryLoading] = useState(false);
   const [retryResult, setRetryResult] = useState(null);
+  const [trackingStatus, setTrackingStatus] = useState(null);
+  const [readinessText, setReadinessText] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -103,6 +159,21 @@ export default function AdminClientDetail() {
       .then((j) => { if (j.ok) setFbInfo(j); })
       .catch(() => {});
   }, [id]);
+
+  // Non-blocking: fetch tracking status for any linked landing page
+  useEffect(() => {
+    if (!client) return;
+    const intakeName = client?.premiumIntake?.businessName || client?.businessName || client?.displayName;
+    const linked = Object.values(LANDING_PAGES).find(p => p.businessName === intakeName);
+    if (!linked) return;
+    fetch(`/api/admin/tracking-status?landingPageSlug=${encodeURIComponent(linked.slug)}`, {
+      credentials: "include",
+      headers: adminHeaders(),
+    })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => { if (j.ok) setTrackingStatus(j); })
+      .catch(() => {});
+  }, [client]);
 
   const toggleChecklist = async (field, currentVal) => {
     if (!client) return;
@@ -285,34 +356,127 @@ export default function AdminClientDetail() {
             {saving && <span style={{ fontSize: 12, color: TEXT_SOFT }}>Saving…</span>}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {Object.entries(CHECKLIST_LABELS).map(([field, label]) => (
-              <label
-                key={field}
+            {Object.entries(CHECKLIST_LABELS).map(([field, label]) => {
+              const isAuto = AUTO_DERIVED_FIELDS.has(field) && trackingStatus != null;
+              const autoOn = isAuto ? !!AUTO_FIELD_CHECKS[field](trackingStatus) : null;
+              const effectiveOn = isAuto ? autoOn : !!onboarding[field];
+
+              if (isAuto) {
+                return (
+                  <div
+                    key={field}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      background: autoOn ? "rgba(16,185,129,0.07)" : "#f8f9fc",
+                      border: `1px solid ${autoOn ? "rgba(16,185,129,0.25)" : BORDER}`,
+                      fontSize: 13,
+                      fontWeight: autoOn ? 600 : 400,
+                      color: autoOn ? "#065f46" : TEXT_SOFT,
+                    }}
+                  >
+                    <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1 }}>{autoOn ? "✓" : "○"}</span>
+                    <span style={{ flex: 1 }}>{label}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 999,
+                      background: autoOn ? "rgba(16,185,129,0.15)" : "rgba(0,0,0,0.06)",
+                      color: autoOn ? "#065f46" : TEXT_SOFT,
+                      flexShrink: 0,
+                    }}>
+                      Auto-verified
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <label
+                  key={field}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    background: effectiveOn ? "rgba(16,185,129,0.07)" : "#f8f9fc",
+                    border: `1px solid ${effectiveOn ? "rgba(16,185,129,0.25)" : BORDER}`,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: effectiveOn ? 600 : 400,
+                    color: effectiveOn ? "#065f46" : TEXT_SOFT,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!onboarding[field]}
+                    onChange={() => toggleChecklist(field, !!onboarding[field])}
+                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#10b981", flexShrink: 0 }}
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+
+          {/* Activity labels */}
+          {trackingStatus && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${BORDER}`, display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
+              <span style={{ color: trackingStatus.checks.hasReceivedLeads ? "#15803d" : TEXT_SOFT, fontWeight: trackingStatus.checks.hasReceivedLeads ? 600 : 400 }}>
+                {trackingStatus.checks.hasReceivedLeads
+                  ? `✓ ${trackingStatus.recentActivity.totalLeads} lead(s) received`
+                  : "○ No leads received yet"}
+              </span>
+              <span style={{ color: trackingStatus.checks.hasReceivedCalls ? "#15803d" : TEXT_SOFT, fontWeight: trackingStatus.checks.hasReceivedCalls ? 600 : 400 }}>
+                {trackingStatus.checks.hasReceivedCalls
+                  ? `✓ ${trackingStatus.recentActivity.totalCalls} call(s) received`
+                  : "○ No calls received yet"}
+              </span>
+            </div>
+          )}
+
+          {/* Ask AI readiness */}
+          {trackingStatus && (
+            <div style={{ marginTop: 14 }}>
+              <button
+                onClick={() => setReadinessText(prev => prev ? "" : generateReadinessText(trackingStatus))}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
+                  padding: "8px 16px",
+                  background: PURPLE,
+                  color: "#fff",
+                  border: "none",
                   borderRadius: 8,
-                  background: onboarding[field] ? "rgba(16,185,129,0.07)" : "#f8f9fc",
-                  border: `1px solid ${onboarding[field] ? "rgba(16,185,129,0.25)" : BORDER}`,
-                  cursor: "pointer",
                   fontSize: 13,
-                  fontWeight: onboarding[field] ? 600 : 400,
-                  color: onboarding[field] ? "#065f46" : TEXT_SOFT,
-                  transition: "all 0.15s",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: FONT,
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={!!onboarding[field]}
-                  onChange={() => toggleChecklist(field, !!onboarding[field])}
-                  style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#10b981", flexShrink: 0 }}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
+                {readinessText ? "Hide" : "Ask AI: Is this client ready to launch?"}
+              </button>
+              {readinessText && (
+                <pre style={{
+                  marginTop: 12,
+                  padding: "14px 16px",
+                  background: trackingStatus.launchReady ? "rgba(16,185,129,0.06)" : "#fffbeb",
+                  border: `1px solid ${trackingStatus.launchReady ? "rgba(16,185,129,0.25)" : "#fde68a"}`,
+                  borderRadius: 10,
+                  fontSize: 12.5,
+                  lineHeight: 1.7,
+                  color: TEXT,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontFamily: FONT,
+                  margin: "12px 0 0",
+                }}>
+                  {readinessText}
+                </pre>
+              )}
+            </div>
+          )}
         </Card>
 
         {/* Premium Intake */}

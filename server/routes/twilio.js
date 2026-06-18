@@ -113,3 +113,4 @@ router.post('/twilio/status/:slug', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.CALL_CONFIGS = CALL_CONFIGS;

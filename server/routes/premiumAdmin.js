@@ -11,6 +11,23 @@ const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
 const { META_API_VERSION } = require('../metaConfig');
+const { CALL_CONFIGS } = require('./twilio');
+
+// Server-side mirror of src/data/landingPages.js — only the fields needed for tracking checks.
+// Keep in sync with the frontend config when adding new pages.
+const LANDING_PAGE_CONFIGS = {
+  'aspen-ac': {
+    slug: 'aspen-ac',
+    businessName: 'Aspen Air Conditioning & Heating',
+    metaPixelId: '2079374046338979',
+    landingPageUrl: 'https://offers.aspen-hvac.com',
+  },
+};
+
+function maskPhone(phone) {
+  if (!phone || phone.length < 8) return '***';
+  return phone.slice(0, 5) + '******' + phone.slice(-2);
+}
 
 // ── Session helpers (same read-only pattern as auth.js) ──────────────────────
 const COOKIE_NAME = 'sm_sid';
@@ -1515,6 +1532,71 @@ function normalizeLead(lead) {
     notes: typeof lead.notes === 'string' ? lead.notes : '',
   };
 }
+
+// GET /api/admin/tracking-status
+router.get('/admin/tracking-status', limitAdmin, requireAdmin, async (req, res) => {
+  const { landingPageSlug } = req.query;
+  if (!landingPageSlug) {
+    return res.status(400).json({ ok: false, error: 'landingPageSlug is required.' });
+  }
+
+  const lpConfig = LANDING_PAGE_CONFIGS[landingPageSlug];
+  const callConfig = CALL_CONFIGS[landingPageSlug];
+
+  if (!lpConfig) {
+    return res.status(404).json({ ok: false, error: `No config found for slug: ${landingPageSlug}` });
+  }
+
+  try {
+    await db.read();
+    const leads = (Array.isArray(db.data.landing_leads) ? db.data.landing_leads : [])
+      .filter(l => l.landingPageSlug === landingPageSlug);
+    const calls = (Array.isArray(db.data.call_tracking_events) ? db.data.call_tracking_events : [])
+      .filter(e => e.landingPageSlug === landingPageSlug);
+
+    const hasReceivedLeads = leads.length > 0;
+    const hasReceivedCalls = calls.length > 0;
+    const metaPixelConfigured = Boolean(lpConfig.metaPixelId);
+    const twilioConfigured = Boolean(callConfig?.twilioNumber);
+
+    const checks = {
+      landingPageConfigured: true,
+      metaPixelConfigured,
+      pageViewEventConfigured: metaPixelConfigured,
+      contactEventConfigured: metaPixelConfigured,
+      leadEventConfigured: metaPixelConfigured,
+      twilioNumberConfigured: twilioConfigured,
+      twilioWebhookRouteConfigured: twilioConfigured,
+      leadFormEndpointConfigured: true,
+      hasReceivedLeads,
+      hasReceivedCalls,
+    };
+
+    const latestLeadAt = leads.reduce((max, l) => (!max || (l.createdAt ?? '') > max ? l.createdAt : max), null);
+    const latestCallAt = calls.reduce((max, c) => (!max || (c.createdAt ?? '') > max ? c.createdAt : max), null);
+
+    return res.json({
+      ok: true,
+      landingPageSlug,
+      businessName: lpConfig.businessName,
+      landingPageUrl: lpConfig.landingPageUrl,
+      metaPixelId: lpConfig.metaPixelId || null,
+      twilioNumber: callConfig?.twilioNumber || null,
+      forwardingNumberMasked: callConfig?.forwardingNumber ? maskPhone(callConfig.forwardingNumber) : null,
+      checks,
+      recentActivity: {
+        totalLeads: leads.length,
+        latestLeadAt,
+        totalCalls: calls.length,
+        latestCallAt,
+      },
+      launchReady: Object.values(checks).every(Boolean),
+    });
+  } catch (err) {
+    console.error('[admin/tracking-status]', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // GET /api/admin/landing-leads
 router.get('/admin/landing-leads', limitAdmin, requireAdmin, async (req, res) => {
