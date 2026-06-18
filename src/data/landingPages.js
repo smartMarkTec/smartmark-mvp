@@ -47,6 +47,7 @@ const LANDING_PAGES = {
       "Simple scheduling",
       "Call for current availability",
     ],
+    hostnames: ["offers.aspen-hvac.com"],
     mainWebsiteUrl: "https://aspen93.godaddysites.com",
     primaryButtonText: "Call Now: (713) 882-2767",
     secondaryButtonText: "Home",

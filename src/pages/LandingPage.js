@@ -58,8 +58,9 @@ function CallBtn({ phone, label, size = "md" }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════ */
-export default function LandingPage() {
-  const { slug } = useParams();
+export default function LandingPage({ slug: slugProp }) {
+  const params = useParams();
+  const slug = slugProp || params.slug;
   const page = LANDING_PAGES[slug];
 
   useEffect(() => { window.scrollTo(0, 0); }, [slug]);

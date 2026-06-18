@@ -27,6 +27,18 @@ import BookingConfirmed from "./pages/BookingConfirmed";
 import Agreement from "./pages/Agreement";
 import OnboardingConnect from "./pages/OnboardingConnect";
 import LandingPage from "./pages/LandingPage";
+import LANDING_PAGES from "./data/landingPages";
+
+/* Renders the matching client landing page when the hostname is a known custom domain,
+   otherwise falls through to the normal Smartemark homepage. */
+function HostnameGateway() {
+  const hostname = window.location.hostname;
+  const match = Object.values(LANDING_PAGES).find(
+    (p) => Array.isArray(p.hostnames) && p.hostnames.includes(hostname)
+  );
+  if (match) return <LandingPage slug={match.slug} />;
+  return <Landing />;
+}
 
 function NotFound() {
   return (
@@ -63,7 +75,7 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      <Route path="/" element={<HostnameGateway />} />
       <Route path="/growth" element={<LandingTest />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/growth-pricing" element={<PricingTest />} />
