@@ -5,76 +5,59 @@ import LANDING_PAGES from "../data/landingPages";
 
 const FONT = "'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif";
 
-const C = {
-  navy:      "#0f2744",
-  navyLight: "#1a3a5c",
-  white:     "#ffffff",
-  bg:        "#f4f6f9",
-  callBtn:   "#f97316",
-  callHover: "#ea6a05",
-  heading:   "#111827",
-  body:      "#374151",
-  muted:     "#6b7280",
-  border:    "#e5e7eb",
-  offerBg:   "#fff7ed",
-  offerBdr:  "#fdba74",
-  offerText: "#92400e",
-  greenBg:   "#f0fdf4",
-  greenBdr:  "#86efac",
-  green:     "#15803d",
-  accentBg:  "#eff6ff",
-  accentBdr: "#bfdbfe",
-  accent:    "#1d4ed8",
-  footerBg:  "#0a1e38",
-  footerTxt: "#94a3b8",
-};
-
-function PhoneIcon({ size = 14 }) {
+function PhoneIcon({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.1 12.17 19.79 19.79 0 0 1 1 3.58 2 2 0 0 1 2.98 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
     </svg>
   );
 }
 
-function CheckIcon({ size = 14, color = C.accent }) {
+function CheckCircleIcon() {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f97316"
+      strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
       <polyline points="20 6 9 17 4 12"/>
     </svg>
   );
 }
 
-function PinIcon({ size = 13 }) {
+function ShieldIcon() {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f2744"
+      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
     </svg>
   );
 }
 
-function CallBtn({ phone, label, big = false }) {
+/* ─────────────────── Big orange call button ─────────────────── */
+function CallBtn({ phone, label, size = "md" }) {
+  const big = size === "lg";
   return (
     <a
       href={`tel:${phone}`}
       style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center",
-        gap: 7, background: C.callBtn, color: "#fff", fontFamily: FONT,
-        fontWeight: 800, fontSize: big ? "1.05rem" : "0.88rem",
-        padding: big ? "14px 28px" : "9px 16px", borderRadius: 10,
-        textDecoration: "none", boxShadow: "0 3px 14px rgba(249,115,22,0.38)",
-        transition: "background 0.12s, transform 0.1s", whiteSpace: "nowrap",
-        boxSizing: "border-box",
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+        background: "#f97316", color: "#fff", fontFamily: FONT, fontWeight: 800,
+        fontSize: big ? "1.1rem" : "0.9rem",
+        padding: big ? "16px 34px" : "11px 22px",
+        borderRadius: 6, textDecoration: "none",
+        boxShadow: big ? "0 4px 20px rgba(249,115,22,0.45)" : "0 2px 10px rgba(249,115,22,0.35)",
+        transition: "background 0.12s, transform 0.1s",
+        whiteSpace: "nowrap", boxSizing: "border-box",
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = C.callHover; e.currentTarget.style.transform = "translateY(-1px)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = C.callBtn; e.currentTarget.style.transform = "translateY(0)"; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#ea6a05"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#f97316"; e.currentTarget.style.transform = "translateY(0)"; }}
     >
-      <PhoneIcon size={big ? 18 : 13} />
+      <PhoneIcon size={big ? 20 : 15} />
       {label}
     </a>
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════ */
 export default function LandingPage() {
   const { slug } = useParams();
   const page = LANDING_PAGES[slug];
@@ -88,13 +71,13 @@ export default function LandingPage() {
       <div style={{
         minHeight: "100vh", display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
-        fontFamily: FONT, background: C.bg, padding: "0 20px", textAlign: "center",
+        fontFamily: FONT, background: "#f4f6f9", padding: "0 20px", textAlign: "center",
       }}>
         <div style={{ fontSize: 48, marginBottom: 14 }}>🔍</div>
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 800, color: C.heading, margin: "0 0 8px" }}>
+        <h1 style={{ fontSize: "1.4rem", fontWeight: 800, color: "#111827", margin: "0 0 8px" }}>
           Landing page not found
         </h1>
-        <p style={{ color: C.muted, fontSize: "0.95rem" }}>
+        <p style={{ color: "#6b7280", fontSize: "0.9rem" }}>
           No page exists at <code>/lp/{slug}</code>.
         </p>
       </div>
@@ -102,52 +85,48 @@ export default function LandingPage() {
   }
 
   return (
-    <div style={{ fontFamily: FONT, background: C.bg, minHeight: "100vh", overflowX: "hidden" }}>
+    <div style={{ fontFamily: FONT, background: "#fff", minHeight: "100vh", overflowX: "hidden" }}>
 
-      {/* ── TOP NAV ── */}
-      <div style={{ background: C.navy, borderBottom: `1px solid rgba(255,255,255,0.08)`, padding: "0 20px" }}>
+      {/* ════════════ TOP BAR ════════════ */}
+      <div style={{ background: "#0a1628", padding: "0 20px" }}>
         <div style={{
-          maxWidth: 840, margin: "0 auto", height: 54,
+          maxWidth: 900, margin: "0 auto", height: 52,
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
           <span style={{
-            color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: 0.1,
+            color: "#fff", fontWeight: 700, fontSize: 14,
             flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {page.businessName}
           </span>
-
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {/* Call — orange, primary */}
             <a
               href={`tel:${page.phone}`}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
-                background: C.callBtn, color: "#fff", fontFamily: FONT,
-                fontWeight: 800, fontSize: 13, padding: "7px 13px", borderRadius: 8,
-                textDecoration: "none", boxShadow: "0 2px 8px rgba(249,115,22,0.4)",
-                transition: "background 0.12s", whiteSpace: "nowrap",
+                background: "#f97316", color: "#fff", fontFamily: FONT,
+                fontWeight: 800, fontSize: 13, padding: "7px 14px", borderRadius: 5,
+                textDecoration: "none", whiteSpace: "nowrap",
+                transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = C.callHover; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = C.callBtn; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#ea6a05"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#f97316"; }}
             >
               <PhoneIcon size={12} />
               Call: {page.phoneDisplay}
             </a>
-
-            {/* Home — ghost */}
             <a
               href={page.mainWebsiteUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{
-                color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 600,
-                textDecoration: "none", padding: "6px 12px", borderRadius: 8,
-                border: "1px solid rgba(255,255,255,0.2)",
-                transition: "color 0.12s, border-color 0.12s", whiteSpace: "nowrap",
+                color: "rgba(255,255,255,0.65)", fontSize: 13, fontWeight: 600,
+                textDecoration: "none", padding: "6px 11px", borderRadius: 5,
+                border: "1px solid rgba(255,255,255,0.2)", whiteSpace: "nowrap",
+                transition: "color 0.12s, border-color 0.12s",
               }}
               onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.5)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.7)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.65)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; }}
             >
               Home
             </a>
@@ -155,154 +134,136 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ── HERO + TWO-COLUMN CARDS — all on navy ── */}
-      <div style={{ background: C.navy, padding: "38px 20px 44px" }}>
-        <div style={{ maxWidth: 840, margin: "0 auto" }}>
-
-          {/* Label */}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: 10 }}>
-            {page.businessName}
+      {/* ════════════ HERO ════════════ */}
+      <div style={{
+        background: "linear-gradient(160deg, #050e1a 0%, #0d1f3c 55%, #143055 100%)",
+        padding: "64px 20px 72px",
+        textAlign: "center",
+      }}>
+        <div style={{ maxWidth: 680, margin: "0 auto" }}>
+          <div style={{
+            display: "inline-block",
+            background: "rgba(249,115,22,0.15)",
+            border: "1px solid rgba(249,115,22,0.4)",
+            color: "#fb923c",
+            fontSize: 11, fontWeight: 700, letterSpacing: 1.2,
+            textTransform: "uppercase", padding: "4px 12px",
+            borderRadius: 4, marginBottom: 20,
+          }}>
+            Houston, TX
           </div>
 
-          {/* Headline */}
           <h1 style={{
-            fontSize: "clamp(1.7rem, 5.5vw, 2.4rem)",
-            fontWeight: 900, lineHeight: 1.15, letterSpacing: -0.3,
-            color: "#fff", margin: "0 0 10px",
+            fontSize: "clamp(2rem, 7vw, 3rem)",
+            fontWeight: 900, lineHeight: 1.1, letterSpacing: -0.5,
+            color: "#fff", margin: "0 0 16px",
           }}>
             {page.headline}
           </h1>
 
-          {/* Subheadline */}
           <p style={{
-            fontSize: "0.97rem", color: "rgba(255,255,255,0.65)",
-            lineHeight: 1.6, margin: "0 0 24px", maxWidth: 500,
+            fontSize: "clamp(0.95rem, 2.5vw, 1.1rem)",
+            color: "rgba(255,255,255,0.65)",
+            lineHeight: 1.65, margin: "0 0 32px",
           }}>
             {page.subheadline}
           </p>
 
-          {/* ── TWO-COLUMN GRID ── */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
-            gap: 16,
-            alignItems: "start",
-          }}>
+          <CallBtn phone={page.phone} label={page.primaryButtonText} size="lg" />
 
-            {/* LEFT — Promotion card */}
-            <div style={{
-              background: C.offerBg,
-              border: `1.5px solid ${C.offerBdr}`,
-              borderRadius: 14,
-              padding: "22px 22px 20px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 0,
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 10, color: C.offerText, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>
-                Promotion
-              </div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "#7c2d12", lineHeight: 1.1, marginBottom: 10 }}>
-                $75 AC Tune-Up
-              </div>
-              <div style={{ fontSize: "0.9rem", color: "#92400e", lineHeight: 1.65, marginBottom: 20 }}>
-                Having AC issues or due for maintenance? Call now to schedule your tune-up or ask about the $120 annual maintenance plan.
-              </div>
-              <div>
-                <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} />
-              </div>
-            </div>
-
-            {/* RIGHT — Services + Why Choose Us */}
-            <div style={{
-              background: C.white,
-              border: "1.5px solid rgba(255,255,255,0.15)",
-              borderRadius: 14,
-              padding: "22px 22px 20px",
-            }}>
-              {/* Inner two-column grid */}
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                gap: "18px 20px",
-              }}>
-                {/* Services */}
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 10, color: C.accent, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>
-                    Services
-                  </div>
-                  <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {page.services.map((svc, i) => (
-                      <li key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.88rem", color: C.heading, fontWeight: 500 }}>
-                        <CheckIcon color={C.accent} />
-                        {svc}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* Why Choose Us */}
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 10, color: C.green, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 }}>
-                    Why Choose Us
-                  </div>
-                  <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {page.trustPoints.map((pt, i) => (
-                      <li key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.88rem", color: C.heading, fontWeight: 500 }}>
-                        <CheckIcon color={C.green} />
-                        {pt}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-          </div>
-          {/* end two-column grid */}
-
-          {/* Service area — below cards, still on navy */}
-          <div style={{ marginTop: 18, display: "inline-flex", alignItems: "center", gap: 5, color: "rgba(255,255,255,0.38)", fontSize: 12, fontWeight: 500 }}>
-            <PinIcon />
+          <div style={{ marginTop: 18, color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
             {page.serviceArea}
           </div>
         </div>
       </div>
-      {/* end navy hero */}
 
-      {/* ── SERVICE AREA CARD ── */}
-      <div style={{ padding: "24px 20px 0" }}>
-        <div style={{ maxWidth: 840, margin: "0 auto" }}>
+      {/* ════════════ OFFER ════════════ */}
+      <div style={{ background: "#fff7ed", borderTop: "3px solid #f97316", padding: "36px 20px" }}>
+        <div style={{ maxWidth: 740, margin: "0 auto" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>
+            Promotion
+          </div>
+          <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>
+            $75 AC Tune-Up
+          </div>
+          <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 0 22px", maxWidth: 560 }}>
+            {page.offer}
+          </p>
+          <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} />
+        </div>
+      </div>
+
+      {/* ════════════ SERVICES ════════════ */}
+      <div style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
+        <div style={{ maxWidth: 740, margin: "0 auto" }}>
+          <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
+            Air Conditioning Services
+          </h2>
           <div style={{
-            background: C.white, border: `1.5px solid ${C.border}`,
-            borderRadius: 14, padding: "13px 20px",
-            display: "flex", alignItems: "center", gap: 10,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+            gap: 10,
           }}>
-            <span style={{ fontSize: 18 }}>📍</span>
-            <div>
-              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: C.heading }}>Service Area: </span>
-              <span style={{ fontSize: "0.88rem", color: C.body }}>{page.serviceArea}</span>
-            </div>
+            {page.services.map((svc, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: "#fff", border: "1px solid #e2e8f0",
+                borderRadius: 6, padding: "12px 14px",
+                fontSize: "0.9rem", fontWeight: 600, color: "#1e293b",
+              }}>
+                <CheckCircleIcon />
+                {svc}
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* ── BOTTOM CTA ── */}
-      <div style={{ background: C.navy, margin: "24px 0 0", padding: "38px 20px 44px" }}>
-        <div style={{ maxWidth: 500, margin: "0 auto", textAlign: "center" }}>
-          <h2 style={{ fontSize: "clamp(1.3rem, 4vw, 1.7rem)", fontWeight: 900, color: "#fff", margin: "0 0 8px", lineHeight: 1.2 }}>
-            Need AC service?
+      {/* ════════════ WHY CHOOSE US ════════════ */}
+      <div style={{ background: "#fff", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
+        <div style={{ maxWidth: 740, margin: "0 auto" }}>
+          <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
+            Why Choose Aspen
           </h2>
-          <p style={{ color: "rgba(255,255,255,0.58)", fontSize: "0.93rem", margin: "0 0 22px", lineHeight: 1.55 }}>
-            Call {page.businessName} to schedule service.
-          </p>
-          <CallBtn phone={page.phone} label={page.primaryButtonText} big />
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 10,
+          }}>
+            {page.trustPoints.map((pt, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: "#f8fafc", border: "1px solid #e2e8f0",
+                borderRadius: 6, padding: "12px 14px",
+                fontSize: "0.9rem", fontWeight: 600, color: "#1e293b",
+              }}>
+                <ShieldIcon />
+                {pt}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── FOOTER ── */}
-      <div style={{ background: C.footerBg, padding: "14px 20px", textAlign: "center" }}>
-        <div style={{ fontSize: 12, color: C.footerTxt, lineHeight: 1.7 }}>
+      {/* ════════════ BOTTOM CTA ════════════ */}
+      <div style={{
+        background: "linear-gradient(160deg, #050e1a 0%, #0d1f3c 100%)",
+        padding: "52px 20px 56px", textAlign: "center",
+      }}>
+        <div style={{ maxWidth: 500, margin: "0 auto" }}>
+          <h2 style={{ fontSize: "clamp(1.4rem, 4.5vw, 1.9rem)", fontWeight: 900, color: "#fff", margin: "0 0 10px", lineHeight: 1.2 }}>
+            Need AC service?
+          </h2>
+          <p style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.95rem", margin: "0 0 26px", lineHeight: 1.6 }}>
+            Call {page.businessName} to schedule service.
+          </p>
+          <CallBtn phone={page.phone} label={page.primaryButtonText} size="lg" />
+        </div>
+      </div>
+
+      {/* ════════════ FOOTER ════════════ */}
+      <div style={{ background: "#040d1a", padding: "14px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.7 }}>
           {page.businessName} · {page.serviceArea}
           {page.mainWebsiteUrl && (
             <>
@@ -311,7 +272,7 @@ export default function LandingPage() {
                 href={page.mainWebsiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: C.footerTxt, textDecoration: "underline" }}
+                style={{ color: "#475569", textDecoration: "underline" }}
               >
                 Home
               </a>
