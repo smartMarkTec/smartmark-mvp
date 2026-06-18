@@ -182,6 +182,31 @@ export default function Login() {
       const backendEmail = String(loginJson?.user?.email || cleanIdentifier || "").trim().toLowerCase();
 
       localStorage.setItem("sm_current_user", backendUsername);
+
+      // ── Namespace + stale-key cleanup on every login ──────────────────────────
+      // Update sm_user_ns_v1 so lsGet's SID-namespace fallback points to this
+      // user, not a previous anonymous/admin-client session's SID.
+      try {
+        localStorage.setItem("sm_user_ns_v1", backendUsername);
+        sessionStorage.setItem("sm_user_ns_v1", backendUsername);
+      } catch {}
+
+      // Clear non-namespaced (bare) Facebook selection keys. These can contain
+      // values from any previous user/session because lsSet writes to them with
+      // alsoLegacy=true. Per-user keys (u:<username>:...) and admin-client
+      // keys (u:adminClient:<id>:...) are intentionally NOT removed.
+      // The server /api/facebook/selection is the authoritative source on /setup.
+      try {
+        localStorage.removeItem("smartmark_last_selected_account");
+        localStorage.removeItem("smartmark_last_selected_pageId");
+        // Clear the shared FB connected flag so it re-verifies from the server on
+        // /setup mount. If this user has a valid token the status check re-sets it.
+        localStorage.removeItem("smartmark_fb_connected");
+      } catch {}
+
+      console.debug("[Login] namespace set", backendUsername);
+      // ─────────────────────────────────────────────────────────────────────────
+
       localStorage.setItem("smartmark_login_username", backendEmail || backendUsername);
 
       if (backendEmail) {

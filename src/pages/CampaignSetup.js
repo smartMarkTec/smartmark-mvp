@@ -3274,14 +3274,28 @@ const handleLogin = async () => {
 };
 
 
-  // IMPORTANT: normalize stored account ID to "act_..."
+  // IMPORTANT: normalize stored account ID — digits only, no "act_" prefix.
+  // When a logged-in user is known, only read their own namespaced key.
+  // Never fall back to the bare (non-namespaced) key for logged-in users:
+  // that key may hold a value from a previous user or admin-client session.
   const [selectedAccount, setSelectedAccount] = useState(() => {
+    const loggedInUser = getUserFromStorage();
+    if (loggedInUser) {
+      const v = (localStorage.getItem(withUser(loggedInUser, "smartmark_last_selected_account")) || "").trim();
+      return String(v).replace(/^act_/, "");
+    }
+    // Anonymous session: safe to use full lsGet with legacy fallbacks
     const v = (lsGet(resolvedUser, "smartmark_last_selected_account") || "").trim();
-    if (!v) return "";
-    return String(v).replace(/^act_/, ""); // store digits only
+    return String(v).replace(/^act_/, "");
   });
 
-  const [selectedPageId, setSelectedPageId] = useState(() => lsGet(resolvedUser, "smartmark_last_selected_pageId") || "");
+  const [selectedPageId, setSelectedPageId] = useState(() => {
+    const loggedInUser = getUserFromStorage();
+    if (loggedInUser) {
+      return localStorage.getItem(withUser(loggedInUser, "smartmark_last_selected_pageId")) || "";
+    }
+    return lsGet(resolvedUser, "smartmark_last_selected_pageId") || "";
+  });
 
   const [fbConnected, setFbConnected] = useState(() => {
     const conn = localStorage.getItem(FB_CONN_KEY);
@@ -4378,6 +4392,9 @@ useEffect(() => {
 // A missing or failed response NEVER disconnects FB.
 useEffect(() => {
   if (!fbConnected) return;
+  console.debug("[Setup Selection Restore]", {
+    resolvedUser, adminClientId, fbSelectionScope, selectedAccount, selectedPageId,
+  });
   const sid = getStoredSid();
   const headers = sid ? { 'x-sm-sid': sid } : {};
   const qs = adminClientId ? `?adminClientId=${encodeURIComponent(adminClientId)}` : '';
@@ -5015,9 +5032,9 @@ useEffect(() => {
     return; // Never touch TheBoss's localStorage keys in admin-client mode
   }
 
-  // Normal user mode
+  // Normal user mode — write ONLY to the user-namespaced key, never the bare key.
   if (hasValidConnectedAccount) {
-    lsSet(resolvedUser, "smartmark_last_selected_account", normalizedSelectedAccount, true);
+    lsSet(resolvedUser, "smartmark_last_selected_account", normalizedSelectedAccount, false);
     return;
   }
 
@@ -5046,9 +5063,9 @@ useEffect(() => {
     return; // Never touch TheBoss's localStorage keys in admin-client mode
   }
 
-  // Normal user mode
+  // Normal user mode — write ONLY to the user-namespaced key, never the bare key.
   if (hasValidConnectedPage) {
-    lsSet(resolvedUser, "smartmark_last_selected_pageId", normalizedSelectedPageId, true);
+    lsSet(resolvedUser, "smartmark_last_selected_pageId", normalizedSelectedPageId, false);
     return;
   }
 
@@ -5098,6 +5115,35 @@ useEffect(() => {
   }).catch(() => {});
   // eslint-disable-next-line
 }, [selectedAccount, selectedPageId, fbConnected, adminClientId, adAccounts.length]);
+
+// ── Selection guards ────────────────────────────────────────────────────────
+// After accounts/pages load, clear any selectedAccount/selectedPageId that
+// is not in the currently loaded list. This is the last line of defence
+// against a stale selection surviving login cleanup or a context switch.
+useEffect(() => {
+  if (adminClientId) return; // admin-client uses its own clear-on-switch logic
+  if (!adAccounts.length) return; // list not loaded yet — don't clear prematurely
+  if (!selectedAccount) return;
+  const available = adAccounts.map((a) => String(a.id || "").replace(/^act_/, "").trim()).filter(Boolean);
+  if (!available.includes(String(selectedAccount).replace(/^act_/, "").trim())) {
+    console.debug("[Setup Selection Guard] cleared stale account", { selectedAccount, available });
+    setSelectedAccount("");
+  }
+  // eslint-disable-next-line
+}, [adAccounts, adminClientId]);
+
+useEffect(() => {
+  if (adminClientId) return;
+  if (!pages.length) return;
+  if (!selectedPageId) return;
+  const available = pages.map((p) => String(p.id || "").trim()).filter(Boolean);
+  if (!available.includes(String(selectedPageId).trim())) {
+    console.debug("[Setup Selection Guard] cleared stale page", { selectedPageId, available });
+    setSelectedPageId("");
+  }
+  // eslint-disable-next-line
+}, [pages, adminClientId]);
+// ────────────────────────────────────────────────────────────────────────────
 
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
