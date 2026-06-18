@@ -50,12 +50,14 @@ All server state lives in a single LowDB JSON file (`server/db.js`). Key collect
 | `call_tracking_events` | Twilio inbound call log |
 | `call_recordings` | Twilio recording metadata (orphans when no matching call event) |
 | `landing_leads` | Schedule Service form submissions |
+| `fb_selections` | Saved Facebook ad account + page per ownerKey |
+| `campaign_drafts` | PAUSED Meta campaigns created for review before launch |
 
 On Render, `DATA_DIR` defaults to `/var/data/smartmark` (persistent disk) or `/tmp` (ephemeral). Locally it uses `server/data/`.
 
 ## Identity: ownerKey and sm_sid
 
-The most important backend concept. Every user-owned resource (FB token, optimizer state, etc.) is keyed by an `ownerKey`:
+The most important backend concept. Every user-owned resource (FB token, optimizer state, FB selection, etc.) is keyed by an `ownerKey`:
 - Format `user:<username>` when a session is linked to a logged-in user
 - Falls back to the raw session SID string when not linked
 
@@ -63,9 +65,79 @@ Session SID (`sm_sid`) is set as a cookie **and** stored in `localStorage` under
 
 **Do not change ownerKey generation logic or SID persistence** — token and campaign ownership depends on it surviving OAuth redirects, Stripe redirects, and page refreshes.
 
-## Facebook token storage
+## Admin-client isolation
 
+TheBoss (admin) can manage individual clients (e.g. Max at `powermaxgen@yahoo.com`) via `?adminClientId=powermaxgen@yahoo.com` in the URL. This mode has strict isolation rules that span both frontend and backend.
+
+### URL is authoritative
+`adminClientId` is always read from the URL query string first. `localStorage.sm_admin_target_client_id` is a secondary hint only — it must not force client mode when the URL has no `adminClientId`.
+
+### Backend ownerKey routing
+When `adminClientId` is present in a request body or query, backend routes resolve the ownerKey as `user:<adminClientId>` (the client's key), not the admin's key. This applies to:
+- `POST /api/facebook/selection` — saves under the client's ownerKey
+- `GET /api/facebook/selection?adminClientId=...` — reads from the client's ownerKey
+- `POST /api/facebook/create-draft` / `launch-draft` — uses client's FB token
+- Facebook OAuth callback — when `state.adminClientId` is present and requester is verified admin, token is stored under `user:<adminClientId>` only (not under the admin's SID)
+
+### Frontend storage namespacing
+All per-user localStorage keys follow the pattern `u:<namespace>:<key>`. The namespace depends on context:
+
+| Context | Namespace | Example key |
+|---|---|---|
+| Logged-in TheBoss own dashboard | `u:TheBoss:key` | `u:TheBoss:draft_form_creatives_v3` |
+| Admin managing Max | `u:adminClient:powermaxgen@yahoo.com:key` | `u:adminClient:powermaxgen@yahoo.com:draft_form_creatives_v3` |
+| Anonymous session | `u:anon:key` or `u:<sid>:key` | — |
+
+**Never write client data to TheBoss's namespace, the bare (non-namespaced) key, or another client's namespace.**
+
+### FormPage namespacing
+`FormPage.js` uses `getUserNS()` (reads `sm_user_ns_v1`) to build `u:<ns>:key` via `nsKey(baseKey)`. In admin mode, the raw `lsSet`/`ssSet` wrappers would write to TheBoss's namespace. For creative draft keys specifically, admin-mode writes must use explicit `localStorage.setItem("u:adminClient:" + adminClientId + ":" + key, ...)`.
+
+### CampaignSetup isolation
+- `adminClientId` is computed synchronously from URL/localStorage at render time (not a React state)
+- Draft re-hydration reads from `u:adminClient:<id>:*` in admin mode, then returns early — never touches TheBoss's keys
+- When `adminClientId` transitions from non-empty to `""`, the `_prevAdminClientIdRef` effect clears all client-derived React state immediately
+- `isExitingAdminClientModeRef` (a `useRef`) is set to `true` in `exitClientMode()` before state clears, and checked in the server-save effect to skip any race-window write
+
+### Login namespace cleanup
+`Login.js` clears stale bare/legacy selection keys on every successful login:
+- Removes `smartmark_last_selected_account`, `smartmark_last_selected_pageId`, `smartmark_fb_connected`
+- Sets `sm_user_ns_v1` to `backendUsername` so `lsGet` fallbacks point to the right user
+
+## Facebook connection and selection
+
+### Connection state machine
+`CampaignSetup.js` maintains two FB states:
+- `fbConnected` (boolean) — only set to `false` when `GET /auth/facebook/status` returns `{ tokenPresent: true, expired: true }`. Never cleared on mere network failure or `connected: false` without a confirmed expired token.
+- `facebookConnectionStatus` (`"checking" | "connected" | "expired" | "not_connected" | "error"`) — drives UI copy without touching `fbConnected`
+
+### Selection persistence
+`server/routes/facebook.js` handles `GET/POST /api/facebook/selection`. Selections (ad account + page) are saved to `db.data.fb_selections` keyed by `ownerKey`. The frontend save effect includes a critical race guard: it checks that `selectedAccount` is actually in the currently-loaded `adAccounts` list before writing, preventing client selections from being written under TheBoss's ownerKey during the exit transition.
+
+### Facebook token storage
 `server/tokenStore.js` owns all FB token reads/writes. It wraps LowDB with an in-memory cache. Always use its exported functions (`getFbUserToken`, `setFbUserToken`, etc.) — never read `db.data.tokens` directly. Tokens are per-ownerKey; the legacy single-token path (`db.data.tokens.fbUserToken`) still exists for backward compatibility.
+
+### Facebook status endpoint
+`GET /auth/facebook/status` calls `await db.read()` first (fixes Render cold-start cache miss) and returns explicit `{ tokenPresent, expired, connected }` booleans. It does **not** delete the token on expiry check — token cleanup is user-initiated.
+
+### OAuth admin-client flow
+When admin connects FB for a client, the frontend passes `adminClientId` in the OAuth start URL. It is embedded in the HMAC-signed state payload (`makeOAuthState({ ..., adminClientId })`). The callback verifies admin status, looks up the client user, and stores the token under `user:<clientUsername>` only — never under the admin's SID or `user:TheBoss`.
+
+## Creative draft persistence
+
+### Key names
+- `CREATIVE_DRAFT_KEY = "draft_form_creatives_v3"` — primary draft
+- `"sm_setup_creatives_backup_v1"` — backup
+- `"draft_form_creatives"` — sessionStorage version
+
+### Namespace rule
+| Mode | FormPage writes to | CampaignSetup reads from |
+|---|---|---|
+| Normal user | `u:<getUserNS()>:draft_form_creatives_v3` via `lsSet()` | `u:<resolvedUser>:draft_form_creatives_v3` via `lsGet()` |
+| Admin client | `u:adminClient:<id>:draft_form_creatives_v3` (explicit write) | `u:adminClient:<id>:draft_form_creatives_v3` (explicit read, then `return`) |
+
+### Draft validation
+`applyDraft()` in CampaignSetup calls `isDraftForActiveCtx(draftObj, resolvedUser)` which compares `draftObj.ctxKey` against the active context key. If the active context is empty, the draft is accepted unconditionally. Drafts also carry `adminClientId` in the payload so wrong-client drafts can be detected.
 
 ## Optimizer pipeline
 
@@ -87,9 +159,9 @@ The autorunner starts inside `routes/auth.js` module load — **do not also star
 
 | File | Why high-risk |
 |---|---|
-| `server/routes/auth.js` | Identity + FB connect + optimizer wiring + Meta API logging — 5 jobs in one file |
-| `src/pages/CampaignSetup.js` | Auth/billing/FB/creative/launch continuity all converge here |
-| `src/pages/FormPage.js` (if present) | Creative draft persistence, user namespace, active context |
+| `server/routes/auth.js` | Identity + FB connect + optimizer wiring + Meta API logging — 5 jobs in one file; FB OAuth callback stores tokens and must preserve admin-client vs normal-user paths |
+| `src/pages/CampaignSetup.js` | Auth/billing/FB/creative/launch continuity all converge here; admin-client isolation logic is spread across many effects |
+| `src/pages/FormPage.js` | Creative draft persistence, user namespace (`getUserNS()`), active context key, AI chat + creative confirmation flow |
 | `server/smartCampaignEngine/index.js` | Meta Graph helpers and campaign execution policy |
 | `server/optimizerAction.js` | Actually mutates live Meta campaigns |
 | `server/server.js` | Middleware ordering matters; Stripe raw body must be captured before JSON parser |
@@ -126,3 +198,4 @@ Routes live in `server/routes/twilio.js`. Per-slug config (`CALL_CONFIGS`) maps 
 - Optimizer state field names used across multiple modules
 - `vercel.json` rewrite rules
 - Legacy Stripe price IDs (grandfathered subscribers)
+- `CALL_CONFIGS` in `twilio.js` — live client numbers
