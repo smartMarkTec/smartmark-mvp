@@ -3333,30 +3333,81 @@ useEffect(() => {
   };
 }, []);
 
-// Server-side FB status verification: fixes rehydration when localStorage flag is
-// missing (different device, cleared cache) or when the token expired server-side.
+// Server-side FB token verification.
+// Rules (in priority order):
+//   1. Only set fbConnected → false when the server EXPLICITLY returns
+//      { tokenPresent: true, expired: true } — i.e. a token exists but is past
+//      its expiry timestamp. Any other non-connected response is treated as
+//      "inconclusive" and the local connected state is preserved.
+//   2. A fetch failure, empty response, or { connected: false } without
+//      tokenPresent:true+expired:true MUST NOT disconnect the user.
+//   3. If the server says connected:true, repair localStorage and confirm
+//      the connected state.
 useEffect(() => {
   let cancelled = false;
+
+  // Only show "checking" banner if we don't already know we're connected locally.
+  // This prevents the "Connected → Checking → Connected" flicker for returning users.
+  if (!fbConnected) setFbConnectionStatus("checking");
+
   authFetch('/facebook/status')
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      if (cancelled || !data) return;
-      if (data.expired) {
-        localStorage.removeItem(FB_CONN_KEY);
-        if (!cancelled) { setFbConnected(false); setFbExpired(true); }
+      if (cancelled) return;
+
+      console.debug('[FB Status]', data);
+
+      if (!data) {
+        // Non-ok HTTP response or parse failure — treat as inconclusive, never disconnect.
+        if (!cancelled) setFbConnectionStatus(fbConnected ? "connected" : "error");
         return;
       }
-      if (data.connected) {
-        if (!cancelled) setFbExpired(false);
-        // Repair localStorage flag if it was missing (e.g. different browser/device)
+
+      // ── Definitively expired: server found the token AND it is past expiresAt ──
+      if (data.tokenPresent === true && data.expired === true) {
+        try { localStorage.removeItem(FB_CONN_KEY); } catch {}
+        if (!cancelled) {
+          setFbConnected(false);
+          setFbExpired(true);
+          setFbConnectionStatus("expired");
+        }
+        return;
+      }
+
+      // ── Server confirms token is valid ──
+      if (data.connected === true) {
         try {
           const raw = localStorage.getItem(FB_CONN_KEY);
           if (!raw) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
         } catch {}
-        if (!cancelled) setFbConnected(true);
+        if (!cancelled) {
+          setFbExpired(false);
+          setFbConnectionStatus("connected");
+          setFbConnected(true);
+        }
+        return;
+      }
+
+      // ── Server says not connected but NOT due to a confirmed expired token ──
+      // Could be: ownerKey mismatch, cold-start db miss, session drift, etc.
+      // Trust localStorage / existing fbConnected state — do NOT disconnect.
+      if (!cancelled) {
+        if (fbConnected) {
+          // Keep showing connected; the adaccounts fetch will confirm or deny.
+          setFbConnectionStatus("connected");
+        } else {
+          setFbConnectionStatus("not_connected");
+        }
       }
     })
-    .catch(() => {});
+    .catch(() => {
+      // Network error / fetch failure — never disconnect on this.
+      if (!cancelled) {
+        console.debug('[FB Status] fetch error — keeping existing state');
+        setFbConnectionStatus(fbConnected ? "connected" : "error");
+      }
+    });
+
   return () => { cancelled = true; };
   // eslint-disable-next-line
 }, []);
@@ -3365,6 +3416,18 @@ useEffect(() => {
 
   const [adAccounts, setAdAccounts] = useState([]);
   const [fbExpired, setFbExpired] = useState(false);
+  // "checking" | "connected" | "expired" | "not_connected" | "error"
+  // Initialised to "connected" when localStorage already says connected so the
+  // first render never shows "Checking…" for a returning user.
+  const [facebookConnectionStatus, setFbConnectionStatus] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FB_CONN_KEY);
+      if (!raw) return "not_connected";
+      const { connected, time } = JSON.parse(raw);
+      if (connected && time && Date.now() - Number(time) < FB_CONN_MAX_AGE) return "connected";
+    } catch {}
+    return "not_connected";
+  });
   const [metaDraft, setMetaDraft] = useState(null);
   const [draftCreatingState, setDraftCreatingState] = useState(null);
   const [draftError, setDraftError] = useState(null);
@@ -4271,19 +4334,22 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [fbConnected, pages.length]);
 
-// Load saved selection from server — authoritative fallback when localStorage is empty
-// (different device, cleared cache, or namespace mismatch after Stripe/OAuth redirect).
+// Load saved selection from server — authoritative fallback when localStorage is empty.
+// A missing or failed selection response NEVER disconnects FB — it only means
+// no saved selection exists yet (user will select from dropdowns).
 useEffect(() => {
   if (adminClientId) return;
   if (!fbConnected) return;
   const sid = getStoredSid();
   const headers = sid ? { 'x-sm-sid': sid } : {};
-  fetch(`/api/facebook/selection${adminClientId ? `?adminClientId=${encodeURIComponent(adminClientId)}` : ''}`, {
+  fetch('/api/facebook/selection', {
     credentials: 'include',
     headers,
   })
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
+      console.debug('[FB Selection]', data);
+      // Never touch fbConnected here — missing selection ≠ not authenticated
       if (!data?.ok) return;
       if (data.adAccountId) setSelectedAccount((prev) => prev || String(data.adAccountId).replace(/^act_/, ''));
       if (data.pageId) setSelectedPageId((prev) => prev || String(data.pageId));
@@ -6955,15 +7021,23 @@ ${pendingTest ? `
 
           <div style={{ textAlign: "center", maxWidth: 560 }}>
             <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, marginBottom: 8 }}>
-              {fbExpired
+              {facebookConnectionStatus === "checking"
+                ? "Checking Facebook connection…"
+                : facebookConnectionStatus === "expired"
                 ? "Facebook connection expired — reconnect"
+                : facebookConnectionStatus === "error"
+                ? "Facebook connection check failed — try refreshing"
                 : fbConnected
                 ? "Facebook Ads Connected"
                 : "Connect your ad account"}
             </div>
             <div style={{ color: "#64748b", fontWeight: 700, fontSize: 15, lineHeight: 1.7 }}>
-              {fbExpired
+              {facebookConnectionStatus === "checking"
+                ? "Verifying your Meta connection…"
+                : facebookConnectionStatus === "expired"
                 ? "Your Facebook token has expired. Click below to reconnect and restore access."
+                : facebookConnectionStatus === "error"
+                ? "A temporary network issue prevented the connection check. Your local connection state has been preserved."
                 : fbConnected
                 ? "Your Meta connection is active. Smartemark can now read campaign data, monitor performance, and manage optimization decisions."
                 : "Start here first. Once connected, you’ll be able to review creatives and finish campaign setup."}
@@ -7059,7 +7133,13 @@ ${pendingTest ? `
               boxShadow: "0 10px 24px rgba(79,70,229,0.18)",
             }}
           >
-            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+            {facebookConnectionStatus === "checking"
+              ? "Checking…"
+              : facebookConnectionStatus === "expired" || fbExpired
+              ? "Reconnect Facebook"
+              : fbConnected
+              ? "Facebook Ads Connected"
+              : "Connect Facebook Ads"}
           </button>
 
           {/* ── Account + Page dropdowns ── */}

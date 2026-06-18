@@ -692,26 +692,42 @@ router.get('/facebook/ping', (req, res) => {
 
 router.get('/facebook/status', async (req, res) => {
   try {
+    // Ensure db.data is populated before token lookup.
+    // On Render cold-start the in-process cache is empty until the first read.
+    try { await db.read(); } catch {}
+
     const ownerKey = ownerKeyFromReq(req);
     const token = getFbUserToken(ownerKey);
     const meta = getFbUserTokenMeta(ownerKey);
 
-    if (!token) return res.json({ ok: true, connected: false });
+    if (!token) {
+      return res.json({ ok: true, connected: false, tokenPresent: false, expired: false });
+    }
 
     const expiresAt = Number(meta?.expiresAt || 0);
+
+    // Only report expired when the metadata is set AND clearly in the past.
+    // Do NOT delete the token here — token clearing should be user-initiated
+    // (reconnect flow). A status check should never permanently destroy credentials.
     if (expiresAt && Date.now() > expiresAt) {
-      await clearFbUserToken(ownerKey);
-      await clearFbUserTokenMeta(ownerKey);
-      return res.json({ ok: true, connected: false, expired: true });
+      return res.json({ ok: true, connected: false, tokenPresent: true, expired: true, expiresAt });
     }
 
     const daysLeft = expiresAt
       ? Math.max(0, Math.ceil((expiresAt - Date.now()) / (1000 * 60 * 60 * 24)))
       : null;
 
-    return res.json({ ok: true, connected: true, expiresAt: expiresAt || null, daysLeft });
+    return res.json({
+      ok: true,
+      connected: true,
+      tokenPresent: true,
+      expired: false,
+      expiresAt: expiresAt || null,
+      daysLeft,
+    });
   } catch {
-    return res.json({ ok: true, connected: false });
+    // Network/db error — return safe defaults; never return expired: true on error.
+    return res.json({ ok: true, connected: false, tokenPresent: false, expired: false, error: 'status_check_failed' });
   }
 });
 
