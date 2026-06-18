@@ -56,10 +56,21 @@ router.post('/twilio/voice/:slug', async (req, res) => {
 
   const backendUrl = process.env.BACKEND_URL || 'https://smartmark-mvp.onrender.com';
   const statusCallbackUrl = `${backendUrl}/api/twilio/status/${req.params.slug}`;
+  const recordingEnabled = process.env.ENABLE_ASPEN_CALL_RECORDING === 'true';
+
+  const sayNotice = recordingEnabled
+    ? '  <Say>This call may be recorded for quality and tracking.</Say>\n'
+    : '';
+
+  const recordingAttrs = recordingEnabled
+    ? `record="record-from-answer-dual"
+    recordingStatusCallback="${backendUrl}/api/twilio/recording/${req.params.slug}"
+    recordingStatusCallbackMethod="POST"`
+    : '';
 
   res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${config.twilioNumber}">
+${sayNotice}  <Dial callerId="${config.twilioNumber}" ${recordingAttrs}>
     <Number
       statusCallback="${statusCallbackUrl}"
       statusCallbackEvent="initiated ringing answered completed"
@@ -107,6 +118,63 @@ router.post('/twilio/status/:slug', async (req, res) => {
     await db.write();
   } catch (err) {
     console.error('[twilio/status] db write error:', err.message);
+  }
+
+  res.status(204).end();
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   POST /api/twilio/recording/:slug
+   Twilio recording status callback — saves RecordingSid, URL, duration, etc.
+   Attaches to the matching call_tracking_events record by CallSid if found;
+   otherwise writes an orphan entry into call_recordings.
+───────────────────────────────────────────────────────────────────────── */
+router.post('/twilio/recording/:slug', async (req, res) => {
+  const {
+    CallSid,
+    RecordingSid,
+    RecordingUrl,
+    RecordingStatus,
+    RecordingDuration,
+    RecordingChannels,
+  } = req.body || {};
+
+  const recordingData = {
+    callSid: CallSid || null,
+    recordingSid: RecordingSid || null,
+    recordingUrl: RecordingUrl || null,
+    recordingStatus: RecordingStatus || null,
+    recordingDuration: RecordingDuration != null ? Number(RecordingDuration) : null,
+    recordingChannels: RecordingChannels != null ? Number(RecordingChannels) : null,
+    landingPageSlug: req.params.slug,
+  };
+
+  try {
+    await db.read();
+
+    if (!Array.isArray(db.data.call_tracking_events)) db.data.call_tracking_events = [];
+    if (!Array.isArray(db.data.call_recordings)) db.data.call_recordings = [];
+
+    const existing = db.data.call_tracking_events.find(e => e.callSid === CallSid);
+    if (existing) {
+      existing.recordingSid = recordingData.recordingSid;
+      existing.recordingUrl = recordingData.recordingUrl;
+      existing.recordingStatus = recordingData.recordingStatus;
+      existing.recordingDuration = recordingData.recordingDuration;
+      existing.recordingChannels = recordingData.recordingChannels;
+      existing.recordingUpdatedAt = new Date().toISOString();
+    } else {
+      db.data.call_recordings.push({
+        id: crypto.randomUUID(),
+        ...recordingData,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    await db.write();
+  } catch (err) {
+    console.error('[twilio/recording] db write error:', err.message);
   }
 
   res.status(204).end();
