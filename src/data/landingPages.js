@@ -55,7 +55,8 @@ const LANDING_PAGES = {
     metaDescription: "Fast, reliable AC service in Houston. Call Aspen Air Conditioning & Heating for AC tune-ups, service, and maintenance.",
     logo: "/client-assets/aspen-ac-logo.png",
     favicon: "/client-assets/aspen-ac-logo.png",
-    metaPixelId: null,
+    metaPixelId: "2079374046338979",
+    scheduleUrl: "tel:7138822767",
     backgroundImage: null,
   },
 };

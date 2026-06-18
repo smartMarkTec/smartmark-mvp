@@ -33,11 +33,12 @@ function ShieldIcon() {
 }
 
 /* ─────────────────── Big orange call button ─────────────────── */
-function CallBtn({ phone, label, size = "md" }) {
+function CallBtn({ phone, label, size = "md", onClick }) {
   const big = size === "lg";
   return (
     <a
       href={`tel:${phone}`}
+      onClick={onClick}
       style={{
         display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
         background: "#f97316", color: "#fff", fontFamily: FONT, fontWeight: 800,
@@ -52,6 +53,31 @@ function CallBtn({ phone, label, size = "md" }) {
       onMouseLeave={(e) => { e.currentTarget.style.background = "#f97316"; e.currentTarget.style.transform = "translateY(0)"; }}
     >
       <PhoneIcon size={big ? 20 : 15} />
+      {label}
+    </a>
+  );
+}
+
+/* ─────────────────── Schedule / secondary button ─────────────────── */
+function ScheduleBtn({ href, label, size = "md", onClick }) {
+  const big = size === "lg";
+  return (
+    <a
+      href={href}
+      onClick={onClick}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+        background: "transparent", color: "#fff", fontFamily: FONT, fontWeight: 700,
+        fontSize: big ? "1.05rem" : "0.9rem",
+        padding: big ? "15px 30px" : "10px 20px",
+        borderRadius: 6, textDecoration: "none",
+        border: "2px solid rgba(255,255,255,0.55)",
+        transition: "border-color 0.12s, background 0.12s",
+        whiteSpace: "nowrap", boxSizing: "border-box",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.55)"; e.currentTarget.style.background = "transparent"; }}
+    >
       {label}
     </a>
   );
@@ -105,7 +131,29 @@ export default function LandingPage({ slug: slugProp }) {
     };
   }, [page]);
 
-  /* TODO: inject Meta Pixel when page.metaPixelId is set */
+  /* ── Meta Pixel: load once, init + PageView on mount ── */
+  useEffect(() => {
+    if (!page?.metaPixelId) return;
+
+    // Inject the fbq stub + script only once per page session
+    if (!window.fbq) {
+      const fbq = function() {
+        fbq.callMethod ? fbq.callMethod.apply(fbq, arguments) : fbq.queue.push(arguments);
+      };
+      if (!window._fbq) window._fbq = fbq;
+      fbq.push = fbq; fbq.loaded = true; fbq.version = "2.0"; fbq.queue = [];
+      window.fbq = fbq;
+
+      const script = document.createElement("script");
+      script.id = "fb-pixel-script";
+      script.async = true;
+      script.src = "https://connect.facebook.net/en_US/fbevents.js";
+      document.head.appendChild(script);
+    }
+
+    window.fbq("init", page.metaPixelId);
+    window.fbq("track", "PageView");
+  }, [page?.metaPixelId]);
 
   if (!page) {
     return (
@@ -125,8 +173,20 @@ export default function LandingPage({ slug: slugProp }) {
     );
   }
 
+  const track = (event, data = {}) => {
+    if (window.fbq) window.fbq("track", event, data);
+  };
+
   return (
     <div style={{ fontFamily: FONT, background: "#fff", minHeight: "100vh", overflowX: "hidden" }}>
+      {/* Pixel noscript fallback */}
+      {page.metaPixelId && (
+        <noscript>
+          <img height="1" width="1" style={{ display: "none" }} alt=""
+            src={`https://www.facebook.com/tr?id=${page.metaPixelId}&ev=PageView&noscript=1`}
+          />
+        </noscript>
+      )}
 
       {/* ════════════ TOP BAR ════════════ */}
       <div style={{ background: "#0a1628", padding: "0 20px" }}>
@@ -160,6 +220,11 @@ export default function LandingPage({ slug: slugProp }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <a
               href={`tel:${page.phone}`}
+              onClick={() => track("Contact", {
+                content_name: "Aspen Call Button",
+                business_name: page.businessName,
+                phone: page.phone,
+              })}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
                 background: "#f97316", color: "#fff", fontFamily: FONT,
@@ -227,7 +292,30 @@ export default function LandingPage({ slug: slugProp }) {
             {page.subheadline}
           </p>
 
-          <CallBtn phone={page.phone} label={page.primaryButtonText} size="lg" />
+          {/* Dual CTA — wraps on mobile */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
+            <CallBtn
+              phone={page.phone}
+              label={page.primaryButtonText}
+              size="lg"
+              onClick={() => track("Contact", {
+                content_name: "Aspen Call Button",
+                business_name: page.businessName,
+                phone: page.phone,
+              })}
+            />
+            {page.scheduleUrl && (
+              <ScheduleBtn
+                href={page.scheduleUrl}
+                label="Schedule Service"
+                size="lg"
+                onClick={() => track("Lead", {
+                  content_name: "Aspen Schedule Service Button",
+                  business_name: page.businessName,
+                })}
+              />
+            )}
+          </div>
 
           <div style={{ marginTop: 18, color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
             {page.serviceArea}
@@ -247,7 +335,15 @@ export default function LandingPage({ slug: slugProp }) {
           <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 0 22px", maxWidth: 560 }}>
             {page.offer}
           </p>
-          <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} />
+          <CallBtn
+            phone={page.phone}
+            label={`Call: ${page.phoneDisplay}`}
+            onClick={() => track("Contact", {
+              content_name: "Aspen Call Button",
+              business_name: page.businessName,
+              phone: page.phone,
+            })}
+          />
         </div>
       </div>
 
@@ -315,7 +411,29 @@ export default function LandingPage({ slug: slugProp }) {
           <p style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.95rem", margin: "0 0 26px", lineHeight: 1.6 }}>
             Call {page.businessName} to schedule service.
           </p>
-          <CallBtn phone={page.phone} label={page.primaryButtonText} size="lg" />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center" }}>
+            <CallBtn
+              phone={page.phone}
+              label={page.primaryButtonText}
+              size="lg"
+              onClick={() => track("Contact", {
+                content_name: "Aspen Call Button",
+                business_name: page.businessName,
+                phone: page.phone,
+              })}
+            />
+            {page.scheduleUrl && (
+              <ScheduleBtn
+                href={page.scheduleUrl}
+                label="Schedule Service"
+                size="lg"
+                onClick={() => track("Lead", {
+                  content_name: "Aspen Schedule Service Button",
+                  business_name: page.businessName,
+                })}
+              />
+            )}
+          </div>
         </div>
       </div>
 
