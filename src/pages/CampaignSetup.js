@@ -121,6 +121,15 @@ async function stripeFetch(path, opts = {}) {
 }
 
 
+// Appends ?adminClientId=<id> to a path when in admin mode.
+// Use this for every navigate("/form") and navigate("/setup") call so admin context
+// is preserved in the URL — FormPage reads adminClientId from the URL only.
+function withAdminClientQuery(path, adminClientId) {
+  if (!adminClientId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}adminClientId=${encodeURIComponent(adminClientId)}`;
+}
+
 /* ======================= Visual Theme (Landing-style tech palette) ======================= */
 const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
@@ -3483,6 +3492,10 @@ useEffect(() => {
   const [copyEditHeadline, setCopyEditHeadline] = useState("");
   const [copyEditLoading, setCopyEditLoading] = useState(false);
   const [copyEditError, setCopyEditError] = useState(null);
+  // 3-dot creative replace menu
+  const [creativeMenuOpen, setCreativeMenuOpen] = useState(false);
+  // null | { action: "ai_image"|"upload_photo"|"upload_video", confirmed: false }
+  const [creativeReplaceConfirm, setCreativeReplaceConfirm] = useState(null);
 const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(false);
   const [campaignSettingsMap, setCampaignSettingsMap] = useState(() =>
     readCampaignSettingsMap(resolvedUser)
@@ -3500,21 +3513,30 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   });
 
   const state = location.state || {};
-  // adminClientId: route state → URL param → separate localStorage key written by FormPage
-  const adminClientId = (() => {
-    const fromState = String(state.adminClientId || "").trim();
-    if (fromState) return fromState;
+
+  // adminClientId: URL query param is the ONLY authority for client mode.
+  // Route state must never be used to enter admin-client mode — it is too easy for
+  // stale state to survive navigation and silently keep TheBoss in the wrong context.
+  // If the URL is clean (/setup with no ?adminClientId=), this is always TheBoss normal mode.
+  const adminClientId = useMemo(() => {
     try {
-      const fromUrl = new URLSearchParams(location.search || "").get("adminClientId") || "";
-      if (fromUrl) return fromUrl;
-    } catch {}
-    try { return localStorage.getItem("sm_admin_target_client_id") || ""; } catch {}
-    return "";
-  })();
-  // adminClientBusinessName: route state → separate localStorage key
+      return new URLSearchParams(location.search || "").get("adminClientId") || "";
+    } catch {
+      return "";
+    }
+  }, [location.search]);
+
+  // Route state may carry supplemental client data (business name, images, etc.)
+  // but ONLY trust it when it belongs to the same client the URL identifies.
+  const routeStateAdminClientId = String(state.adminClientId || "").trim();
+  const routeStateMatchesClient = !!(adminClientId && routeStateAdminClientId === adminClientId);
+
+  // adminClientBusinessName: matching route state → localStorage label
   const adminClientBusinessName = (() => {
-    const fromState = String(state.adminClientBusinessName || "").trim();
-    if (fromState) return fromState;
+    if (routeStateMatchesClient) {
+      const fromState = String(state.adminClientBusinessName || "").trim();
+      if (fromState) return fromState;
+    }
     try { return localStorage.getItem("sm_admin_target_client_label") || ""; } catch {}
     return "";
   })();
@@ -3569,6 +3591,11 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     setPublicSummaryMap({});
     setOptimizerCreativeMap({});
     setCampaignCount(0);
+    // Creative/copy state — clear so client draft never bleeds into TheBoss normal view
+    setDraftCreatives({ images: [], mediaSelection: "image" });
+    setPreviewCopy({ headline: "", body: "", link: "" });
+    // FB status — reset so TheBoss status re-verifies from server on next /setup load
+    setFbConnectionStatus("not_connected");
 
     console.debug('[CampaignSetup] exitClientMode — all client-derived state cleared');
     navigate("/admin/clients");
@@ -3840,6 +3867,19 @@ useEffect(() => {
   }
 
   const applyDraft = (draftObj) => {
+    // Reject drafts that belong to a different client context.
+    // In admin mode: only accept drafts whose adminClientId matches the current client.
+    // In normal mode: reject any draft that has an adminClientId field.
+    const draftClientId = String(draftObj?.adminClientId || "").trim();
+    if (draftClientId !== (adminClientId || "")) {
+      console.debug("[Creative Draft Rejected - wrong client]", {
+        currentAdminClientId: adminClientId || null,
+        draftAdminClientId: draftClientId || null,
+        ctxKey: draftObj?.ctxKey || null,
+      });
+      return false;
+    }
+
     if (!isDraftForActiveCtx(draftObj, resolvedUser)) return false;
 
     const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
@@ -5478,7 +5518,7 @@ const handleDeleteCampaign = async (campaignId) => {
     // Mint a fresh ctxKey so FormPage's restore logic never matches the old campaign's draft
     const freshCtx = `${Date.now()}|new||`;
     setActiveCtx(freshCtx, resolvedUser);
-    navigate("/form");
+    navigate(withAdminClientQuery("/form", adminClientId));
   };
 
 const adminActive = true;
@@ -6665,10 +6705,11 @@ ${pendingTest ? `
       <div style={{ width: "100%", maxWidth: 1180, padding: "22px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <button
-            onClick={() => navigate("/form", {
+            onClick={() => navigate(withAdminClientQuery("/form", adminClientId), {
               state: {
                 imageUrls: Array.isArray(draftCreatives?.images) ? draftCreatives.images.filter(Boolean) : [],
                 ctxKey: getActiveCtx(resolvedUser) || "",
+                ...(adminClientId ? { adminClientId } : {}),
               },
             })}
             style={{
@@ -7504,18 +7545,162 @@ ${pendingTest ? `
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-                    <div
-                      style={{
-                        padding: "7px 11px",
-                        borderRadius: 999,
-                        background: "#eef2ff",
-                        color: "#4f46e5",
-                        fontWeight: 900,
-                        fontSize: 12,
-                      }}
-                    >
-                      {isDraftView ? "Draft Ready" : isTesting ? "A/B Testing" : "Monitoring"}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div
+                        style={{
+                          padding: "7px 11px",
+                          borderRadius: 999,
+                          background: "#eef2ff",
+                          color: "#4f46e5",
+                          fontWeight: 900,
+                          fontSize: 12,
+                        }}
+                      >
+                        {isDraftView ? "Draft Ready" : isTesting ? "A/B Testing" : "Monitoring"}
+                      </div>
+
+                      {/* ── 3-dot creative replace menu ── */}
+                      <div style={{ position: "relative" }}>
+                        <button
+                          type="button"
+                          title="Creative options"
+                          onClick={() => { setCreativeMenuOpen((v) => !v); setCreativeReplaceConfirm(null); }}
+                          style={{
+                            background: "none",
+                            border: "1px solid #dbe4ff",
+                            borderRadius: 8,
+                            padding: "5px 8px",
+                            color: "#4f46e5",
+                            fontSize: 14,
+                            cursor: "pointer",
+                            lineHeight: 1,
+                          }}
+                        >
+                          <FaEllipsisV />
+                        </button>
+
+                        {creativeMenuOpen && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: "110%",
+                              background: "#ffffff",
+                              border: "1px solid #dbe4ff",
+                              borderRadius: 12,
+                              boxShadow: "0 8px 24px rgba(79,70,229,0.12)",
+                              padding: "6px 0",
+                              zIndex: 200,
+                              minWidth: 190,
+                            }}
+                          >
+                            {[
+                              { key: "ai_image",     label: "✨ Replace with AI Image" },
+                              { key: "upload_photo", label: "📷 Upload New Photo" },
+                              { key: "upload_video", label: "🎬 Upload New Video" },
+                            ].map(({ key, label }) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => {
+                                  setCreativeMenuOpen(false);
+                                  setCreativeReplaceConfirm({ action: key });
+                                }}
+                                style={{
+                                  width: "100%",
+                                  display: "block",
+                                  textAlign: "left",
+                                  padding: "8px 16px",
+                                  background: "none",
+                                  border: "none",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  color: "#111827",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                            <div style={{ borderTop: "1px solid #f0f0f8", margin: "4px 0" }} />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCreativeMenuOpen(false);
+                                setCopyEditPrimaryText(
+                                  aiCurrentPrimaryText || creativeMeta?.body || previewCopy?.body || body || ""
+                                );
+                                setCopyEditHeadline(
+                                  creativeMeta?.headline || previewCopy?.headline || headline || ""
+                                );
+                                setCopyEditError(null);
+                                setCopyEditMode(true);
+                              }}
+                              style={{
+                                width: "100%",
+                                display: "block",
+                                textAlign: "left",
+                                padding: "8px 16px",
+                                background: "none",
+                                border: "none",
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "#111827",
+                                cursor: "pointer",
+                              }}
+                            >
+                              ✏️ Edit Copy
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Creative replace confirmation panel */}
+                    {creativeReplaceConfirm && (
+                      <div style={{
+                        background: "#fffbeb",
+                        border: "1px solid #fcd34d",
+                        borderRadius: 10,
+                        padding: "10px 14px",
+                        fontSize: 12,
+                        maxWidth: 240,
+                        textAlign: "right",
+                      }}>
+                        <div style={{ fontWeight: 700, color: "#78350f", marginBottom: 6 }}>
+                          {selectedLiveCampaign && !isDraftView
+                            ? "This campaign is currently running. Replacing the creative may affect live ads. Continue?"
+                            : "Replace this creative?"}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            onClick={() => setCreativeReplaceConfirm(null)}
+                            style={{ background: "none", border: "1px solid #d4a000", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, color: "#78350f", cursor: "pointer" }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const action = creativeReplaceConfirm.action;
+                              setCreativeReplaceConfirm(null);
+                              if (selectedLiveCampaign && !isDraftView) {
+                                alert("Creative replacement saved in Smartemark. Apply-to-live-ad support will be added separately.");
+                              }
+                              navigate(
+                                withAdminClientQuery(`/form?creativeMode=${encodeURIComponent(action)}`, adminClientId),
+                                { state: adminClientId ? { adminClientId } : undefined }
+                              );
+                            }}
+                            style={{ background: "#4f46e5", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+                          >
+                            Continue
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {isDraftView && (
                       <button
                         type="button"

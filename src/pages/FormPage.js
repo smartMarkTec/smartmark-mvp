@@ -113,6 +113,14 @@ function ssRemove(baseKey) {
   } catch {}
 }
 
+// Appends ?adminClientId=<id> (or &adminClientId=<id>) to a path when in admin mode.
+// Always use this instead of hardcoded "/form" or "/setup" strings in navigate calls.
+function withAdminClientQuery(path, adminClientId) {
+  if (!adminClientId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}adminClientId=${encodeURIComponent(adminClientId)}`;
+}
+
 function getActiveCtx() {
   return ssGet(ACTIVE_CTX_KEY) || lsGet(ACTIVE_CTX_KEY) || "";
 }
@@ -912,7 +920,14 @@ export default function FormPage() {
   const [videoUploadError, setVideoUploadError] = useState("");
   const videoInputRef = React.useRef(null);
 
-  const [creativeSource, setCreativeSource] = useState("ai_image"); // "ai_image" | "upload_photo" | "upload_video"
+  const [creativeSource, setCreativeSource] = useState(() => {
+    // Pre-select creative mode when arriving from CampaignSetup 3-dot replace menu
+    try {
+      const v = new URLSearchParams(window.location.search).get("creativeMode") || "";
+      if (["ai_image", "upload_photo", "upload_video"].includes(v)) return v;
+    } catch {}
+    return "ai_image";
+  }); // "ai_image" | "upload_photo" | "upload_video"
   const [awaitingAiImageConfirm, setAwaitingAiImageConfirm] = useState(false); // waiting for yes/no after "Generate AI Image" card click
   const [copyGenerated, setCopyGenerated] = useState(false); // true once copy-only generation ran for upload modes
 
@@ -939,6 +954,14 @@ export default function FormPage() {
   const adminClientId = useMemo(() => {
     try {
       return new URLSearchParams(location.search).get("adminClientId") || "";
+    } catch { return ""; }
+  }, [location.search]);
+
+  // Optional creativeMode URL param — lets CampaignSetup 3-dot menu pre-select the mode
+  const creativeModeFromUrl = useMemo(() => {
+    try {
+      const v = new URLSearchParams(location.search).get("creativeMode") || "";
+      return ["ai_image", "upload_photo", "upload_video"].includes(v) ? v : "";
     } catch { return ""; }
   }, [location.search]);
   const [adminClientInfo, setAdminClientInfo] = useState(null);
@@ -2832,7 +2855,7 @@ async function generatePosterBPair(runToken) {
           <button
             onClick={() => {
               if (adminClientId) {
-                navigate("/setup", {
+                navigate(withAdminClientQuery("/setup", adminClientId), {
                   state: {
                     adminClientId,
                     adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",
@@ -3785,7 +3808,7 @@ async function generatePosterBPair(runToken) {
                 }).catch(() => {});
               } catch {}
 
-              navigate("/setup", {
+              navigate(withAdminClientQuery("/setup", adminClientId), {
                 state: {
                   ctxKey,
                   mediaType: "video",
@@ -3888,7 +3911,7 @@ async function generatePosterBPair(runToken) {
 
             console.debug("[Creative Draft Saved]", { ctxKey, adminClientId: adminClientId || null, mediaSelection: "image", imageUrls: imgA });
 
-            navigate("/setup", {
+            navigate(withAdminClientQuery("/setup", adminClientId), {
               state: {
                 ctxKey,
                 imageUrls: imgA,

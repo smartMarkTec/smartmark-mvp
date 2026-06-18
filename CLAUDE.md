@@ -69,8 +69,43 @@ Session SID (`sm_sid`) is set as a cookie **and** stored in `localStorage` under
 
 TheBoss (admin) can manage individual clients (e.g. Max at `powermaxgen@yahoo.com`) via `?adminClientId=powermaxgen@yahoo.com` in the URL. This mode has strict isolation rules that span both frontend and backend.
 
-### URL is authoritative
-`adminClientId` is always read from the URL query string first. `localStorage.sm_admin_target_client_id` is a secondary hint only — it must not force client mode when the URL has no `adminClientId`.
+### How each page resolves adminClientId
+
+**FormPage.js** — URL-only, no localStorage fallback:
+```js
+const adminClientId = useMemo(
+  () => new URLSearchParams(location.search).get("adminClientId") || "",
+  [location.search]
+);
+```
+Route state is *not* checked. If the URL doesn't contain `?adminClientId=`, FormPage will be in TheBoss normal mode regardless of what's in localStorage or route state.
+
+**CampaignSetup.js** — route state → URL param → localStorage:
+```js
+const adminClientId = (() => {
+  const fromState = String(state.adminClientId || "").trim();
+  if (fromState) return fromState;
+  const fromUrl = new URLSearchParams(location.search || "").get("adminClientId") || "";
+  if (fromUrl) return fromUrl;
+  return localStorage.getItem("sm_admin_target_client_id") || "";
+})();
+```
+
+### Navigation must preserve adminClientId in the URL
+
+Because FormPage only reads from the URL, **every navigation that goes to `/form` must include `?adminClientId=<id>` in the URL path**, not just in route state. Route state alone is not enough. Example:
+```js
+// CORRECT — preserves admin context in FormPage
+navigate(`/form?adminClientId=${encodeURIComponent(adminClientId)}`);
+
+// WRONG — FormPage won't see adminClientId
+navigate("/form", { state: { adminClientId } });
+```
+
+Navigations to `/setup` can use route state OR URL param — CampaignSetup checks both. But prefer the URL param for consistency and refresh-safety.
+
+### sm_admin_target_client_id localStorage key
+Written by FormPage and CampaignSetup when entering admin-client mode. Used only as a last-resort fallback in CampaignSetup (not in FormPage at all). `exitClientMode()` explicitly removes it. It must **not** force client mode when the URL has no `adminClientId` — if the URL is clean, treat as normal user mode even if this key exists.
 
 ### Backend ownerKey routing
 When `adminClientId` is present in a request body or query, backend routes resolve the ownerKey as `user:<adminClientId>` (the client's key), not the admin's key. This applies to:
@@ -136,8 +171,16 @@ When admin connects FB for a client, the frontend passes `adminClientId` in the 
 | Normal user | `u:<getUserNS()>:draft_form_creatives_v3` via `lsSet()` | `u:<resolvedUser>:draft_form_creatives_v3` via `lsGet()` |
 | Admin client | `u:adminClient:<id>:draft_form_creatives_v3` (explicit write) | `u:adminClient:<id>:draft_form_creatives_v3` (explicit read, then `return`) |
 
-### Draft validation
-`applyDraft()` in CampaignSetup calls `isDraftForActiveCtx(draftObj, resolvedUser)` which compares `draftObj.ctxKey` against the active context key. If the active context is empty, the draft is accepted unconditionally. Drafts also carry `adminClientId` in the payload so wrong-client drafts can be detected.
+### Draft payload fields
+Drafts carry `{ ctxKey, adminClientId?, savedAt, expiresAt, images, mediaSelection, ... }`. The `adminClientId` field is written when the draft was created in admin-client mode.
+
+### Wrong-client draft rejection rules
+Before applying a draft, check both fields:
+1. **Admin mode** (`currentAdminClientId` is set): reject any draft where `draft.adminClientId !== currentAdminClientId`.
+2. **Normal mode** (no `currentAdminClientId`): reject any draft where `draft.adminClientId` is non-empty.
+3. Log rejections: `console.debug("[Creative Draft Rejected - wrong client]", { currentAdminClientId, draftAdminClientId, ctxKey })`.
+
+`applyDraft()` in CampaignSetup also calls `isDraftForActiveCtx(draftObj, resolvedUser)` which compares `draftObj.ctxKey` against the active context key. If the active context is empty, the ctxKey check passes unconditionally.
 
 ## Optimizer pipeline
 
@@ -161,7 +204,7 @@ The autorunner starts inside `routes/auth.js` module load — **do not also star
 |---|---|
 | `server/routes/auth.js` | Identity + FB connect + optimizer wiring + Meta API logging — 5 jobs in one file; FB OAuth callback stores tokens and must preserve admin-client vs normal-user paths |
 | `src/pages/CampaignSetup.js` | Auth/billing/FB/creative/launch continuity all converge here; admin-client isolation logic is spread across many effects |
-| `src/pages/FormPage.js` | Creative draft persistence, user namespace (`getUserNS()`), active context key, AI chat + creative confirmation flow |
+| `src/pages/FormPage.js` | Creative draft persistence, user namespace (`getUserNS()`/`nsKey()`), active context key, AI image confirmation flow (`awaitingAiImageConfirm` + `triggerAiImageGeneration()`), compact creative pills in preview header |
 | `server/smartCampaignEngine/index.js` | Meta Graph helpers and campaign execution policy |
 | `server/optimizerAction.js` | Actually mutates live Meta campaigns |
 | `server/server.js` | Middleware ordering matters; Stripe raw body must be captured before JSON parser |
