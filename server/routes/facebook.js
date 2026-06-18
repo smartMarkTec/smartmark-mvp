@@ -89,10 +89,33 @@ router.get('/facebook/selection', async (req, res) => {
    POST /api/facebook/selection
    Saves the selected ad account and/or page to LowDB.
    Body: { adAccountId, pageId, adAccountName?, pageName?, adminClientId? }
+   When adminClientId is provided, the requester must be an admin — the
+   selection is saved under the CLIENT's ownerKey, not the admin's.
 ───────────────────────────────────────────────────────────────────────── */
 router.post('/facebook/selection', async (req, res) => {
   const { adAccountId, pageId, adAccountName, pageName, adminClientId } = req.body || {};
+
+  // If adminClientId is present, verify the requester is admin before allowing
+  // a cross-user write (prevents any authenticated user from overwriting another's selection).
+  if (adminClientId) {
+    await ensureCollections();
+    const sid = getSidFromReq(req);
+    const ADMIN_UN = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+    try {
+      const sess = (db.data.sessions || []).find((s) => String(s.sid) === sid);
+      const username = String(sess?.username || '').trim();
+      const user = (db.data.users || []).find((u) => String(u?.username || '').trim() === username);
+      const isAdmin = username === ADMIN_UN || user?.role === 'admin';
+      if (!isAdmin) {
+        return res.status(403).json({ ok: false, error: 'Admin access required for cross-user selection save.' });
+      }
+    } catch {
+      return res.status(403).json({ ok: false, error: 'Could not verify admin status.' });
+    }
+  }
+
   const ownerKey = resolveOwnerKey(req, adminClientId);
+  console.log('[FB Selection API] saving for ownerKey:', ownerKey);
 
   if (!adAccountId && !pageId) {
     return res.status(400).json({ ok: false, error: 'adAccountId or pageId required' });

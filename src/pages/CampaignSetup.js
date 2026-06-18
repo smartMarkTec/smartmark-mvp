@@ -3505,6 +3505,11 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     return "";
   })();
 
+  // Stable scope key for per-client localStorage isolation.
+  // In admin-client mode selections are namespaced under the client email,
+  // never under TheBoss's own user namespace.
+  const fbSelectionScope = adminClientId ? `adminClient:${adminClientId}` : resolvedUser;
+
   // Clears admin client session mode and returns to the admin client list.
   // Also scrubs localStorage keys that may have been written with client data while in client mode,
   // and resets React state so the TheBoss dashboard is clean on next render.
@@ -4368,28 +4373,25 @@ useEffect(() => {
 }, [fbConnected, pages.length]);
 
 // Load saved selection from server — authoritative fallback when localStorage is empty.
-// A missing or failed selection response NEVER disconnects FB — it only means
-// no saved selection exists yet (user will select from dropdowns).
+// Works in both normal mode (resolves to the user's ownerKey) and admin-client mode
+// (passes adminClientId so the backend resolves to the client's ownerKey).
+// A missing or failed response NEVER disconnects FB.
 useEffect(() => {
-  if (adminClientId) return;
   if (!fbConnected) return;
   const sid = getStoredSid();
   const headers = sid ? { 'x-sm-sid': sid } : {};
-  fetch('/api/facebook/selection', {
-    credentials: 'include',
-    headers,
-  })
+  const qs = adminClientId ? `?adminClientId=${encodeURIComponent(adminClientId)}` : '';
+  fetch(`/api/facebook/selection${qs}`, { credentials: 'include', headers })
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
       console.debug('[FB Selection]', data);
-      // Never touch fbConnected here — missing selection ≠ not authenticated
       if (!data?.ok) return;
       if (data.adAccountId) setSelectedAccount((prev) => prev || String(data.adAccountId).replace(/^act_/, ''));
       if (data.pageId) setSelectedPageId((prev) => prev || String(data.pageId));
     })
     .catch(() => {});
   // eslint-disable-next-line
-}, [fbConnected]);
+}, [fbConnected, adminClientId]);
 
   // ✅ Admin-client mode: when the selected client changes, immediately clear any stale
   // FB/account state from the previous client, then load fresh data for the new client.
@@ -4995,11 +4997,6 @@ useEffect(() => {
 
 
 useEffect(() => {
-  // Never persist client account data to the admin/TheBoss localStorage keys.
-  // Without this guard, Joe's ad account would be written to u:TheBoss:smartmark_last_selected_account
-  // while in client mode, causing TheBoss's dashboard to show Joe's account after exiting.
-  if (adminClientId) return;
-
   const normalizedSelectedAccount = String(selectedAccount || "").replace(/^act_/, "").trim();
   const availableAccountIds = (adAccounts || [])
     .map((a) => String(a?.id || "").replace(/^act_/, "").trim())
@@ -5010,6 +5007,15 @@ useEffect(() => {
     !!normalizedSelectedAccount &&
     availableAccountIds.includes(normalizedSelectedAccount);
 
+  if (adminClientId) {
+    // Admin-client mode: persist under the client's own scope key, never under TheBoss.
+    if (hasValidConnectedAccount) {
+      lsSet(`adminClient:${adminClientId}`, "smartmark_last_selected_account", normalizedSelectedAccount, false);
+    }
+    return; // Never touch TheBoss's localStorage keys in admin-client mode
+  }
+
+  // Normal user mode
   if (hasValidConnectedAccount) {
     lsSet(resolvedUser, "smartmark_last_selected_account", normalizedSelectedAccount, true);
     return;
@@ -5022,9 +5028,6 @@ useEffect(() => {
 }, [adminClientId, selectedAccount, adAccounts, fbConnected, resolvedUser]);
 
 useEffect(() => {
-  // Same guard as the account effect — never write client's page to admin localStorage keys.
-  if (adminClientId) return;
-
   const normalizedSelectedPageId = String(selectedPageId || "").trim();
   const availablePageIds = (pages || [])
     .map((p) => String(p?.id || "").trim())
@@ -5035,6 +5038,15 @@ useEffect(() => {
     !!normalizedSelectedPageId &&
     availablePageIds.includes(normalizedSelectedPageId);
 
+  if (adminClientId) {
+    // Admin-client mode: persist under the client's own scope key, never under TheBoss.
+    if (hasValidConnectedPage) {
+      lsSet(`adminClient:${adminClientId}`, "smartmark_last_selected_pageId", normalizedSelectedPageId, false);
+    }
+    return; // Never touch TheBoss's localStorage keys in admin-client mode
+  }
+
+  // Normal user mode
   if (hasValidConnectedPage) {
     lsSet(resolvedUser, "smartmark_last_selected_pageId", normalizedSelectedPageId, true);
     return;
@@ -5047,10 +5059,26 @@ useEffect(() => {
 }, [adminClientId, selectedPageId, pages, fbConnected, resolvedUser]);
 
 // Persist selection to server so it survives cross-device / cross-browser refreshes.
-// Fires whenever a valid account+page pair is selected while connected.
+// In admin-client mode: passes adminClientId in the body so the backend saves under
+// the CLIENT's ownerKey, not TheBoss's.
+// Guard: only saves when the selected account is confirmed in the current adAccounts
+// list — this prevents a race-condition where adminClientId clears before fbConnected
+// does, which would otherwise save the client's account under TheBoss's ownerKey.
 useEffect(() => {
-  if (adminClientId) return;
   if (!fbConnected || !selectedAccount) return;
+
+  const normalizedAccount = String(selectedAccount).replace(/^act_/, '').trim();
+  const availableIds = (adAccounts || [])
+    .map((a) => String(a?.id || '').replace(/^act_/, '').trim())
+    .filter(Boolean);
+
+  // If the account is not in the current list, we're mid-transition — skip.
+  if (!availableIds.includes(normalizedAccount)) return;
+
+  const scope = adminClientId ? `adminClient:${adminClientId}` : resolvedUser;
+  console.debug('[FB Selection Scope]', { adminClientId, scope, selectedAccount, selectedPageId });
+  console.log('[FB Selection API] saving for ownerKey:', adminClientId ? `user:${adminClientId}` : `user:${resolvedUser || '(sid)'}`);
+
   const sid = getStoredSid();
   const headers = { 'Content-Type': 'application/json' };
   if (sid) headers['x-sm-sid'] = sid;
@@ -5065,10 +5093,11 @@ useEffect(() => {
       pageId: selectedPageId || '',
       adAccountName: accountName,
       pageName,
+      ...(adminClientId ? { adminClientId } : {}),
     }),
   }).catch(() => {});
   // eslint-disable-next-line
-}, [selectedAccount, selectedPageId, fbConnected, adminClientId]);
+}, [selectedAccount, selectedPageId, fbConnected, adminClientId, adAccounts.length]);
 
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
