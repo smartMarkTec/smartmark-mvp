@@ -30,8 +30,9 @@ const LANDING_PAGES = {
     headline: "Houston AC Tune-Up Special",
     subheadline: "Fast, reliable AC service from Aspen Air Conditioning & Heating.",
     offer: "Having issues with your AC or due for maintenance? Take advantage of our $75 AC tune-up, or ask about the $120 annual maintenance plan.",
-    phone: "7138822767",
-    phoneDisplay: "(713) 882-2767",
+    phone: "13466411064",
+    phoneDisplay: "(346) 641-1064",
+    forwardingPhone: "17138822767",
     serviceArea: "Houston and surrounding areas",
     services: [
       "AC repair",
@@ -56,7 +57,7 @@ const LANDING_PAGES = {
     logo: "/client-assets/aspen-ac-logo.png",
     favicon: "/client-assets/aspen-ac-logo.png",
     metaPixelId: "2079374046338979",
-    scheduleUrl: "tel:7138822767",
+    scheduleUrl: "tel:13466411064",
     backgroundImage: null,
   },
 };

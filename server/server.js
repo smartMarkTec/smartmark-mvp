@@ -472,6 +472,9 @@ app.use("/api", agreementRoutes);
 const campaignContextRoutes = require("./routes/campaignContext");
 app.use("/api", campaignContextRoutes);
 
+const twilioRoutes = require("./routes/twilio");
+app.use("/api", twilioRoutes);
+
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");
 app.get("/proxy-img", proxyImgHandler);
