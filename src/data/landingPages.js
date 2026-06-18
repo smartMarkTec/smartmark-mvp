@@ -57,7 +57,7 @@ const LANDING_PAGES = {
     logo: "/client-assets/aspen-ac-logo.png",
     favicon: "/client-assets/aspen-ac-logo.png",
     metaPixelId: "2079374046338979",
-    scheduleUrl: "tel:13466411064",
+    scheduleUrl: null,
     backgroundImage: null,
   },
 };

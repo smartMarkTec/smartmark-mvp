@@ -32,6 +32,7 @@ const db = new Low(adapter, {
   campaign_contexts: [],   // structured intake + objective per campaign session
   ai_action_proposals: [], // approval-mode action queue
   call_tracking_events: [], // Twilio inbound call log
+  landing_leads: [],        // Schedule Service form submissions
   tokens: {} // <= where we keep the FB token
 });
 

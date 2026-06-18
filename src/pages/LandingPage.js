@@ -1,5 +1,5 @@
 // src/pages/LandingPage.js
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import LANDING_PAGES from "../data/landingPages";
 
@@ -59,18 +59,18 @@ function CallBtn({ phone, label, size = "md", onClick }) {
 }
 
 /* ─────────────────── Schedule / secondary button ─────────────────── */
-function ScheduleBtn({ href, label, size = "md", onClick }) {
+function ScheduleBtn({ label, size = "md", onClick }) {
   const big = size === "lg";
   return (
-    <a
-      href={href}
+    <button
+      type="button"
       onClick={onClick}
       style={{
         display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
         background: "transparent", color: "#fff", fontFamily: FONT, fontWeight: 700,
         fontSize: big ? "1.05rem" : "0.9rem",
         padding: big ? "15px 30px" : "10px 20px",
-        borderRadius: 6, textDecoration: "none",
+        borderRadius: 6, cursor: "pointer",
         border: "2px solid rgba(255,255,255,0.55)",
         transition: "border-color 0.12s, background 0.12s",
         whiteSpace: "nowrap", boxSizing: "border-box",
@@ -79,7 +79,7 @@ function ScheduleBtn({ href, label, size = "md", onClick }) {
       onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.55)"; e.currentTarget.style.background = "transparent"; }}
     >
       {label}
-    </a>
+    </button>
   );
 }
 
@@ -175,6 +175,56 @@ export default function LandingPage({ slug: slugProp }) {
 
   const track = (event, data = {}) => {
     if (window.fbq) window.fbq("track", event, data);
+  };
+
+  // Schedule Service modal
+  const [modalOpen, setModalOpen] = useState(false);
+  const [formData, setFormData] = useState({ name: "", phone: "", preferredDate: "", preferredTime: "" });
+  const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const openModal = () => {
+    setFormData({ name: "", phone: "", preferredDate: "", preferredTime: "" });
+    setFormError(""); setSubmitSuccess(false); setSubmitting(false);
+    setModalOpen(true);
+  };
+  const closeModal = () => setModalOpen(false);
+
+  const handleScheduleSubmit = async (e) => {
+    e.preventDefault();
+    const { name, phone, preferredDate, preferredTime } = formData;
+    if (!name.trim() || !phone.trim() || !preferredDate || !preferredTime) {
+      setFormError("Please fill in all fields."); return;
+    }
+    setFormError(""); setSubmitting(true);
+    try {
+      const res = await fetch("/api/landing-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          landingPageSlug: page.slug,
+          businessName: page.businessName,
+          name: name.trim(),
+          phone: phone.trim(),
+          preferredDate,
+          preferredTime,
+          source: "Aspen Landing Page",
+          pageUrl: window.location.href,
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "Submission failed.");
+      setSubmitSuccess(true);
+      track("Lead", {
+        content_name: "Aspen Schedule Service Form Submitted",
+        business_name: page.businessName,
+      });
+    } catch (err) {
+      setFormError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -304,17 +354,11 @@ export default function LandingPage({ slug: slugProp }) {
                 phone: page.phone,
               })}
             />
-            {page.scheduleUrl && (
-              <ScheduleBtn
-                href={page.scheduleUrl}
-                label="Schedule Service"
-                size="lg"
-                onClick={() => track("Lead", {
-                  content_name: "Aspen Schedule Service Button",
-                  business_name: page.businessName,
-                })}
-              />
-            )}
+            <ScheduleBtn
+              label="Schedule Service"
+              size="lg"
+              onClick={openModal}
+            />
           </div>
 
           <div style={{ marginTop: 18, color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
@@ -422,20 +466,134 @@ export default function LandingPage({ slug: slugProp }) {
                 phone: page.phone,
               })}
             />
-            {page.scheduleUrl && (
-              <ScheduleBtn
-                href={page.scheduleUrl}
-                label="Schedule Service"
-                size="lg"
-                onClick={() => track("Lead", {
-                  content_name: "Aspen Schedule Service Button",
-                  business_name: page.businessName,
-                })}
-              />
-            )}
+            <ScheduleBtn
+              label="Schedule Service"
+              size="lg"
+              onClick={openModal}
+            />
           </div>
         </div>
       </div>
+
+      {/* ════════════ SCHEDULE SERVICE MODAL ════════════ */}
+      {modalOpen && (
+        <div
+          onClick={closeModal}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000,
+            background: "rgba(5,14,26,0.75)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "20px", boxSizing: "border-box",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff", borderRadius: 14, width: "100%", maxWidth: 460,
+              padding: "28px 28px 24px", boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+              boxSizing: "border-box", position: "relative",
+            }}
+          >
+            {/* Close button */}
+            <button
+              type="button" onClick={closeModal}
+              style={{
+                position: "absolute", top: 14, right: 14, background: "none",
+                border: "none", cursor: "pointer", color: "#6b7280", fontSize: 22,
+                lineHeight: 1, padding: 4,
+              }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 style={{ fontSize: "1.25rem", fontWeight: 900, color: "#0f2744", margin: "0 0 6px" }}>
+              Schedule AC Service
+            </h2>
+            <p style={{ fontSize: "0.88rem", color: "#6b7280", margin: "0 0 22px", lineHeight: 1.55 }}>
+              Tell us the best time to reach you. Aspen will follow up to confirm your appointment.
+            </p>
+
+            {submitSuccess ? (
+              <div style={{
+                background: "#f0fdf4", border: "1.5px solid #86efac",
+                borderRadius: 10, padding: "16px 18px",
+                fontSize: "0.93rem", color: "#15803d", lineHeight: 1.6, fontWeight: 600,
+              }}>
+                Thanks — your request was sent. Aspen will follow up shortly to confirm.
+              </div>
+            ) : (
+              <form onSubmit={handleScheduleSubmit} noValidate>
+                {[
+                  { label: "Your Name", key: "name", type: "text", placeholder: "Jane Smith" },
+                  { label: "Phone Number", key: "phone", type: "tel", placeholder: "(555) 000-0000" },
+                  { label: "Preferred Date", key: "preferredDate", type: "date", placeholder: "" },
+                ].map(({ label, key, type, placeholder }) => (
+                  <div key={key} style={{ marginBottom: 14 }}>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                      {label}
+                    </label>
+                    <input
+                      type={type}
+                      placeholder={placeholder}
+                      value={formData[key]}
+                      onChange={(e) => setFormData((f) => ({ ...f, [key]: e.target.value }))}
+                      style={{
+                        width: "100%", boxSizing: "border-box",
+                        padding: "10px 12px", borderRadius: 7,
+                        border: "1.5px solid #d1d5db", fontSize: "0.93rem",
+                        fontFamily: FONT, color: "#111827", outline: "none",
+                      }}
+                    />
+                  </div>
+                ))}
+
+                <div style={{ marginBottom: 18 }}>
+                  <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: "#374151", marginBottom: 5 }}>
+                    Preferred Time
+                  </label>
+                  <select
+                    value={formData.preferredTime}
+                    onChange={(e) => setFormData((f) => ({ ...f, preferredTime: e.target.value }))}
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      padding: "10px 12px", borderRadius: 7,
+                      border: "1.5px solid #d1d5db", fontSize: "0.93rem",
+                      fontFamily: FONT, color: formData.preferredTime ? "#111827" : "#9ca3af",
+                      background: "#fff", outline: "none",
+                    }}
+                  >
+                    <option value="">Select a time...</option>
+                    <option value="Morning (8am–12pm)">Morning (8am–12pm)</option>
+                    <option value="Afternoon (12pm–4pm)">Afternoon (12pm–4pm)</option>
+                    <option value="Evening (4pm–7pm)">Evening (4pm–7pm)</option>
+                    <option value="Any time">Any time</option>
+                  </select>
+                </div>
+
+                {formError && (
+                  <div style={{ fontSize: "0.85rem", color: "#dc2626", marginBottom: 12, fontWeight: 600 }}>
+                    {formError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  style={{
+                    width: "100%", padding: "13px", background: submitting ? "#fdba74" : "#f97316",
+                    color: "#fff", border: "none", borderRadius: 8, fontSize: "1rem",
+                    fontWeight: 800, fontFamily: FONT, cursor: submitting ? "not-allowed" : "pointer",
+                    transition: "background 0.12s",
+                  }}
+                >
+                  {submitting ? "Sending…" : "Request Service"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ════════════ FOOTER ════════════ */}
       <div style={{ background: "#040d1a", padding: "14px 20px", textAlign: "center" }}>
