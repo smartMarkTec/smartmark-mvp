@@ -826,25 +826,38 @@ function normalizeSmartCopy(raw = {}, answers = {}) {
   };
 }
 
-function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, answers, mediaSelection }) {
+function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, answers, mediaSelection, adminClientId }) {
   try {
    const imgs = (imageUrls || []).filter(Boolean).slice(0, 1).map(toAbsoluteMedia);
+    const resolvedCtxKey = ctxKey || getActiveCtx();
 
     const payload = {
-      ctxKey: ctxKey || getActiveCtx(),
+      ctxKey: resolvedCtxKey,
       images: imgs,
       headline: (headline || "").toString().trim().slice(0, 55),
       body: (body || "").toString().trim(),
       imageOverlayCTA: (overlay || "").toString().trim(),
       answers: answers && typeof answers === "object" ? answers : {},
       mediaSelection: mediaSelection || "image",
+      ...(adminClientId ? { adminClientId } : {}),
       savedAt: Date.now(),
-      expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
+      expiresAt: Date.now() + CREATIVE_TTL_MS,
     };
 
-    lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
-    lsSet("sm_setup_creatives_backup_v1", JSON.stringify(payload));
-    ssSet("draft_form_creatives", JSON.stringify(payload));
+    console.debug("[Creative Draft Saved]", { ctxKey: resolvedCtxKey, adminClientId: adminClientId || null, mediaSelection: payload.mediaSelection, imageUrls: imgs });
+
+    if (adminClientId) {
+      // Admin-client mode: persist under the client's own namespace.
+      // Never writes to TheBoss's namespace or bare global keys.
+      const clientNs = `adminClient:${adminClientId}`;
+      localStorage.setItem(`u:${clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(payload));
+      localStorage.setItem(`u:${clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(payload));
+    } else {
+      // Normal user mode: use the existing namespace-aware writers (keyed by getUserNS()).
+      lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+      lsSet("sm_setup_creatives_backup_v1", JSON.stringify(payload));
+      ssSet("draft_form_creatives", JSON.stringify(payload));
+    }
   } catch (e) {
     console.warn("syncCreativesToDraftKeys failed:", e);
   }
@@ -2893,49 +2906,7 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
-      {/* ── Creative type picker — hidden in saved-context flow (inline panel handles it) ── */}
-      <div style={{ width: "100%", maxWidth: 760, marginTop: 18, marginBottom: 0, padding: "0 0 0 0", boxSizing: "border-box", display: contextStatus === "loaded" ? "none" : undefined }}>
-        <div style={{ background: "rgba(255,255,255,0.92)", borderRadius: 18, border: "1.5px solid #e8e4f4", boxShadow: "0 2px 16px rgba(66,54,120,0.07)", padding: "18px 22px" }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a22", marginBottom: 12 }}>
-            What kind of ad creative do you want to use?
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {[
-              { id: "ai_image",     label: "Generate an AI image",  icon: "✨", desc: "Smartemark designs your ad" },
-              { id: "upload_photo", label: "Upload my own photo",    icon: "📷", desc: "Your photo, AI writes the copy" },
-              { id: "upload_video", label: "Upload my own video",    icon: "🎬", desc: "Your video, AI writes the copy" },
-            ].map(({ id, label, icon, desc }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => handleCreativeSourceChange(id)}
-                style={{
-                  flex: 1,
-                  minWidth: 120,
-                  padding: "11px 14px",
-                  borderRadius: 12,
-                  border: creativeSource === id ? "2px solid #6c63d4" : "1.5px solid #e0dced",
-                  background: creativeSource === id ? "#f0eeff" : "#fff",
-                  color: creativeSource === id ? "#4c3db0" : "#5a5a6e",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: 3,
-                  textAlign: "left",
-                  transition: "border-color 0.15s, background 0.15s",
-                }}
-              >
-                <span style={{ fontSize: 18 }}>{icon}</span>
-                <span>{label}</span>
-                <span style={{ fontWeight: 500, fontSize: 11, color: creativeSource === id ? "#6c63d4" : "#9990b8" }}>{desc}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      {/* Creative type picker moved to the preview panel header (compact pills below) */}
 
          <div
         style={{
@@ -2947,7 +2918,7 @@ async function generatePosterBPair(runToken) {
           borderRadius: 28,
           border: `1px solid ${EDGE}`,
           boxShadow: "0 16px 42px rgba(66,54,120,0.10)",
-          padding: isMobile ? "14px 12px 12px" : "26px 26px 22px 26px",
+          padding: isMobile ? "10px 10px 10px" : "16px 18px 14px 18px",
           display: "flex",
           flexDirection: "column",
           alignItems: "stretch",
@@ -2959,10 +2930,10 @@ async function generatePosterBPair(runToken) {
              <div
           style={{
             color: "#7a728f",
-            fontSize: 14,
+            fontSize: 12,
             fontWeight: 700,
-            marginBottom: 12,
-            letterSpacing: 0.6,
+            marginBottom: 8,
+            letterSpacing: 0.5,
             textAlign: "center",
           }}
         >
@@ -2974,17 +2945,17 @@ async function generatePosterBPair(runToken) {
           className="chat-scroll"
           style={{
             width: "100%",
-            minHeight: 250,
-            maxHeight: 500,
+            minHeight: 180,
+            maxHeight: 360,
             overflowY: "auto",
-            marginBottom: 16,
-            padding: 16,
+            marginBottom: 10,
+            padding: "10px 12px",
             background: "rgba(250,248,244,0.52)",
-            borderRadius: 22,
+            borderRadius: 16,
             border: `1px solid ${EDGE}`,
             display: "flex",
             flexDirection: "column",
-            gap: 12,
+            gap: 8,
           }}
         >
           {/* ── Context loading state (admin mode: prevents "Are you ready?" flash) ── */}
@@ -3057,16 +3028,17 @@ async function generatePosterBPair(runToken) {
                     style={{
                       alignSelf: isGPT ? "flex-start" : "flex-end",
                       color: isGPT ? "#262331" : "#1f1a2d",
-                      background: isGPT ? "rgba(255,255,255,0.92)" : "rgba(233,228,255,0.96)",
+                      background: isGPT ? "rgba(255,255,255,0.90)" : "rgba(233,228,255,0.94)",
                       border: `1px solid ${EDGE}`,
-                      borderRadius: 20,
-                      padding: "12px 15px",
+                      borderRadius: 14,
+                      padding: "8px 12px",
                       maxWidth: "85%",
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
-                      boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                      boxShadow: "0 2px 8px rgba(66,54,120,0.05)",
                       fontWeight: 500,
-                      lineHeight: 1.55,
+                      fontSize: 13.5,
+                      lineHeight: 1.5,
                     }}
                   >
                     {msg.text}
@@ -3080,16 +3052,17 @@ async function generatePosterBPair(runToken) {
                   style={{
                     alignSelf: "flex-start",
                     color: "#262331",
-                    background: "rgba(255,255,255,0.92)",
+                    background: "rgba(255,255,255,0.90)",
                     border: `1px solid ${EDGE}`,
-                    borderRadius: 20,
-                    padding: "12px 15px",
+                    borderRadius: 14,
+                    padding: "8px 12px",
                     maxWidth: "85%",
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
-                    boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                    boxShadow: "0 2px 8px rgba(66,54,120,0.05)",
                     fontWeight: 500,
-                    lineHeight: 1.55,
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
                   }}
                 >
                   {typingMsg.slice(0, typingIdx)}
@@ -3105,13 +3078,13 @@ async function generatePosterBPair(runToken) {
                     color: "#7d7794",
                     background: "rgba(255,255,255,0.88)",
                     border: `1px solid ${EDGE}`,
-                    borderRadius: 20,
-                    padding: "12px 18px",
+                    borderRadius: 14,
+                    padding: "7px 14px",
                     maxWidth: "85%",
-                    boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                    boxShadow: "0 2px 8px rgba(66,54,120,0.05)",
                     fontWeight: 500,
-                    fontSize: "1.2rem",
-                    letterSpacing: "0.12em",
+                    fontSize: "1rem",
+                    letterSpacing: "0.1em",
                   }}
                 >
                   •••
@@ -3226,46 +3199,7 @@ async function generatePosterBPair(runToken) {
                   </button>
                 </div>
 
-                {/* Creative format cards */}
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#8e87b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8, textAlign: "center" }}>
-                  How would you like to create your ad?
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[
-                    { id: "ai_image",     label: "Generate AI image", icon: "✨", desc: "Smartemark designs your ad" },
-                    { id: "upload_photo", label: "Upload my photo",   icon: "📷", desc: "Your photo, AI writes copy" },
-                    { id: "upload_video", label: "Upload my video",   icon: "🎬", desc: "Your video, AI writes copy" },
-                  ].map(({ id, label, icon, desc }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => handleCreativeSourceChange(id)}
-                      style={{
-                        flex: 1,
-                        minWidth: 90,
-                        padding: "10px 10px",
-                        borderRadius: 12,
-                        border: creativeSource === id ? "2px solid #5d59ea" : "1.5px solid #e0dced",
-                        background: creativeSource === id ? "#f0eeff" : "#fafafe",
-                        color: creativeSource === id ? "#4c3db0" : "#5a5a6e",
-                        fontWeight: 700,
-                        fontSize: 12,
-                        cursor: "pointer",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                        gap: 3,
-                        textAlign: "left",
-                        transition: "border-color 0.15s, background 0.15s",
-                        fontFamily: MODERN_FONT,
-                      }}
-                    >
-                      <span style={{ fontSize: 17 }}>{icon}</span>
-                      <span style={{ fontWeight: 800 }}>{label}</span>
-                      <span style={{ fontWeight: 500, fontSize: 10.5, color: creativeSource === id ? "#6c63d4" : "#9990b8" }}>{desc}</span>
-                    </button>
-                  ))}
-                </div>
+                {/* Creative format — compact pills now live in the preview panel header */}
               </>
             )}
 
@@ -3364,9 +3298,34 @@ async function generatePosterBPair(runToken) {
         {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
-         <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
-        <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>
-          {creativeSource === "upload_photo" ? "Your Photo Ad" : creativeSource === "upload_video" ? "Your Video Ad" : "Ad Previews"}
+         {/* ── Compact creative format picker pills — replaces the large top cards ── */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+          {[
+            { id: "ai_image",     label: "✨ AI Image" },
+            { id: "upload_photo", label: "📷 Upload Photo" },
+            { id: "upload_video", label: "🎬 Upload Video" },
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => handleCreativeSourceChange(id)}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 999,
+                border: creativeSource === id ? "1.5px solid #6c63d4" : "1.5px solid #d8d4ed",
+                background: creativeSource === id ? "#eeecff" : "rgba(255,255,255,0.82)",
+                color: creativeSource === id ? "#4c3db0" : "#7b74c0",
+                fontWeight: creativeSource === id ? 800 : 600,
+                fontSize: 12,
+                cursor: "pointer",
+                transition: "all 0.12s",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -3496,16 +3455,7 @@ async function generatePosterBPair(runToken) {
             {/* ── Video upload section — primary for upload_video, optional for ai_image, hidden for upload_photo ── */}
             {creativeSource !== "upload_photo" && (
               <div style={{ marginTop: 14, borderTop: creativeSource === "upload_video" ? "none" : "1px solid #e8e4f0", paddingTop: creativeSource === "upload_video" ? 0 : 14 }}>
-                {creativeSource === "ai_image" && (
-                  <>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7b74c0", marginBottom: 4 }}>
-                      Upload your own video ad <span style={{ fontWeight: 400, color: "#9990b8" }}>(optional)</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#9990b8", marginBottom: 8, lineHeight: 1.5 }}>
-                      If you already have a video you want to use in the ad, upload it here. We'll use this video instead of the generated image.
-                    </div>
-                  </>
-                )}
+                {/* Upload video label/description removed — intent is clear from the creative controls above */}
 
                 <input
                   ref={videoInputRef}
@@ -3871,9 +3821,17 @@ async function generatePosterBPair(runToken) {
 };
 
 
-            ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
-            lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-            lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+            if (adminClientId) {
+              // Admin-client mode: persist under the client's isolated namespace.
+              const clientNs = `adminClient:${adminClientId}`;
+              localStorage.setItem(`u:${clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(draftForSetup));
+              localStorage.setItem(`u:${clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(draftForSetup));
+            } else {
+              // Normal user mode: existing namespace-aware writers.
+              ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+              lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+              lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+            }
 
             // ✅ Write FORM_DRAFT_KEY synchronously before SPA navigation — the autosave
             // debounce gets cancelled on unmount and beforeunload doesn't fire for navigate(),
@@ -3927,6 +3885,8 @@ async function generatePosterBPair(runToken) {
                 }),
               }).catch(() => {});
             } catch {}
+
+            console.debug("[Creative Draft Saved]", { ctxKey, adminClientId: adminClientId || null, mediaSelection: "image", imageUrls: imgA });
 
             navigate("/setup", {
               state: {

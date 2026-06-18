@@ -3529,6 +3529,11 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   // and resets React state so the TheBoss dashboard is clean on next render.
   // Never touches sm_sid_v1 or any normal user session key.
   const exitClientMode = React.useCallback(() => {
+    // Raise the guard BEFORE any state clears so the save effect can't race
+    // and write the client's account/page under TheBoss's ownerKey.
+    isExitingAdminClientModeRef.current = true;
+    console.debug("[Exit Client Mode] clearing FB client state");
+
     // Remove admin mode markers
     try { localStorage.removeItem("sm_admin_target_client_id"); } catch {}
     try { localStorage.removeItem("sm_admin_target_client_label"); } catch {}
@@ -3799,6 +3804,30 @@ useEffect(() => {
     return;
   }
 
+  // ── Admin-client mode: read creative draft from the client-scoped namespace.
+  // Never touches TheBoss's draft keys.
+  if (adminClientId) {
+    const clientNs = `adminClient:${adminClientId}`;
+    const rawClient =
+      localStorage.getItem(`u:${clientNs}:${CREATIVE_DRAFT_KEY}`) ||
+      localStorage.getItem(`u:${clientNs}:sm_setup_creatives_backup_v1`);
+    if (rawClient) {
+      try {
+        const obj = JSON.parse(rawClient);
+        const now = Date.now();
+        const expiresAt = Number(obj.expiresAt);
+        const ageOk =
+          (Number.isFinite(expiresAt) && now <= expiresAt) ||
+          (!obj.savedAt || now - obj.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
+        if (ageOk) {
+          applyDraft(obj);
+        }
+      } catch {}
+    }
+    return; // Do NOT read TheBoss's draft keys in admin-client mode
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
   if (lastFields) {
     const f = JSON.parse(lastFields);
@@ -3816,6 +3845,13 @@ useEffect(() => {
     const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
     const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
     if (!norm.length) return false;
+
+    console.debug("[Creative Draft Restored]", {
+      ctxKey: draftObj.ctxKey || null,
+      adminClientId: draftObj.adminClientId || null,
+      mediaSelection: draftObj.mediaSelection || "image",
+      imageUrls: norm,
+    });
 
     setDraftCreatives({
       images: norm,
@@ -4589,11 +4625,16 @@ useEffect(() => { setCampaignSubtab("overview"); }, [selectedCampaignId]);
 // transitions from a non-empty value to "". This fires even if exitClientMode had
 // batching issues, and provides a second line of defence against the 403.
 const _prevAdminClientIdRef = React.useRef(adminClientId);
+// True during the brief window when exitClientMode fires but React state batches
+// haven't committed yet. The server-save effect checks this to skip any stale write.
+const isExitingAdminClientModeRef = React.useRef(false);
+
 useEffect(() => {
   const prev = _prevAdminClientIdRef.current;
   _prevAdminClientIdRef.current = adminClientId;
   if (prev && !adminClientId) {
     console.debug('[CampaignSetup] adminClientId cleared — wiping all client-derived maps');
+    isExitingAdminClientModeRef.current = false; // state is now stable, reset guard
     setMetricsMap({});
     setOptimizerStateMap({});
     setCampaignCreativesMap({});
@@ -5082,6 +5123,12 @@ useEffect(() => {
 // list — this prevents a race-condition where adminClientId clears before fbConnected
 // does, which would otherwise save the client's account under TheBoss's ownerKey.
 useEffect(() => {
+  // Hard stop during exit — prevents the stale client selection from being written
+  // under TheBoss's ownerKey while React batches haven't committed yet.
+  if (isExitingAdminClientModeRef.current) {
+    console.debug("[FB Save Guard] skipped stale client save", { adminClientId, selectedAccount });
+    return;
+  }
   if (!fbConnected || !selectedAccount) return;
 
   const normalizedAccount = String(selectedAccount).replace(/^act_/, '').trim();
