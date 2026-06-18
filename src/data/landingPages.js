@@ -51,8 +51,11 @@ const LANDING_PAGES = {
     mainWebsiteUrl: "https://aspen93.godaddysites.com",
     primaryButtonText: "Call Now: (713) 882-2767",
     secondaryButtonText: "Home",
+    pageTitle: "Aspen Air Conditioning & Heating | Houston AC Tune-Up Special",
+    metaDescription: "Fast, reliable AC service in Houston. Call Aspen Air Conditioning & Heating for AC tune-ups, service, and maintenance.",
+    logo: "/client-assets/aspen-ac-logo.png",
+    favicon: "/client-assets/aspen-ac-logo.png",
     metaPixelId: null,
-    logo: null,
     backgroundImage: null,
   },
 };

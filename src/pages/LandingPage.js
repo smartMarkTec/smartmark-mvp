@@ -65,6 +65,46 @@ export default function LandingPage({ slug: slugProp }) {
 
   useEffect(() => { window.scrollTo(0, 0); }, [slug]);
 
+  /* ── Branding: title, favicon, meta description ── */
+  useEffect(() => {
+    if (!page) return;
+
+    const prevTitle = document.title;
+
+    // Page title
+    if (page.pageTitle) document.title = page.pageTitle;
+
+    // Meta description
+    let metaDesc = document.querySelector('meta[name="description"]');
+    const prevDesc = metaDesc ? metaDesc.getAttribute("content") : null;
+    if (page.metaDescription) {
+      if (!metaDesc) {
+        metaDesc = document.createElement("meta");
+        metaDesc.setAttribute("name", "description");
+        document.head.appendChild(metaDesc);
+      }
+      metaDesc.setAttribute("content", page.metaDescription);
+    }
+
+    // Favicon
+    let faviconEl = document.querySelector('link[rel="icon"]');
+    const prevFavicon = faviconEl ? faviconEl.getAttribute("href") : null;
+    if (page.favicon) {
+      if (!faviconEl) {
+        faviconEl = document.createElement("link");
+        faviconEl.setAttribute("rel", "icon");
+        document.head.appendChild(faviconEl);
+      }
+      faviconEl.setAttribute("href", page.favicon);
+    }
+
+    return () => {
+      document.title = prevTitle;
+      if (metaDesc && prevDesc !== null) metaDesc.setAttribute("content", prevDesc);
+      if (faviconEl && prevFavicon !== null) faviconEl.setAttribute("href", prevFavicon);
+    };
+  }, [page]);
+
   /* TODO: inject Meta Pixel when page.metaPixelId is set */
 
   if (!page) {
@@ -94,12 +134,29 @@ export default function LandingPage({ slug: slugProp }) {
           maxWidth: 900, margin: "0 auto", height: 52,
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
-          <span style={{
-            color: "#fff", fontWeight: 700, fontSize: 14,
-            flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {page.businessName}
-          </span>
+          {page.logo ? (
+            <div style={{
+              background: "#fff", borderRadius: 6, padding: "3px 8px",
+              display: "flex", alignItems: "center", flexShrink: 1,
+            }}>
+              <img
+                src={page.logo}
+                alt={page.businessName}
+                onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextSibling.style.display = "inline"; }}
+                style={{ height: 40, maxWidth: 180, objectFit: "contain", display: "block" }}
+              />
+              <span style={{ display: "none", color: "#0a1628", fontWeight: 700, fontSize: 14 }}>
+                {page.businessName}
+              </span>
+            </div>
+          ) : (
+            <span style={{
+              color: "#fff", fontWeight: 700, fontSize: 14,
+              flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {page.businessName}
+            </span>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <a
               href={`tel:${page.phone}`}
