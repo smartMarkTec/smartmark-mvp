@@ -26,6 +26,7 @@ import AdminManageCampaign from "./pages/admin/AdminManageCampaign";
 import BookingConfirmed from "./pages/BookingConfirmed";
 import Agreement from "./pages/Agreement";
 import OnboardingConnect from "./pages/OnboardingConnect";
+import LandingPage from "./pages/LandingPage";
 
 function NotFound() {
   return (
@@ -91,6 +92,8 @@ function App() {
       <Route path="/admin/clients" element={<AdminClients />} />
       <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
       <Route path="/admin/clients/:id/manage-campaign" element={<AdminManageCampaign />} />
+      {/* ── Public client landing pages — no auth required ── */}
+      <Route path="/lp/:slug" element={<LandingPage />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
