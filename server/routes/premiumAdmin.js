@@ -1502,4 +1502,96 @@ router.post('/admin/clients/:id/billing-portal', limitAdmin, requireAdmin, async
   }
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+   LANDING LEADS — admin routes
+───────────────────────────────────────────────────────────────────────── */
+
+const VALID_LEAD_STATUSES = ['new', 'contacted', 'booked', 'lost'];
+
+function normalizeLead(lead) {
+  return {
+    ...lead,
+    status: VALID_LEAD_STATUSES.includes(lead.status) ? lead.status : 'new',
+    notes: typeof lead.notes === 'string' ? lead.notes : '',
+  };
+}
+
+// GET /api/admin/landing-leads
+router.get('/admin/landing-leads', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    await db.read();
+    let leads = Array.isArray(db.data.landing_leads) ? db.data.landing_leads : [];
+
+    const { landingPageSlug, status } = req.query;
+    if (landingPageSlug) leads = leads.filter(l => l.landingPageSlug === landingPageSlug);
+    if (status) leads = leads.filter(l => (l.status || 'new') === status);
+
+    const normalized = leads.map(normalizeLead).sort((a, b) => b.createdAt?.localeCompare(a.createdAt ?? '') ?? 0);
+    return res.json({ ok: true, leads: normalized, total: normalized.length });
+  } catch (err) {
+    console.error('[admin/landing-leads GET]', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/landing-leads/:leadId
+router.patch('/admin/landing-leads/:leadId', limitAdmin, requireAdmin, async (req, res) => {
+  const { leadId } = req.params;
+  const { status, notes } = req.body || {};
+
+  if (status !== undefined && !VALID_LEAD_STATUSES.includes(status)) {
+    return res.status(400).json({ ok: false, error: `Invalid status. Must be one of: ${VALID_LEAD_STATUSES.join(', ')}` });
+  }
+
+  try {
+    await db.read();
+    if (!Array.isArray(db.data.landing_leads)) db.data.landing_leads = [];
+
+    const idx = db.data.landing_leads.findIndex(l => l.id === leadId);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'Lead not found.' });
+
+    if (status !== undefined) db.data.landing_leads[idx].status = status;
+    if (notes !== undefined) db.data.landing_leads[idx].notes = String(notes).slice(0, 1000);
+    db.data.landing_leads[idx].updatedAt = new Date().toISOString();
+    await db.write();
+
+    return res.json({ ok: true, lead: normalizeLead(db.data.landing_leads[idx]) });
+  } catch (err) {
+    console.error('[admin/landing-leads PATCH]', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/admin/lead-summary
+router.get('/admin/lead-summary', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    await db.read();
+    const leads = Array.isArray(db.data.landing_leads) ? db.data.landing_leads : [];
+
+    const map = {};
+    for (const lead of leads) {
+      const key = lead.landingPageSlug || 'unknown';
+      if (!map[key]) {
+        map[key] = {
+          landingPageSlug: key,
+          businessName: lead.businessName || '',
+          totalLeads: 0,
+          newLeads: 0,
+          latestLeadAt: null,
+        };
+      }
+      map[key].totalLeads++;
+      if ((lead.status || 'new') === 'new') map[key].newLeads++;
+      if (!map[key].latestLeadAt || (lead.createdAt ?? '') > map[key].latestLeadAt) {
+        map[key].latestLeadAt = lead.createdAt || null;
+      }
+    }
+
+    return res.json({ ok: true, summary: Object.values(map) });
+  } catch (err) {
+    console.error('[admin/lead-summary]', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

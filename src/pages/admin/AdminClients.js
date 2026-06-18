@@ -36,6 +36,7 @@ function adminHeaders() {
 export default function AdminClients() {
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
+  const [leadSummary, setLeadSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -66,6 +67,17 @@ export default function AdminClients() {
         }
         if (!j.ok) throw new Error(j.error || `Server returned ${r.status}.`);
         setClients(j.clients || []);
+        // Lead summary (non-blocking — ignore errors)
+        fetch("/api/admin/lead-summary", { credentials: "include", headers: adminHeaders() })
+          .then(r => r.json().catch(() => ({})))
+          .then(j2 => {
+            if (j2.ok && Array.isArray(j2.summary)) {
+              const map = {};
+              j2.summary.forEach(s => { map[s.landingPageSlug] = s; });
+              setLeadSummary(map);
+            }
+          })
+          .catch(() => {});
       } catch (err) {
         setError(err.message || "Failed to load clients. Check that you are logged in.");
       } finally {
@@ -96,12 +108,20 @@ export default function AdminClients() {
               Clients
             </h1>
           </div>
-          <button
-            onClick={() => navigate("/setup")}
-            style={{ background: "none", border: "none", color: TEXT_SOFT, fontSize: 14, cursor: "pointer", fontFamily: FONT }}
-          >
-            ← Dashboard
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={() => navigate("/admin/leads")}
+              style={{ padding: "8px 14px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}
+            >
+              View Leads
+            </button>
+            <button
+              onClick={() => navigate("/setup")}
+              style={{ background: "none", border: "none", color: TEXT_SOFT, fontSize: 14, cursor: "pointer", fontFamily: FONT }}
+            >
+              ← Dashboard
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -154,8 +174,21 @@ export default function AdminClients() {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 600, color: TEXT, marginBottom: 2 }}>
+                  <div style={{ fontWeight: 600, color: TEXT, marginBottom: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {c.businessName || c.displayName || c.email}
+                    {(() => {
+                      // Match by businessName against lead summary
+                      const match = Object.values(leadSummary).find(s => s.businessName === (c.businessName || c.displayName));
+                      if (!match || match.newLeads < 1) return null;
+                      return (
+                        <span
+                          onClick={() => navigate("/admin/leads")}
+                          style={{ fontSize: 10, fontWeight: 700, background: "#dbeafe", color: "#1d4ed8", padding: "1px 7px", borderRadius: 999, cursor: "pointer" }}
+                        >
+                          {match.newLeads} New {match.newLeads === 1 ? "Lead" : "Leads"}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div style={{ fontSize: 12, color: TEXT_SOFT }}>{c.email}</div>
                 </div>

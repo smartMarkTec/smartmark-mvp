@@ -316,7 +316,17 @@ export default function AdminClientDetail() {
         </Card>
 
         {/* Premium Intake */}
-        <Card title={`Premium Intake — ${intake?.submittedAt ? "Submitted ✓" : "Pending"}`}>
+        <Card title={
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>Premium Intake — {intake?.submittedAt ? "Submitted ✓" : "Pending"}</span>
+            <button
+              onClick={() => navigate(`/premium-intake?adminClientId=${encodeURIComponent(id)}`)}
+              style={{ padding: "6px 14px", background: "#f5f3ff", color: PURPLE, border: `1px solid rgba(93,89,234,0.3)`, borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: FONT }}
+            >
+              Edit Intake →
+            </button>
+          </div>
+        }>
           {intake ? (
             <>
               <div style={{ marginBottom: 12, fontSize: 12, color: TEXT_SOFT }}>

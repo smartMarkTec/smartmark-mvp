@@ -23,6 +23,7 @@ import PremiumIntakeComplete from "./pages/PremiumIntakeComplete";
 import AdminClients from "./pages/admin/AdminClients";
 import AdminClientDetail from "./pages/admin/AdminClientDetail";
 import AdminManageCampaign from "./pages/admin/AdminManageCampaign";
+import AdminLeads from "./pages/admin/AdminLeads";
 import BookingConfirmed from "./pages/BookingConfirmed";
 import Agreement from "./pages/Agreement";
 import OnboardingConnect from "./pages/OnboardingConnect";
@@ -104,6 +105,7 @@ function App() {
       <Route path="/admin/clients" element={<AdminClients />} />
       <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
       <Route path="/admin/clients/:id/manage-campaign" element={<AdminManageCampaign />} />
+      <Route path="/admin/leads" element={<AdminLeads />} />
       {/* ── Public client landing pages — no auth required ── */}
       <Route path="/lp/:slug" element={<LandingPage />} />
       <Route path="*" element={<NotFound />} />
