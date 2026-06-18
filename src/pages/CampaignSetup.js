@@ -3984,8 +3984,41 @@ useEffect(() => {
   setFbConnected(true);
   setCameFromFbConnect(true);
 
-  // ✅ FORCE refresh accounts/pages after OAuth so dropdowns auto-fill even if fbConnected was already true
+  // In admin-client mode the token was stored under the CLIENT's ownerKey,
+  // not the admin session. The client's data must come from the admin wrapper
+  // endpoint that reads the client's token — not from the session-level routes.
+  const returnedAdminClientId = (params.get("adminClientId") || adminClientId || "").trim();
+
+  // ✅ FORCE refresh accounts/pages after OAuth
   (async () => {
+    if (returnedAdminClientId) {
+      // Admin-client mode: reload client FB info from admin wrapper route
+      const enc = encodeURIComponent(returnedAdminClientId);
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const headers = sid ? { "x-sm-sid": sid } : {};
+      try {
+        const r = await fetch(`/api/admin/clients/${enc}/facebook-info`, {
+          credentials: "include",
+          headers,
+        });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          if (j.ok) {
+            const accts = Array.isArray(j.adAccounts) ? j.adAccounts : [];
+            const pgs = Array.isArray(j.pages) ? j.pages : [];
+            setFbConnected(!!j.fbConnected);
+            setAdAccounts(accts);
+            setPages(pgs);
+            touchFbConn();
+            if (accts.length) setSelectedAccount(String(accts[0].id || "").replace(/^act_/, ""));
+            if (pgs.length) setSelectedPageId(String(pgs[0].id || ""));
+          }
+        }
+      } catch {}
+      return; // Do not fall through to session-level routes in admin mode
+    }
+
+    // Normal self-connect: use session-level routes
     try {
       const r = await authFetch(`/facebook/adaccounts`);
       if (r.ok) {
@@ -7110,13 +7143,21 @@ ${pendingTest ? `
                 }
               } catch {}
 
+              // In admin-client mode, embed the clientId in the return URL and the
+              // OAuth start URL so the callback knows whose token to store.
+              const adminClientParam = adminClientId
+                ? `&adminClientId=${encodeURIComponent(adminClientId)}`
+                : "";
+
               const returnTo =
                 window.location.origin +
                 "/setup" +
-                `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
+                `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1${adminClientParam}`;
 
               const sid = ensureStoredSid();
-              window.location.assign(`/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_to=${encodeURIComponent(returnTo)}`);
+              window.location.assign(
+                `/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_to=${encodeURIComponent(returnTo)}${adminClientParam}`
+              );
             }}
             style={{
               padding: "14px 24px",
@@ -7176,8 +7217,10 @@ ${pendingTest ? `
                   >
                     {adAccounts.map((a) => {
                       const id = String(a.id || "").replace(/^act_/, "");
-                      const status = Number(a.account_status);
-                      const statusLabel = status === 1 ? "" : status === 2 ? " ⚠ Disabled" : status === 3 ? " ⚠ Unsettled" : " ⚠ Not Active";
+                      // account_status is used by the normal /facebook/adaccounts route;
+                      // status is used by the /api/admin/clients/:id/facebook-info route.
+                      const status = Number(a.account_status ?? a.status);
+                      const statusLabel = status === 1 ? "" : status === 2 ? " ⚠ Disabled" : status === 3 ? " ⚠ Unsettled" : status > 0 ? " ⚠ Not Active" : "";
                       return (
                         <option key={id} value={id}>
                           {a.name ? `${a.name} (${id})${statusLabel}` : `ID: ${id}${statusLabel}`}
@@ -7194,8 +7237,8 @@ ${pendingTest ? `
                 {(() => {
                   const acct = adAccounts.find((a) => String(a.id).replace(/^act_/, "") === selectedAccount);
                   if (!acct) return null;
-                  const status = Number(acct.account_status);
-                  if (status === 1) return null;
+                  const status = Number(acct.account_status ?? acct.status);
+                  if (status === 1 || status === 0) return null;
                   return (
                     <div style={{
                       marginTop: 10,

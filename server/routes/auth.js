@@ -1034,11 +1034,17 @@ router.get('/facebook', (req, res) => {
 
   safeReturnTo = appendSidToReturnTo(safeReturnTo, sid);
 
+  // Admin-client mode: the frontend passes adminClientId so the token gets stored
+  // under the CLIENT's ownerKey in the callback, not under the admin's ownerKey.
+  // We embed it in the HMAC-signed state so it cannot be tampered with in transit.
+  const adminClientId = String(req.query?.adminClientId || '').trim();
+
   const state = makeOAuthState({
     sid,
     returnTo: safeReturnTo,
     iat: Date.now(),
     n: nanoid(10),
+    ...(adminClientId ? { adminClientId } : {}),
   });
 
   if (!FACEBOOK_LOGIN_CONFIG_ID) {
@@ -1072,6 +1078,7 @@ router.get('/facebook/callback', async (req, res) => {
   const fallback = `${FRONTEND_URL}/setup`;
   let returnTo = String(verified.payload?.returnTo || fallback).trim();
 
+  // Resolve the ownerKey for the requester (admin or normal user)
   let userOwner = sidOwner;
   try {
     await ensureUsersAndSessions();
@@ -1079,6 +1086,49 @@ router.get('/facebook/callback', async (req, res) => {
     const sess = (db.data.sessions || []).find((s) => String(s.sid) === String(sidOwner));
     if (sess?.username) userOwner = `user:${String(sess.username).trim()}`;
   } catch {}
+
+  // ── Admin-client mode ──
+  // If the signed state carries adminClientId, the admin is connecting Facebook
+  // on behalf of a client. Store the token under the CLIENT's ownerKey only.
+  // The admin's own ownerKey should not receive this client token.
+  const stateAdminClientId = String(verified.payload?.adminClientId || '').trim();
+  let targetOwnerKey = userOwner; // default: self-connect
+
+  if (stateAdminClientId) {
+    try {
+      await ensureUsersAndSessions();
+      await db.read();
+
+      // Verify the requestor's session belongs to an admin
+      const adminSess = (db.data.sessions || []).find((s) => String(s.sid) === String(sidOwner));
+      const adminUsername = String(adminSess?.username || '').trim();
+      const ADMIN_UN = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+      const adminUser = (db.data.users || []).find(
+        (u) => String(u?.username || '').trim() === adminUsername
+      );
+      const isAdmin = adminUsername === ADMIN_UN || adminUser?.role === 'admin';
+
+      if (isAdmin) {
+        // Find the client user record by username (adminClientId is the client username/email)
+        const clientUser = (db.data.users || []).find(
+          (u) => String(u?.username || '').trim() === stateAdminClientId
+        );
+        if (clientUser) {
+          targetOwnerKey = `user:${String(clientUser.username).trim()}`;
+          console.log('[FB OAuth] adminClientId from state:', stateAdminClientId);
+          console.log('[FB OAuth] storing token for client ownerKey:', targetOwnerKey);
+        } else {
+          console.warn('[FB OAuth] adminClientId in state but client user not found:', stateAdminClientId);
+        }
+      } else {
+        console.warn('[FB OAuth] adminClientId in state but requester is not admin:', adminUsername);
+      }
+    } catch (e) {
+      console.error('[FB OAuth] admin-client ownerKey resolution failed:', e?.message);
+    }
+  } else {
+    console.log('[FB OAuth] normal self-connect ownerKey:', userOwner);
+  }
 
   try {
     const tokenRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/oauth/access_token`, {
@@ -1107,59 +1157,55 @@ router.get('/facebook/callback', async (req, res) => {
         const fallback60Days = 60 * 24 * 60 * 60;
         const expSec = expiresInSec > 0 ? expiresInSec : fallback60Days;
         const expiresAt = Date.now() + expSec * 1000;
+        const meta = { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' };
 
-        await setFbUserToken(tok, userOwner);
-        await setFbUserTokenMeta(
-          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
-          userOwner
-        );
+        // Always store under targetOwnerKey (= client's ownerKey in admin-client mode,
+        // or userOwner in normal self-connect mode).
+        await setFbUserToken(tok, targetOwnerKey);
+        await setFbUserTokenMeta(meta, targetOwnerKey);
 
-        await setFbUserToken(tok, sidOwner);
-        await setFbUserTokenMeta(
-          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
-          sidOwner
-        );
+        // In normal self-connect: also store under sidOwner as a fallback.
+        // In admin-client mode: do NOT store under the admin's sidOwner — that
+        // would associate the client's token with the admin's session.
+        if (!stateAdminClientId) {
+          await setFbUserToken(tok, sidOwner);
+          await setFbUserTokenMeta(meta, sidOwner);
+        }
 
-        await refreshDefaults(tok, userOwner);
+        await refreshDefaults(tok, targetOwnerKey);
         console.log('[auth] stored LONG-LIVED FB user token (user-bound) + refreshed defaults');
       } else {
         const tok = accessToken;
         const expSec = 2 * 60 * 60;
         const expiresAt = Date.now() + expSec * 1000;
+        const meta = { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' };
 
-        await setFbUserToken(tok, userOwner);
-        await setFbUserTokenMeta(
-          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-          userOwner
-        );
+        await setFbUserToken(tok, targetOwnerKey);
+        await setFbUserTokenMeta(meta, targetOwnerKey);
 
-        await setFbUserToken(tok, sidOwner);
-        await setFbUserTokenMeta(
-          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-          sidOwner
-        );
+        if (!stateAdminClientId) {
+          await setFbUserToken(tok, sidOwner);
+          await setFbUserTokenMeta(meta, sidOwner);
+        }
 
-        await refreshDefaults(tok, userOwner);
+        await refreshDefaults(tok, targetOwnerKey);
         console.log('[auth] stored SHORT-LIVED FB user token (user-bound) + refreshed defaults');
       }
     } catch {
       const tok = accessToken;
       const expSec = 2 * 60 * 60;
       const expiresAt = Date.now() + expSec * 1000;
+      const meta = { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' };
 
-      await setFbUserToken(tok, userOwner);
-      await setFbUserTokenMeta(
-        { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-        userOwner
-      );
+      await setFbUserToken(tok, targetOwnerKey);
+      await setFbUserTokenMeta(meta, targetOwnerKey);
 
-      await setFbUserToken(tok, sidOwner);
-      await setFbUserTokenMeta(
-        { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-        sidOwner
-      );
+      if (!stateAdminClientId) {
+        await setFbUserToken(tok, sidOwner);
+        await setFbUserTokenMeta(meta, sidOwner);
+      }
 
-      await refreshDefaults(tok, userOwner);
+      await refreshDefaults(tok, targetOwnerKey);
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
