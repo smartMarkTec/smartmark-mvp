@@ -170,6 +170,134 @@ router.post("/gpt-chat", limitChat, async (req, res) => {
   }
 });
 
+// ---------- Vision-based copy generation for uploaded images ----------
+// Uses gpt-4o vision to actually analyze the uploaded image and write
+// ad copy that matches what is visually present in the photo.
+// Falls back to context-only copy if vision fails.
+const limitVision = basicRateLimit({ windowMs: 60 * 1000, max: 10 });
+
+router.post("/generate-copy-for-uploaded-image", limitVision, async (req, res) => {
+  const { image, campaignState } = req.body || {};
+
+  if (!image || typeof image !== "string") {
+    return res.status(400).json({ ok: false, error: "image field required (URL or data URL)" });
+  }
+
+  // Build campaign context for the prompt
+  const cs = campaignState || {};
+  const ctxParts = [];
+  if (cs.businessName)    ctxParts.push(`Business: ${cs.businessName}`);
+  if (cs.objective)       ctxParts.push(`Campaign objective: ${cs.objective}`);
+  if (cs.offer)           ctxParts.push(`Offer/promotion: ${cs.offer}`);
+  if (cs.service)         ctxParts.push(`Service or product: ${cs.service}`);
+  if (cs.location)        ctxParts.push(`Location: ${cs.location}`);
+  if (cs.idealCustomer)   ctxParts.push(`Target customer: ${cs.idealCustomer}`);
+
+  const ctxBlock = ctxParts.length
+    ? `\n\nCampaign context (use this to match the copy to the business):\n${ctxParts.join("\n")}`
+    : "";
+
+  const prompt = [
+    "You are an expert Facebook/Instagram ad copywriter.",
+    "Analyze this image carefully. Look at what is literally shown: products, people,",
+    "equipment, branding, locations, services, etc.",
+    "Write ad copy that directly references what is in the image.",
+    ctxBlock,
+    "\nReturn ONLY a JSON object with exactly these three keys:",
+    '{"headline":"5 to 10 word headline referencing the image","body":"2 to 3 sentence body copy matching the image and business","imageObservation":"one sentence describing what the image shows"}'
+  ].join(" ");
+
+  const visionModel = process.env.OPENAI_VISION_MODEL || process.env.OPENAI_MODEL || "gpt-4o";
+
+  // Determine whether to pass the image as a URL or as a base64 data URL.
+  // OpenAI accepts both; data URLs are sent inline, https:// URLs are fetched by OpenAI.
+  const isDataUrl = image.startsWith("data:");
+  const isHttpUrl = image.startsWith("http://") || image.startsWith("https://");
+
+  if (!isDataUrl && !isHttpUrl) {
+    return res.status(400).json({ ok: false, error: "image must be a data URL or https:// URL" });
+  }
+
+  // Reject data URLs that are obviously too large (>8 MB base64 ≈ ~6 MB image)
+  if (isDataUrl && image.length > 8 * 1024 * 1024) {
+    console.warn("[vision] data URL too large, skipping vision — will fallback to context-only");
+    return runFallback(res, cs, ctxBlock);
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: visionModel,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: image, detail: "high" },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+      max_tokens: 400,
+      response_format: { type: "json_object" },
+    });
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() || "{}";
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+
+    const headline = String(parsed.headline || "").trim().slice(0, 55);
+    const body     = String(parsed.body || "").trim();
+    const obs      = String(parsed.imageObservation || "").trim();
+
+    if (!headline && !body) {
+      console.warn("[vision] model returned empty copy, falling back to context-only");
+      return runFallback(res, cs, ctxBlock);
+    }
+
+    console.log(`[vision] copy generated via ${visionModel} — obs: "${obs}"`);
+    return res.json({ ok: true, headline, body, imageObservation: obs, usedVision: true });
+  } catch (err) {
+    console.error("[vision] vision call failed:", err?.message || err);
+    // Fall back to context-only copy — never surface "can't view image" to user
+    return runFallback(res, cs, ctxBlock);
+  }
+});
+
+async function runFallback(res, cs, ctxBlock) {
+  const fallbackPrompt = [
+    "You are an expert Facebook/Instagram ad copywriter.",
+    "Write compelling ad copy for this business based on the campaign details below.",
+    ctxBlock,
+    "\nReturn ONLY a JSON object with exactly these three keys:",
+    '{"headline":"5 to 10 word headline","body":"2 to 3 sentence body copy","imageObservation":""}'
+  ].join(" ");
+
+  try {
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const fb = await client.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: fallbackPrompt }],
+      max_tokens: 300,
+      response_format: { type: "json_object" },
+    });
+    const raw2 = fb.choices?.[0]?.message?.content?.trim() || "{}";
+    let p2;
+    try { p2 = JSON.parse(raw2); } catch { p2 = {}; }
+    return res.json({
+      ok: true,
+      headline: String(p2.headline || "").trim().slice(0, 55),
+      body: String(p2.body || "").trim(),
+      imageObservation: "",
+      usedVision: false,
+    });
+  } catch (err2) {
+    console.error("[vision] fallback also failed:", err2?.message || err2);
+    return res.status(500).json({ ok: false, error: "Copy generation failed" });
+  }
+}
+
 // ---------- coherent multi-sentence subline generator (28–60 words) ----------
 router.post("/coherent-subline", limitSubline, async (req, res) => {
   const { answers = {}, category = "generic" } = req.body || {};

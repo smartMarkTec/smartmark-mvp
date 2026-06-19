@@ -2068,30 +2068,73 @@ useEffect(() => {
   }
 
   /* ---- Generate ad copy from uploaded photo ---- */
+  // Sends the actual image to the backend vision route so GPT-4o can SEE the photo
+  // and write copy that matches what is visually in it.
+  // Prefers server-hosted URL (imageUrls[0]) so OpenAI fetches it directly;
+  // falls back to the data URL (userUploadedImage) if no server URL is available.
   async function handleGenerateCopyForUpload() {
-    if (!imageUrls[0] && !userUploadedImage) return;
+    // Accept either: server URL after upload, or raw data URL before upload completes
+    // Prefer userUploadedImage (data URL) — exact preview the user sees.
+    // Fall back to the server-hosted URL if the data URL is not available.
+    const imageToSend = userUploadedImage || imageUrls[0];
+    if (!imageToSend) return;
+
     setLoading(true);
-    setChatHistory((ch) => [...ch, { from: "gpt", text: "Generating ad copy for your photo…" }]);
+    const THINKING_MSG = "Analyzing your photo and writing matched ad copy…";
+    setChatHistory((ch) => [...ch, { from: "gpt", text: THINKING_MSG }]);
+
     try {
-      const smartCopy = await summarizeAdCopy({
-        ...(answers || {}),
-        ...(imageUrls[0] || userUploadedImage
-          ? { userImage: imageUrls[0] || userUploadedImage }
-          : {}),
+      const r = await fetch(`${API_BASE}/generate-copy-for-uploaded-image`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: imageToSend,
+          campaignState: {
+            adminClientId: adminClientId || null,
+            businessName: answers?.businessName || null,
+            objective: selectedObjective?.label || aiRecommendedObjective?.label || null,
+            offer: answers?.offer || answers?.saveAmount || null,
+            service: answers?.service || answers?.mainServices || null,
+            location: answers?.location || null,
+            idealCustomer: answers?.idealCustomer || null,
+          },
+        }),
       });
-      const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
-      const aiBody = smartCopy?.subline || smartCopy?.body || "";
-      if (aiHeadline || aiBody) {
-        setResult((prev) => ({ ...(prev || {}), headline: aiHeadline, body: aiBody }));
+
+      const data = await r.json().catch(() => ({}));
+
+      if (r.ok && data.ok && (data.headline || data.body)) {
+        const headline = (data.headline || "").slice(0, 55);
+        const body     = data.body || "";
+
+        setResult((prev) => ({ ...(prev || {}), headline, body }));
         setCopyGenerated(true);
-        const msg = `Here's your ad copy:\n\n**${aiHeadline}**\n\n${aiBody}`;
+
+        const srcLabel = data.usedVision
+          ? "based on your photo"
+          : "based on your campaign details";
+        const obsLine = data.imageObservation
+          ? `\n\n*Photo: ${data.imageObservation}*`
+          : "";
+        const msg = `Here's your ad copy (${srcLabel}):\n\n**${headline}**\n\n${body}${obsLine}`;
+
         setChatHistory((ch) => [
-          ...ch.filter((m) => m.text !== "Generating ad copy for your photo…"),
+          ...ch.filter((m) => m.text !== THINKING_MSG),
           { from: "gpt", text: msg },
         ]);
+      } else {
+        setChatHistory((ch) => [
+          ...ch.filter((m) => m.text !== THINKING_MSG),
+          { from: "gpt", text: "Copy generation failed. Please try again." },
+        ]);
       }
-    } catch {
-      setChatHistory((ch) => [...ch, { from: "gpt", text: "Copy generation failed. Please try again." }]);
+    } catch (err) {
+      console.error("[generateCopyForUpload]", err?.message || err);
+      setChatHistory((ch) => [
+        ...ch.filter((m) => m.text !== THINKING_MSG),
+        { from: "gpt", text: "Copy generation failed. Please try again." },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -3479,9 +3522,15 @@ async function generatePosterBPair(runToken) {
                   <div style={{ fontSize: 13, color: "#7b74c0", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
                     <Dotty /> Uploading photo...
                   </div>
-                ) : imageUrls[0] ? (
+                ) : (userUploadedImage || imageUrls[0]) ? (
+                  // Show photo preview + Generate Copy as soon as EITHER the data URL or server URL exists.
+                  // Prefer userUploadedImage for display (matches what the user sees) and for vision analysis.
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <img src={imageUrls[0]} alt="Your photo" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 8, border: "2px solid #6c63d4" }} />
+                    <img
+                      src={userUploadedImage || imageUrls[0]}
+                      alt="Your photo"
+                      style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 8, border: "2px solid #6c63d4" }}
+                    />
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 13, color: "#4c3db0" }}>Photo selected</div>
                       <div style={{ fontSize: 11, color: "#7b74c0" }}>Ready to continue</div>
