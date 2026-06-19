@@ -16,6 +16,47 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { nanoid } = require('nanoid');
+const { getFbUserToken } = require('../tokenStore');
+const { executeAction } = require('../optimizerAction');
+const {
+  findOptimizerCampaignStateByCampaignId,
+  updateOptimizerCampaignState,
+  appendAiHistoryEntry,
+} = require('../optimizerCampaignState');
+
+// Extracts the creative patch fields from an executeAction result.
+function buildCreativePatch(action) {
+  const result = action?.actionResult || null;
+  const imageUrls = Array.isArray(result?.imageUrls)
+    ? result.imageUrls.filter(Boolean)
+    : Array.isArray(result?.sourceGeneratedCreatives)
+    ? result.sourceGeneratedCreatives.filter(Boolean)
+    : [];
+  const patch = {};
+  if (result?.pendingCreativeTest && typeof result.pendingCreativeTest === 'object') {
+    patch.pendingCreativeTest = result.pendingCreativeTest;
+  } else if (imageUrls.length) {
+    patch.pendingCreativeTest = {
+      status: 'ready',
+      sourceActionType: 'generate_single_creative_variant',
+      variantCount: imageUrls.length,
+      creativeGoal:      String(result?.creativeGoal || '').trim(),
+      generationReason:  String(result?.generationReason || '').trim(),
+      generatedAt:       String(action?.generatedAt || new Date().toISOString()).trim(),
+      imageUrls,
+    };
+  }
+  if (imageUrls.length) {
+    patch.latestCreativeMeta = {
+      sourceActionType:  'generate_single_creative_variant',
+      creativeGoal:      String(result?.creativeGoal || '').trim(),
+      generationReason:  String(result?.generationReason || '').trim(),
+      generatedAt:       String(action?.generatedAt || new Date().toISOString()).trim(),
+      imageUrls,
+    };
+  }
+  return patch;
+}
 
 // ── Auth helpers (same pattern as campaigns.js / adAgent.js) ─────────────────
 const COOKIE_NAME = 'sm_sid';
@@ -505,6 +546,124 @@ router.patch('/ai-proposal/:id', async (req, res) => {
   } catch (err) {
     console.error('[aiProposal] patch error:', err?.message);
     return res.status(500).json({ ok: false, error: 'Failed to update proposal.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/ai-proposal/:id/apply
+// Executes the proposal's action via the optimizer pipeline, then marks it
+// applied (or failed). This is what "Approve & Apply" calls — it actually
+// mutates Meta, not just marks the record approved.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/ai-proposal/:id/apply', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { id } = req.params;
+    const proposal = db.data.ai_action_proposals.find(
+      (p) => p.id === id && String(p.ownerKey || '') === ownerKey
+    );
+    if (!proposal) return res.status(404).json({ ok: false, error: 'Proposal not found.' });
+
+    if (!['pending', 'approved'].includes(proposal.status)) {
+      return res.status(400).json({
+        ok: false,
+        error: `Proposal cannot be applied (status: ${proposal.status}).`,
+      });
+    }
+
+    if (proposal.actionType !== 'generate_single_creative_variant') {
+      return res.status(400).json({
+        ok: false,
+        error: `Action type '${proposal.actionType}' cannot be automatically applied yet. Contact support.`,
+      });
+    }
+
+    const campaignId = String(proposal.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'Proposal has no campaignId.' });
+
+    const campaignState = await findOptimizerCampaignStateByCampaignId(campaignId).catch(() => null);
+    if (!campaignState) return res.status(404).json({ ok: false, error: 'Campaign optimizer state not found.' });
+
+    const userToken = getFbUserToken(ownerKey);
+    if (!userToken) {
+      return res.status(401).json({
+        ok: false,
+        error: 'No Facebook token found. Please reconnect your Facebook account.',
+      });
+    }
+
+    const synthDecision = {
+      decision:              'launch_creative_test',
+      actionType:            'generate_single_creative_variant',
+      priority:              'high',
+      reason:                `Applying approved proposal ${id} via user-initiated Approve & Apply.`,
+      requiresHumanApproval: false,
+      confidence:            0.95,
+      generatedAt:           new Date().toISOString(),
+      mode:                  'proposal_apply_v1',
+    };
+
+    let actionResult;
+    try {
+      actionResult = await executeAction({
+        optimizerState: { ...campaignState, latestDecision: synthDecision },
+        userToken,
+      });
+    } catch (execErr) {
+      console.error('[ai-proposal/apply] executeAction failed:', execErr?.message);
+      const now = new Date().toISOString();
+      proposal.status    = 'failed';
+      proposal.updatedAt = now;
+      proposal.error     = String(execErr?.message || 'execution failed').slice(0, 500);
+      await db.write();
+      return res.status(500).json({
+        ok: false,
+        error: proposal.error,
+        proposalStatus: 'failed',
+      });
+    }
+
+    // Persist creative patch to optimizer state
+    const creativePatch = buildCreativePatch(actionResult);
+    await updateOptimizerCampaignState(campaignId, {
+      latestDecision: synthDecision,
+      latestAction:   actionResult,
+      ...creativePatch,
+    }).catch((e) => console.error('[ai-proposal/apply] state persist error:', e?.message));
+
+    await appendAiHistoryEntry(campaignId, {
+      type:       'action',
+      timestamp:  actionResult?.generatedAt || new Date().toISOString(),
+      title:      'Applied approved proposal',
+      summary:    String(actionResult?.status || '').trim(),
+      reason:     `User approved and applied proposal ${id} via Ad Agent.`,
+      actionType: 'generate_single_creative_variant',
+      source:     'proposal_apply',
+    }).catch(() => {});
+
+    const now = new Date().toISOString();
+    proposal.status     = 'applied';
+    proposal.updatedAt  = now;
+    proposal.approvedAt = proposal.approvedAt || now;
+    proposal.appliedAt  = now;
+    proposal.result     = {
+      actionType:   actionResult?.actionType,
+      actionStatus: actionResult?.status,
+    };
+    await db.write();
+
+    return res.json({
+      ok:             true,
+      proposalStatus: 'applied',
+      actionType:     actionResult?.actionType,
+      actionStatus:   actionResult?.status,
+    });
+  } catch (err) {
+    console.error('[ai-proposal/apply] error:', err?.message);
+    return res.status(500).json({ ok: false, error: 'Failed to apply proposal.' });
   }
 });
 

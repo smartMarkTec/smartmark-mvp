@@ -113,10 +113,22 @@ async function upsertOptimizerCampaignState(input = {}) {
     businessContext: safeObject(input.businessContext, {}),
     businessBrief: safeNullableObject(input.businessBrief),
     currentStatus: String(input.currentStatus || 'ACTIVE').trim(),
+    // Default: false — Autopilot must be explicitly enabled by the user via AI Settings.
     optimizationEnabled:
       typeof input.optimizationEnabled === 'boolean'
         ? input.optimizationEnabled
+        : false,
+
+    // AI control settings — safe defaults until the user explicitly configures them.
+    aiSettingsInitialized:
+      typeof input.aiSettingsInitialized === 'boolean'
+        ? input.aiSettingsInitialized
+        : false,
+    aiApprovalRequired:
+      typeof input.aiApprovalRequired === 'boolean'
+        ? input.aiApprovalRequired
         : true,
+    aiSettingsUpdatedAt: String(input.aiSettingsUpdatedAt || '').trim(),
 
     billingBlocked:
       typeof input.billingBlocked === 'boolean'
@@ -332,6 +344,43 @@ async function appendAiHistoryEntry(campaignId, entry, options = {}) {
   return list[index];
 }
 
+// Creates an AI action proposal record in db.data.ai_action_proposals.
+// Used by the orchestrator and AI agent when aiApprovalRequired is true.
+async function createActionProposal({
+  ownerKey,
+  campaignId,
+  actionType,
+  title,
+  reasoning = '',
+  proposedChanges = null,
+  riskLevel = 'medium',
+}) {
+  await db.read();
+  db.data.ai_action_proposals = Array.isArray(db.data.ai_action_proposals)
+    ? db.data.ai_action_proposals
+    : [];
+  const crypto = require('crypto');
+  const now = new Date().toISOString();
+  const proposal = {
+    id:              crypto.randomBytes(6).toString('hex'),
+    ownerKey:        String(ownerKey || ''),
+    campaignId:      String(campaignId || ''),
+    actionType:      String(actionType || ''),
+    title:           String(title || '').slice(0, 200),
+    reasoning:       String(reasoning || '').slice(0, 1000),
+    proposedChanges: proposedChanges || null,
+    riskLevel:       ['low', 'medium', 'high'].includes(riskLevel) ? riskLevel : 'medium',
+    status:          'pending',
+    createdAt:       now,
+    updatedAt:       now,
+    approvedAt:      null,
+    executedAt:      null,
+  };
+  db.data.ai_action_proposals.push(proposal);
+  await db.write();
+  return proposal;
+}
+
 module.exports = {
   ensureOptimizerCampaignStateShape,
   getAllOptimizerCampaignStates,
@@ -341,4 +390,5 @@ module.exports = {
   upsertOptimizerCampaignState,
   updateOptimizerCampaignState,
   appendAiHistoryEntry,
+  createActionProposal,
 };

@@ -4000,7 +4000,12 @@ const optimizerPayload = {
   planKey: String(launchPlanLimits.planKey || 'starter').trim(),
   planLabel: String(launchPlanLimits.planLabel || 'Standard').trim(),
   currentStatus: String(campaignStatus || '').trim(),
-  optimizationEnabled: !VALIDATE_ONLY,
+  // New campaigns start with Autopilot OFF and Approval Required ON.
+  // The user must explicitly enable Autopilot in the AI Settings panel
+  // before any automatic optimizer cycle can run on this campaign.
+  optimizationEnabled:   false,
+  aiApprovalRequired:    true,
+  aiSettingsInitialized: false,
   billingBlocked: false,
   metricsSnapshot: {},
   latestAction: null,
@@ -6187,6 +6192,98 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/archive-meta', 
       error: metaErr?.message || err.message || 'Failed to stop campaign on Meta',
       campaignId: normalizedCampaignId,
     });
+  }
+});
+
+// ── AI Control Settings ──────────────────────────────────────────────────────
+// GET  /auth/facebook/adaccount/:accountId/campaign/:campaignId/ai-settings
+// PATCH /auth/facebook/adaccount/:accountId/campaign/:campaignId/ai-settings
+//
+// aiAutopilotEnabled maps to the existing optimizationEnabled field.
+// aiApprovalRequired is a new field; defaults false (undefined) for existing campaigns.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/ai-settings', async (req, res) => {
+  const { campaignId } = req.params;
+  const id = String(campaignId || '').trim();
+  if (!id) return res.status(400).json({ error: 'campaignId is required' });
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
+    const state = (db.data.optimizer_campaign_state || []).find(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+
+    return res.json({
+      ok: true,
+      campaignId: id,
+      // aiSettingsInitialized tracks whether the user has ever explicitly saved
+      // their AI control settings. If not, we show safe defaults in the UI (OFF/ON)
+      // without changing backend optimizer behavior for existing campaigns.
+      aiSettingsInitialized: state?.aiSettingsInitialized === true,
+      aiAutopilotEnabled: state?.aiSettingsInitialized === true
+        ? (state.optimizationEnabled !== false)
+        : false,  // safe default: OFF until user explicitly enables
+      aiApprovalRequired: state?.aiSettingsInitialized === true
+        ? (state.aiApprovalRequired === true)
+        : true,   // safe default: ON until user explicitly disables
+      aiSettingsUpdatedAt: state?.aiSettingsUpdatedAt || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Failed to load AI settings' });
+  }
+});
+
+router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/ai-settings', async (req, res) => {
+  const { campaignId } = req.params;
+  const id = String(campaignId || '').trim();
+  if (!id) return res.status(400).json({ error: 'campaignId is required' });
+  try {
+    await db.read();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ error: 'Not authenticated' });
+
+    const { aiAutopilotEnabled, aiApprovalRequired } = req.body || {};
+    const now = new Date().toISOString();
+    const patch = {
+      ...(typeof aiAutopilotEnabled === 'boolean' && { optimizationEnabled: aiAutopilotEnabled }),
+      ...(typeof aiApprovalRequired === 'boolean' && { aiApprovalRequired }),
+      aiSettingsInitialized: true,  // explicit save — user has configured these settings
+      aiSettingsUpdatedAt: now,
+    };
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const sIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    let state;
+    if (sIdx !== -1) {
+      Object.assign(db.data.optimizer_campaign_state[sIdx], patch);
+      state = db.data.optimizer_campaign_state[sIdx];
+    } else {
+      const stub = { campaignId: id, ownerKey, ...patch };
+      db.data.optimizer_campaign_state.push(stub);
+      state = stub;
+    }
+
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+    const ccIdx = db.data.campaign_creatives.findIndex(
+      (r) => String(r.campaignId || '') === id && String(r.ownerKey || '') === ownerKey
+    );
+    if (ccIdx !== -1) Object.assign(db.data.campaign_creatives[ccIdx], patch);
+
+    await db.write();
+    return res.json({
+      ok: true,
+      campaignId: id,
+      aiSettingsInitialized: true,
+      aiAutopilotEnabled: state.optimizationEnabled !== false,
+      aiApprovalRequired: state.aiApprovalRequired === true,
+      aiSettingsUpdatedAt: state.aiSettingsUpdatedAt || now,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Failed to save AI settings' });
   }
 });
 

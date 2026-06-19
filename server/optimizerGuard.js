@@ -1,5 +1,7 @@
 'use strict';
 
+const { getEffectiveAiControlSettings } = require('./aiControlSettings');
+
 // Statuses that mean a campaign is definitively over — no optimizer should touch it.
 const TERMINAL_STATUSES = new Set([
   'ARCHIVED',
@@ -20,6 +22,19 @@ function shouldSkipOptimizationForCampaign(state) {
     return { skip: true, reason: 'invalid_state' };
   }
 
+  // ── AI Control Settings gate ──────────────────────────────────────────────
+  // Effective Autopilot is OFF when:
+  //   (a) aiSettingsInitialized is not yet true (user has never configured settings), OR
+  //   (b) the user explicitly turned Autopilot OFF (optimizationEnabled === false)
+  //
+  // This protects both legacy campaigns (no explicit settings) and new campaigns
+  // from unintended automatic optimizer cycles.
+  const { aiAutopilotEnabled } = getEffectiveAiControlSettings(state);
+  if (!aiAutopilotEnabled) {
+    return { skip: true, reason: 'autopilot_off_or_not_initialized' };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Explicit Smartemark archive flag (set by the /archive route).
   if (state.smArchived === true) {
     return { skip: true, reason: 'campaign_sm_archived' };
@@ -30,7 +45,8 @@ function shouldSkipOptimizationForCampaign(state) {
     return { skip: true, reason: 'campaign_archived' };
   }
 
-  // Optimization explicitly disabled by any mechanism (archive, billing, admin).
+  // optimizationEnabled === false is now also caught by the getEffectiveAiControlSettings
+  // check above, but keep this for any path that sets it directly (billing block, admin).
   if (state.optimizationEnabled === false) {
     return { skip: true, reason: 'optimization_disabled' };
   }

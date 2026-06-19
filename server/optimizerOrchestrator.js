@@ -4,7 +4,9 @@ const {
   findOptimizerCampaignStateByCampaignId,
   updateOptimizerCampaignState,
   appendAiHistoryEntry,
+  createActionProposal,
 } = require('./optimizerCampaignState');
+const { getEffectiveAiControlSettings } = require('./aiControlSettings');
 const {
   syncCampaignMetricsToOptimizerState,
 } = require('./optimizerMetricsSync');
@@ -196,16 +198,52 @@ async function runFullOptimizerCycle({
 
   state = await safeReloadState(normalizedCampaignId, 'after first decision');
 
-  const action = DRY_RUN
-    ? {
-        actionType: 'dry_run_skipped',
-        skipped: true,
-        dryRun: true,
-        plannedActionType: decisionBeforeAction?.actionType || 'unknown',
-        reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
-        generatedAt: new Date().toISOString(),
-      }
-    : await executeAction({ optimizerState: state, userToken });
+  // Approval gate: use effective settings so that uninitialized campaigns also
+  // require approval (aiApprovalRequired defaults to true when not initialized).
+  // shouldSkipOptimizationForCampaign already blocked the cycle if autopilot is OFF,
+  // so we only reach here when autopilot is ON — but approval may still be required.
+  const { aiApprovalRequired: _effectiveApprovalRequired } = getEffectiveAiControlSettings(state);
+  const _needsApproval = _effectiveApprovalRequired &&
+    !DRY_RUN &&
+    !isNonExecutableActionType(decisionBeforeAction?.actionType);
+
+  let action;
+  if (_needsApproval) {
+    const _proposal = await createActionProposal({
+      ownerKey:    normalizedOwnerKey,
+      campaignId:  normalizedCampaignId,
+      actionType:  decisionBeforeAction.actionType,
+      title:       `Proposed: ${decisionBeforeAction.actionType.replace(/_/g, ' ')}`,
+      reasoning:   String(decisionBeforeAction.reason || decisionBeforeAction.reasoning || '').slice(0, 1000),
+      riskLevel:   'medium',
+    }).catch((e) => { console.warn('[orchestrator] proposal create failed:', e?.message); return null; });
+
+    action = {
+      actionType:        'queued_for_approval',
+      skipped:           true,
+      approvalRequired:  true,
+      proposalId:        _proposal?.id || null,
+      plannedActionType: decisionBeforeAction.actionType,
+      reason:            'aiApprovalRequired=true — action queued for user approval before Meta mutation.',
+      generatedAt:       new Date().toISOString(),
+    };
+    console.log('[optimizer orchestrator] action queued for approval:', {
+      campaignId: normalizedCampaignId,
+      actionType: decisionBeforeAction.actionType,
+      proposalId: _proposal?.id,
+    });
+  } else {
+    action = DRY_RUN
+      ? {
+          actionType: 'dry_run_skipped',
+          skipped: true,
+          dryRun: true,
+          plannedActionType: decisionBeforeAction?.actionType || 'unknown',
+          reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
+          generatedAt: new Date().toISOString(),
+        }
+      : await executeAction({ optimizerState: state, userToken });
+  }
   await persistAction(normalizedCampaignId, action);
   cycle.action = action;
 
@@ -237,16 +275,39 @@ async function runFullOptimizerCycle({
     secondActionType !== firstActionType;
 
   if (shouldRunSecondAction) {
-    const secondAction = DRY_RUN
-      ? {
-          actionType: 'dry_run_skipped',
-          skipped: true,
-          dryRun: true,
-          plannedActionType: decisionAfterMonitoring?.actionType || 'unknown',
-          reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
-          generatedAt: new Date().toISOString(),
-        }
-      : await executeAction({ optimizerState: state, userToken });
+    const { aiApprovalRequired: _effectiveApprovalRequired2 } = getEffectiveAiControlSettings(state);
+    const _needsApproval2 = _effectiveApprovalRequired2 && !DRY_RUN;
+    let secondAction;
+    if (_needsApproval2) {
+      const _p2 = await createActionProposal({
+        ownerKey:   normalizedOwnerKey,
+        campaignId: normalizedCampaignId,
+        actionType: decisionAfterMonitoring.actionType,
+        title:      `Proposed: ${decisionAfterMonitoring.actionType.replace(/_/g, ' ')}`,
+        reasoning:  String(decisionAfterMonitoring.reason || decisionAfterMonitoring.reasoning || '').slice(0, 1000),
+        riskLevel:  'medium',
+      }).catch((e) => { console.warn('[orchestrator] proposal create (2nd) failed:', e?.message); return null; });
+      secondAction = {
+        actionType:        'queued_for_approval',
+        skipped:           true,
+        approvalRequired:  true,
+        proposalId:        _p2?.id || null,
+        plannedActionType: decisionAfterMonitoring.actionType,
+        reason:            'aiApprovalRequired=true — second action queued for user approval.',
+        generatedAt:       new Date().toISOString(),
+      };
+    } else {
+      secondAction = DRY_RUN
+        ? {
+            actionType: 'dry_run_skipped',
+            skipped: true,
+            dryRun: true,
+            plannedActionType: decisionAfterMonitoring?.actionType || 'unknown',
+            reason: 'Dry-run mode active (SMARTEMARK_AI_OPERATOR_DRY_RUN=1). No Facebook API calls made.',
+            generatedAt: new Date().toISOString(),
+          }
+        : await executeAction({ optimizerState: state, userToken });
+    }
 
     await persistAction(normalizedCampaignId, secondAction);
     cycle.secondAction = secondAction;

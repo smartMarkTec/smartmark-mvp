@@ -17,6 +17,7 @@ import {
   FaRobot,
   FaLock,
   FaUsers,
+  FaCog,
 } from "react-icons/fa";
 import { trackEvent } from "../analytics/gaEvents";
 
@@ -3515,6 +3516,14 @@ useEffect(() => {
   const [showArchived, setShowArchived] = useState(false);
   // null | campaignId — when set, the 3-dot menu shows an inline "Delete / Stop Campaign" confirm
   const [archiveMetaConfirmId, setArchiveMetaConfirmId] = useState(null);
+  // AI Control Settings panel
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const [aiSettings, setAiSettings] = useState({
+    aiAutopilotEnabled:    false,  // safe default: OFF
+    aiApprovalRequired:    true,   // safe default: ON
+    aiSettingsInitialized: false,  // false = user has never explicitly saved settings
+  });
+  const [aiSettingsSaving, setAiSettingsSaving] = useState(false);
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -4700,6 +4709,14 @@ useEffect(() => {
 // Reset campaign subtab to overview when selection changes
 useEffect(() => { setCampaignSubtab("overview"); }, [selectedCampaignId]);
 
+// Load AI settings when campaign selection or account changes
+useEffect(() => {
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  loadAiSettings(selectedCampaignId, acctId);
+  // eslint-disable-next-line
+}, [selectedCampaignId, selectedAccount, adminClientId]);
+
 // ── Admin-client exit guard: wipe ALL client-derived maps the instant adminClientId
 // transitions from a non-empty value to "". This fires even if exitClientMode had
 // batching issues, and provides a second line of defence against the 403.
@@ -5597,6 +5614,64 @@ const handleHideFromHistory = async (campaignId) => {
   }
   setLoading(false);
 };
+
+// ── AI Control Settings ────────────────────────────────────────────────────
+const loadAiSettings = async (campaignId, acctId) => {
+  if (!campaignId || campaignId === "__DRAFT__") return;
+  try {
+    let r;
+    if (adminClientId) {
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      r = await fetch(
+        `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/ai-settings`,
+        { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} }
+      );
+    } else {
+      r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/ai-settings`);
+    }
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      setAiSettings({
+        aiSettingsInitialized: d.aiSettingsInitialized === true,
+        aiAutopilotEnabled:    d.aiAutopilotEnabled === true,
+        aiApprovalRequired:    d.aiApprovalRequired !== false,
+      });
+    }
+  } catch {}
+};
+
+const saveAiSettings = async (patch) => {
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  const next = { ...aiSettings, ...patch };
+  setAiSettings(next);
+  setAiSettingsSaving(true);
+  try {
+    let r;
+    if (adminClientId) {
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      r = await fetch(
+        `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(selectedCampaignId)}/ai-settings`,
+        {
+          method: "PATCH", credentials: "include",
+          headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+          body: JSON.stringify(next),
+        }
+      );
+    } else {
+      r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/ai-settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+    }
+    if (!r.ok) throw new Error("Save failed");
+  } catch {
+    // Non-critical — settings are already shown in local state
+  }
+  setAiSettingsSaving(false);
+};
+// ──────────────────────────────────────────────────────────────────────────
 
 // Stops the campaign on Meta (ARCHIVED or PAUSED), pauses all adsets/ads, then removes
 // it from the Smartemark active list. This is the only safe way to guarantee no further
@@ -8861,6 +8936,29 @@ ${pendingTest ? `
       <FaEllipsisV />
     </button>
 
+    {selectedLiveCampaign && (
+      <button
+        type="button"
+        onClick={() => { setShowAiSettings((v) => !v); setShowCampaignMenu(false); }}
+        title="AI Control Settings"
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          border: showAiSettings ? "1px solid #818cf8" : "1px solid #dbe4ff",
+          background: showAiSettings ? "#eef2ff" : "#ffffff",
+          color: showAiSettings ? "#5b5cf0" : "#6b7280",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          flex: "0 0 auto",
+        }}
+      >
+        <FaCog />
+      </button>
+    )}
+
     {showCampaignMenu && (
       <div
         style={{
@@ -9046,6 +9144,133 @@ ${pendingTest ? `
     )}
   </div>
 </div>
+
+{/* ── AI Control Settings Panel ─────────────────────────────────────────── */}
+{showAiSettings && selectedLiveCampaign && (
+  <div style={{
+    background: "#fff",
+    border: "1px solid #e0e7ff",
+    borderRadius: 14,
+    padding: "18px 20px",
+    marginTop: 8,
+    boxShadow: "0 4px 16px rgba(91,92,240,0.08)",
+  }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#111827" }}>AI Control Settings</div>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+          {adminClientId ? `Managing: ${adminClientId}` : "This campaign"}
+        </div>
+      </div>
+      {aiSettingsSaving && (
+        <span style={{ fontSize: 11, color: "#9ca3af" }}>Saving…</span>
+      )}
+    </div>
+
+    {/* Autopilot toggle */}
+    <div style={{ background: "#f9fafb", borderRadius: 10, padding: "14px 16px", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#111827", marginBottom: 2 }}>Autopilot</div>
+          <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            {aiSettings.aiAutopilotEnabled
+              ? "AI marketer is active"
+              : "Manual mode — AI can suggest, but cannot act automatically"}
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, lineHeight: 1.5 }}>
+            When enabled, Smartemark can automatically monitor, test, and optimize this campaign.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => saveAiSettings({ aiAutopilotEnabled: !aiSettings.aiAutopilotEnabled })}
+          style={{
+            width: 44,
+            height: 24,
+            borderRadius: 12,
+            border: "none",
+            background: aiSettings.aiAutopilotEnabled ? "#5b5cf0" : "#d1d5db",
+            cursor: "pointer",
+            position: "relative",
+            flexShrink: 0,
+            transition: "background 0.2s",
+          }}
+        >
+          <span style={{
+            position: "absolute",
+            top: 3,
+            left: aiSettings.aiAutopilotEnabled ? 22 : 3,
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+            transition: "left 0.2s",
+          }} />
+        </button>
+      </div>
+    </div>
+
+    {/* Require Approval toggle */}
+    <div style={{ background: "#f9fafb", borderRadius: 10, padding: "14px 16px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#111827", marginBottom: 2 }}>Require Approval</div>
+          <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            {aiSettings.aiApprovalRequired
+              ? "Approval required before Meta changes"
+              : aiSettings.aiAutopilotEnabled
+                ? "AI can apply approved autopilot actions automatically"
+                : "Manual mode — confirmation always required"}
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, lineHeight: 1.5 }}>
+            AI must ask before applying campaign changes to Meta.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => saveAiSettings({ aiApprovalRequired: !aiSettings.aiApprovalRequired })}
+          style={{
+            width: 44,
+            height: 24,
+            borderRadius: 12,
+            border: "none",
+            background: aiSettings.aiApprovalRequired ? "#5b5cf0" : "#d1d5db",
+            cursor: "pointer",
+            position: "relative",
+            flexShrink: 0,
+            transition: "background 0.2s",
+          }}
+        >
+          <span style={{
+            position: "absolute",
+            top: 3,
+            left: aiSettings.aiApprovalRequired ? 22 : 3,
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+            transition: "left 0.2s",
+          }} />
+        </button>
+      </div>
+    </div>
+
+    {!aiSettings.aiSettingsInitialized && (
+      <div style={{
+        fontSize: 12, color: "#92400e", fontWeight: 600, lineHeight: 1.6,
+        background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8,
+        padding: "8px 12px", marginBottom: 10,
+      }}>
+        Safe default active — AI will not make automatic changes until Autopilot is turned on.
+      </div>
+    )}
+    <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.6, borderTop: "1px solid #f3f4f6", paddingTop: 10 }}>
+      Manual mode does not stop existing Meta ads. Use Pause or Delete / Stop Campaign to stop spend.
+    </div>
+  </div>
+)}
 
 {showCampaignDetails && selectedLiveCampaign && (() => {
   const detId = String(selectedLiveCampaign.id || "").trim();

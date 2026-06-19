@@ -13,8 +13,10 @@ const {
   findOptimizerCampaignStateByCampaignId,
   updateOptimizerCampaignState,
   appendAiHistoryEntry,
+  createActionProposal,
 } = require('../optimizerCampaignState');
 const { executeAction } = require('../optimizerAction');
+const { getEffectiveAiControlSettings } = require('../aiControlSettings');
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -1175,6 +1177,45 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         return res.json({
           ok: true,
           reply: 'No Meta access token found. Please reconnect your Facebook account in Settings, then try again.',
+        });
+      }
+
+      // AI control gate — uses the central effective-settings helper so that
+      // uninitialized campaigns (no explicit aiSettingsInitialized) are treated
+      // the same as Autopilot OFF + Approval Required ON.
+      //
+      //   • Effective Autopilot OFF → always queue as proposal
+      //   • Effective Autopilot ON + Approval Required ON → queue as proposal
+      //   • Effective Autopilot ON + Approval Required OFF → execute directly
+      //
+      // "Approve & Apply" bypasses this gate — it calls POST /api/ai-proposal/:id/apply
+      // directly, which is the explicit user-confirmation path.
+      const { aiAutopilotEnabled: _autopilot, aiApprovalRequired: _approvalRequired } =
+        getEffectiveAiControlSettings(campaignState);
+      if (!_autopilot || _approvalRequired) {
+        const proposal = await createActionProposal({
+          ownerKey:        effectiveOwnerKey,
+          campaignId:      safeCampaignId,
+          actionType:      'generate_single_creative_variant',
+          title:           'Generate challenger ad (user requested via Ad Agent)',
+          reasoning:       'User asked Ad Agent to generate a replacement challenger. Approval required before Meta changes are made.',
+          proposedChanges: { adCount: 1, testType: 'creative_variant', requestedBy: 'ad_agent' },
+          riskLevel:       'low',
+        }).catch((e) => {
+          console.error('[AdAgent] proposal create error:', e?.message);
+          return null;
+        });
+
+        return res.json({
+          ok: true,
+          proposalId:       proposal?.id || null,
+          proposalPending:  true,
+          proposalTitle:    'Generate challenger ad',
+          proposalSummary:  'Create 1 new challenger ad variant and start an A/B test',
+          proposalAction:   'generate_single_creative_variant',
+          reply: proposal
+            ? `**Approval required.** I've queued a request to generate a challenger ad for this campaign.\n\nProposed action: **${proposal.title}**\n\nTo approve or reject this change, use the Approve/Reject buttons below or visit the AI Settings panel.`
+            : 'Approval is required for this campaign, but I could not create the proposal record. Please try again or disable approval mode in AI Settings.',
         });
       }
 

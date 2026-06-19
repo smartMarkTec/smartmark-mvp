@@ -2167,4 +2167,94 @@ router.post('/admin/clients/:clientId/campaign/:campaignId/archive-meta', limitA
   }
 });
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   AI Control Settings — admin-client routes
+   ownerKey is ALWAYS user:<clientId>, never the admin's own session.
+───────────────────────────────────────────────────────────────────────────── */
+
+// GET /api/admin/clients/:clientId/campaign/:campaignId/ai-settings
+router.get('/admin/clients/:clientId/campaign/:campaignId/ai-settings', limitAdmin, requireAdmin, async (req, res) => {
+  const clientId   = decodeURIComponent(req.params.clientId || '');
+  const campaignId = String(req.params.campaignId || '').trim();
+  if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
+  if (!clientId)   return res.status(400).json({ error: 'clientId is required' });
+
+  const ownerKey = `user:${clientId}`;
+  try {
+    await db.read();
+    const state = (db.data.optimizer_campaign_state || []).find(
+      (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+    );
+    return res.json({
+      ok: true,
+      campaignId,
+      resolvedOwnerKey: ownerKey,
+      aiSettingsInitialized: state?.aiSettingsInitialized === true,
+      aiAutopilotEnabled: state?.aiSettingsInitialized === true
+        ? (state.optimizationEnabled !== false)
+        : false,
+      aiApprovalRequired: state?.aiSettingsInitialized === true
+        ? (state.aiApprovalRequired === true)
+        : true,
+      aiSettingsUpdatedAt: state?.aiSettingsUpdatedAt || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Failed to load AI settings' });
+  }
+});
+
+// PATCH /api/admin/clients/:clientId/campaign/:campaignId/ai-settings
+router.patch('/admin/clients/:clientId/campaign/:campaignId/ai-settings', limitAdmin, requireAdmin, async (req, res) => {
+  const clientId   = decodeURIComponent(req.params.clientId || '');
+  const campaignId = String(req.params.campaignId || '').trim();
+  if (!campaignId) return res.status(400).json({ error: 'campaignId is required' });
+  if (!clientId)   return res.status(400).json({ error: 'clientId is required' });
+
+  const ownerKey = `user:${clientId}`;
+  try {
+    await db.read();
+    const { aiAutopilotEnabled, aiApprovalRequired } = req.body || {};
+    const now = new Date().toISOString();
+    const patch = {
+      ...(typeof aiAutopilotEnabled === 'boolean' && { optimizationEnabled: aiAutopilotEnabled }),
+      ...(typeof aiApprovalRequired === 'boolean' && { aiApprovalRequired }),
+      aiSettingsInitialized: true,  // explicit save — user has configured these settings
+      aiSettingsUpdatedAt: now,
+    };
+
+    db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+    const sIdx = db.data.optimizer_campaign_state.findIndex(
+      (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+    );
+    let state;
+    if (sIdx !== -1) {
+      Object.assign(db.data.optimizer_campaign_state[sIdx], patch);
+      state = db.data.optimizer_campaign_state[sIdx];
+    } else {
+      const stub = { campaignId, ownerKey, ...patch };
+      db.data.optimizer_campaign_state.push(stub);
+      state = stub;
+    }
+
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+    const ccIdx = db.data.campaign_creatives.findIndex(
+      (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+    );
+    if (ccIdx !== -1) Object.assign(db.data.campaign_creatives[ccIdx], patch);
+
+    await db.write();
+    return res.json({
+      ok: true,
+      campaignId,
+      resolvedOwnerKey: ownerKey,
+      aiSettingsInitialized: true,
+      aiAutopilotEnabled: state.optimizationEnabled !== false,
+      aiApprovalRequired: state.aiApprovalRequired === true,
+      aiSettingsUpdatedAt: state.aiSettingsUpdatedAt || now,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Failed to save AI settings' });
+  }
+});
+
 module.exports = router;

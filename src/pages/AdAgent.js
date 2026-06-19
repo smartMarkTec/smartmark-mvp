@@ -19,10 +19,18 @@ function adAgentAccess(planKey, isAdmin) {
   return "locked"; // base, starter, standard, '', unknown
 }
 
+const SUGGESTED_PROMPTS = [
+  "How are my ads performing?",
+  "Generate a challenger ad for this campaign",
+  "What should I test next?",
+  "Write 3 headline variations for this campaign",
+];
+
 export default function AdAgent() {
   const navigate = useNavigate();
   const [planKey, setPlanKey] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userName, setUserName] = useState("");
   const [planLoading, setPlanLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -41,6 +49,8 @@ export default function AdAgent() {
         const j = await r.json().catch(() => ({}));
         setPlanKey(String(j?.billing?.planKey || j?.planKey || "").trim());
         setIsAdmin(!!j?.user?.isAdmin);
+        const rawName = String(j?.user?.displayName || j?.user?.username || j?.user?.email || "").trim();
+        if (rawName) setUserName(rawName.split("@")[0]);
         // Load persisted chat history — scoped to the effective account (admin-client mode
         // passes adminClientId so the server loads the selected client's history, not TheBoss's)
         const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
@@ -133,7 +143,16 @@ export default function AdAgent() {
       });
       const j = await r.json().catch(() => ({}));
       const reply = j?.reply || "Sorry, something went wrong. Please try again.";
-      const finalMessages = [...updatedMessages, { role: "assistant", content: reply }];
+      const assistantMsg = {
+        role: "assistant",
+        content: reply,
+        // Proposal fields — present when aiApprovalRequired is true and agent queued an action
+        ...(j?.proposalId       && { proposalId:      j.proposalId }),
+        ...(j?.proposalPending  && { proposalPending: true }),
+        ...(j?.proposalTitle    && { proposalTitle:   j.proposalTitle }),
+        ...(j?.proposalSummary  && { proposalSummary: j.proposalSummary }),
+      };
+      const finalMessages = [...updatedMessages, assistantMsg];
       setMessages(finalMessages);
       saveHistory(finalMessages);
     } catch {
@@ -338,41 +357,67 @@ export default function AdAgent() {
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              minHeight: "calc(100vh - 160px)",
+              minHeight: "calc(100vh - 180px)",
               padding: "0 24px",
               textAlign: "center",
             }}
           >
             <div
               style={{
-                width: 60,
-                height: 60,
-                borderRadius: 18,
-                background: "rgba(93,89,234,0.08)",
+                width: 64,
+                height: 64,
+                borderRadius: 20,
+                background: "linear-gradient(135deg, rgba(93,89,234,0.12) 0%, rgba(93,89,234,0.06) 100%)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: 20,
+                marginBottom: 22,
+                boxShadow: "0 2px 12px rgba(93,89,234,0.10)",
               }}
             >
-              <FaRobot style={{ color: PURPLE, fontSize: 26 }} />
+              <FaRobot style={{ color: PURPLE, fontSize: 28 }} />
             </div>
-            <h2 style={{ margin: "0 0 10px", fontSize: "1.5rem", fontWeight: 700, color: TEXT }}>
-              Ad Agent
+            <h2 style={{ margin: "0 0 8px", fontSize: "1.6rem", fontWeight: 800, color: TEXT }}>
+              {userName ? `Hi, ${userName} —` : "Hi —"}
             </h2>
+            <p style={{ margin: "0 0 6px", fontSize: "1.1rem", fontWeight: 600, color: TEXT }}>
+              what would you like to improve today?
+            </p>
             <p
               style={{
-                margin: 0,
+                margin: "0 0 28px",
                 color: TEXT_SOFT,
-                fontSize: 16,
-                maxWidth: 420,
+                fontSize: 14,
+                maxWidth: 380,
                 lineHeight: 1.65,
               }}
             >
-              Ask me about your campaigns, services to promote, ad angles, or how to improve your
-              results.
-              {access === "pixel" && " I can also fetch your Meta Pixel."}
+              I can analyze performance, write ad copy, generate challenger ads, and propose A/B tests
+              {access === "pixel" ? " — and fetch your Meta Pixel." : "."}
             </p>
+            {/* Suggested prompts */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 480 }}>
+              {SUGGESTED_PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => { setInput(p); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 20,
+                    border: "1px solid #e0e7ff",
+                    background: "#f5f3ff",
+                    color: PURPLE,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: FONT,
+                    transition: "background 0.15s",
+                  }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           /* Conversation */
@@ -386,35 +431,113 @@ export default function AdAgent() {
               gap: 18,
             }}
           >
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-                }}
-              >
+            {messages.map((m, i) => {
+              // Proposal card: assistant messages that carry a pending proposal
+              if (m.role === "assistant" && m.proposalId && m.proposalPending) {
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <div style={{ maxWidth: "90%", width: "100%" }}>
+                      <div style={{
+                        background: "#fff7ed",
+                        border: "1px solid #fed7aa",
+                        borderRadius: "16px 16px 16px 4px",
+                        padding: "14px 16px",
+                        marginBottom: 8,
+                        fontFamily: FONT,
+                      }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 4 }}>
+                          Proposed Action
+                        </div>
+                        <div style={{ fontSize: 14, color: "#111827", fontWeight: 600, marginBottom: 4 }}>
+                          {m.proposalTitle || "AI Action"}
+                        </div>
+                        <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.55 }}>
+                          {m.proposalSummary || m.content}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          onClick={async () => {
+                            const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+                            // POST /apply actually executes the action on Meta — not just marks approved
+                            const r = await fetch(`/api/ai-proposal/${m.proposalId}/apply`, {
+                              method: "POST", credentials: "include",
+                              headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+                            }).catch(() => null);
+                            const result = r ? await r.json().catch(() => ({})) : {};
+                            const reply = result.ok
+                              ? `Done — the challenger ad has been created on Meta (status: ${result.actionStatus || "applied"}). Go to the A/B Test tab to review it.`
+                              : `Could not apply: ${result.error || "unknown error"}. Please try again.`;
+                            const updated = messages.map((msg, j) => j === i ? { ...msg, proposalPending: false } : msg);
+                            const final = [...updated, { role: "assistant", content: reply }];
+                            setMessages(final);
+                            saveHistory(final);
+                          }}
+                          style={{
+                            padding: "7px 16px", borderRadius: 8, border: "none",
+                            background: "#111827", color: "#fff", fontSize: 12,
+                            fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                          }}
+                        >
+                          Approve &amp; Apply
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+                            await fetch(`/api/ai-proposal/${m.proposalId}`, {
+                              method: "PATCH", credentials: "include",
+                              headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+                              body: JSON.stringify({ status: "rejected" }),
+                            }).catch(() => null);
+                            const updated = messages.map((msg, j) => j === i ? { ...msg, proposalPending: false } : msg);
+                            const final = [...updated, { role: "assistant", content: "Rejected. No changes were made." }];
+                            setMessages(final);
+                            saveHistory(final);
+                          }}
+                          style={{
+                            padding: "7px 16px", borderRadius: 8, border: "1px solid #e5e7eb",
+                            background: "#fff", color: "#374151", fontSize: 12,
+                            fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                          }}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              // Normal message bubble
+              return (
                 <div
+                  key={i}
                   style={{
-                    maxWidth: "84%",
-                    padding: "11px 16px",
-                    borderRadius:
-                      m.role === "user"
-                        ? "18px 18px 4px 18px"
-                        : "18px 18px 18px 4px",
-                    background: m.role === "user" ? "#111827" : "#f3f4f6",
-                    color: m.role === "user" ? "#fff" : TEXT,
-                    fontSize: 14.5,
-                    lineHeight: 1.65,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    fontFamily: FONT,
+                    display: "flex",
+                    justifyContent: m.role === "user" ? "flex-end" : "flex-start",
                   }}
                 >
-                  {m.content}
+                  <div
+                    style={{
+                      maxWidth: "84%",
+                      padding: "11px 16px",
+                      borderRadius:
+                        m.role === "user"
+                          ? "18px 18px 4px 18px"
+                          : "18px 18px 18px 4px",
+                      background: m.role === "user" ? "#111827" : "#f3f4f6",
+                      color: m.role === "user" ? "#fff" : TEXT,
+                      fontSize: 14.5,
+                      lineHeight: 1.65,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      fontFamily: FONT,
+                    }}
+                  >
+                    {m.content}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {sending && (
               <div style={{ display: "flex", justifyContent: "flex-start" }}>
                 <div
