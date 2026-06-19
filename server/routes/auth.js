@@ -5961,6 +5961,222 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/unarchive', as
   }
 });
 
+// Stops the campaign on Meta (ARCHIVED, falling back to PAUSED) and pauses all adsets/ads.
+// Also marks the campaign smArchived+hiddenFromHistory in Smartemark DB so it disappears from
+// the active list. This is the only path that guarantees no further Meta spend.
+// Idempotent: if the campaign is already ARCHIVED on Meta the status update is a no-op.
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/archive-meta', async (req, res) => {
+  const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+
+  if (!normalizedCampaignId) return res.status(400).json({ error: 'campaignId is required' });
+
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    preferredOwnerKey: String(
+      req.query?.ownerKey || req.query?.owner_key ||
+      req.body?.ownerKey || req.body?.owner_key || ''
+    ).trim(),
+  });
+
+  const ownerKey = String(resolved?.ownerKey || ownerKeyFromReq(req) || '').trim();
+  const userToken = String(resolved?.userToken || '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({
+      error: 'Not authenticated with Facebook',
+      ownerKeyUsed: ownerKey || null,
+      sid: String(getSidFromReq(req) || '').trim() || null,
+    });
+  }
+
+  const mkTok = () => ({ access_token: userToken });
+  const now = new Date().toISOString();
+  let finalStatus = 'ARCHIVED';
+  let metaStatus = 'ARCHIVED';
+  let effectiveStatus = 'ARCHIVED';
+
+  try {
+    // Step 1: Try ARCHIVED on Meta; fall back to PAUSED if Meta rejects ARCHIVED
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
+        { status: 'ARCHIVED' },
+        { params: mkTok() }
+      );
+    } catch (archiveErr) {
+      console.warn('[archive-meta] ARCHIVED rejected, falling back to PAUSED:', archiveErr?.response?.data?.error?.message || archiveErr.message);
+      await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
+        { status: 'PAUSED' },
+        { params: mkTok() }
+      );
+      finalStatus = 'PAUSED';
+    }
+
+    // Step 2: Pause every non-deleted adset (cursor-paginated — no page limit)
+    const childPauseFailures = [];
+    try {
+      let afterCursor = null;
+      do {
+        const params = { ...mkTok(), fields: 'id,status,effective_status', limit: 50 };
+        if (afterCursor) params.after = afterCursor;
+        const adsetsRes = await axios.get(
+          `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/adsets`,
+          { params }
+        );
+        const adsets = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data : [];
+        for (const adset of adsets) {
+          const st = String(adset.status || adset.effective_status || '').toUpperCase();
+          if (st === 'DELETED' || st === 'ARCHIVED') continue;
+          try {
+            await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adset.id}`, { status: 'PAUSED' }, { params: mkTok() });
+          } catch (e) {
+            const msg = e?.response?.data?.error?.message || e.message;
+            console.warn('[archive-meta] adset pause failed (non-fatal):', adset.id, msg);
+            childPauseFailures.push({ type: 'adset', id: adset.id, error: msg });
+          }
+        }
+        afterCursor = adsetsRes.data?.paging?.cursors?.after || null;
+        if (!adsetsRes.data?.paging?.next) afterCursor = null; // no next page
+      } while (afterCursor);
+    } catch (e) {
+      console.warn('[archive-meta] adsets list failed (non-fatal):', e?.message);
+      childPauseFailures.push({ type: 'adsets_list', error: e?.message });
+    }
+
+    // Step 3: Pause every non-deleted ad (cursor-paginated — no page limit)
+    try {
+      let afterCursor = null;
+      do {
+        const params = { ...mkTok(), fields: 'id,status,effective_status', limit: 100 };
+        if (afterCursor) params.after = afterCursor;
+        const adsRes = await axios.get(
+          `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/ads`,
+          { params }
+        );
+        const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+        for (const ad of ads) {
+          const st = String(ad.status || ad.effective_status || '').toUpperCase();
+          if (st === 'DELETED' || st === 'ARCHIVED') continue;
+          try {
+            await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${ad.id}`, { status: 'PAUSED' }, { params: mkTok() });
+          } catch (e) {
+            const msg = e?.response?.data?.error?.message || e.message;
+            console.warn('[archive-meta] ad pause failed (non-fatal):', ad.id, msg);
+            childPauseFailures.push({ type: 'ad', id: ad.id, error: msg });
+          }
+        }
+        afterCursor = adsRes.data?.paging?.cursors?.after || null;
+        if (!adsRes.data?.paging?.next) afterCursor = null;
+      } while (afterCursor);
+    } catch (e) {
+      console.warn('[archive-meta] ads list failed (non-fatal):', e?.message);
+      childPauseFailures.push({ type: 'ads_list', error: e?.message });
+    }
+
+    // Step 4: Verify the campaign status Meta actually stored
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
+        { params: { ...mkTok(), fields: 'id,status,effective_status' }, timeout: 8000 }
+      );
+      const mc = verifyRes.data || {};
+      metaStatus      = String(mc.status           || finalStatus).toUpperCase();
+      effectiveStatus = String(mc.effective_status || finalStatus).toUpperCase();
+    } catch (verifyErr) {
+      console.warn('[archive-meta] verify fetch failed, using expected status:', verifyErr?.message);
+      metaStatus      = finalStatus;
+      effectiveStatus = finalStatus;
+    }
+
+    const currentStatus = effectiveStatus === 'ARCHIVED' ? 'ARCHIVED' : 'PAUSED_ARCHIVED';
+
+    // Step 5: Update Smartemark DB — smArchived + hiddenFromHistory so it disappears from the list
+    try {
+      await db.read();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      const idx = db.data.campaign_creatives.findIndex(
+        (r) => String(r.campaignId || '') === normalizedCampaignId && String(r.ownerKey || '') === ownerKey
+      );
+      if (idx !== -1) {
+        db.data.campaign_creatives[idx] = {
+          ...db.data.campaign_creatives[idx],
+          smArchived: true,
+          hiddenFromHistory: true,
+          status: effectiveStatus,
+          currentStatus,
+          archivedAt: now,
+          hiddenAt: now,
+          lastStatusCheckedAt: now,
+        };
+      } else {
+        db.data.campaign_creatives.push({
+          campaignId: normalizedCampaignId,
+          ownerKey,
+          accountId: normalizedAccountId,
+          smArchived: true,
+          hiddenFromHistory: true,
+          status: effectiveStatus,
+          currentStatus,
+          archivedAt: now,
+          hiddenAt: now,
+          lastStatusCheckedAt: now,
+        });
+      }
+
+      db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+      const optIdx = db.data.optimizer_campaign_state.findIndex(
+        (r) => String(r.campaignId || '') === normalizedCampaignId && String(r.ownerKey || '') === ownerKey
+      );
+      if (optIdx !== -1) {
+        db.data.optimizer_campaign_state[optIdx] = {
+          ...db.data.optimizer_campaign_state[optIdx],
+          smArchived: true,
+          hiddenFromHistory: true,
+          currentStatus,
+          optimizationEnabled: false,
+          archivedAt: now,
+          lastStatusCheckedAt: now,
+        };
+      }
+
+      await db.write();
+    } catch (dbErr) {
+      console.warn('[archive-meta] DB update failed (non-critical):', dbErr?.message);
+    }
+
+    return res.json({
+      ok: true,
+      success: true,
+      campaignId: normalizedCampaignId,
+      ownerKey,
+      metaStatus,
+      effectiveStatus,
+      currentStatus,
+      smArchived: true,
+      hiddenFromHistory: true,
+      lastStatusCheckedAt: now,
+      ...(childPauseFailures.length > 0 && { childPauseFailures }),
+    });
+  } catch (err) {
+    const metaErr = err?.response?.data?.error || null;
+    console.error('[archive-meta] failed:', {
+      campaignId: normalizedCampaignId,
+      ownerKey,
+      status: err?.response?.status,
+      metaError: metaErr,
+      message: metaErr?.message || err.message,
+    });
+    return res.status(500).json({
+      error: metaErr?.message || err.message || 'Failed to stop campaign on Meta',
+      campaignId: normalizedCampaignId,
+    });
+  }
+});
+
 // Soft-delete a Smartemark-archived campaign from the local history.
 // Does NOT delete from Meta/Facebook. Only applies to campaigns already marked smArchived.
 router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/hide-history', async (req, res) => {

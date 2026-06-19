@@ -3513,6 +3513,8 @@ useEffect(() => {
 
   const [showCampaignMenu, setShowCampaignMenu] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  // null | campaignId — when set, the 3-dot menu shows an inline "Stop & Archive on Meta" confirm
+  const [archiveMetaConfirmId, setArchiveMetaConfirmId] = useState(null);
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -5462,14 +5464,17 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 
 const handleArchiveCampaign = async (campaignId) => {
   if (!campaignId || campaignId === "__DRAFT__" || !selectedAccount) return;
+  // Defense-in-depth: this function's admin-client branch calls the Meta "cancel" route,
+  // which is NOT Smartemark-only. Block it unconditionally even if the button is hidden.
+  // Admin-client campaigns must use handleStopArchiveOnMeta instead.
+  if (adminClientId) {
+    alert("Use Stop & Archive on Meta for admin-managed campaigns.");
+    return;
+  }
   const acctId = String(selectedAccount).trim().replace(/^act_/, "");
   setLoading(true);
   try {
-    // Admin-client mode: reuse the cancel route (pauses + removes from DB) which
-    // is equivalent to archive for admin-client management purposes.
-    const r = adminClientId
-      ? await adminCampaignControlFetch(adminClientId, campaignId, "cancel", acctId)
-      : await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive`, { method: "PATCH" });
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive`, { method: "PATCH" });
     if (!r.ok) throw new Error("Archive failed");
     setCampaigns((prev) =>
       Array.isArray(prev)
@@ -5483,10 +5488,7 @@ const handleArchiveCampaign = async (campaignId) => {
       setSelectedCampaignId(nextActive?.id || "");
       setExpandedId(nextActive?.id || null);
     }
-    console.debug("[campaign-control-ui-success]", { action: "archive", campaignId, adminClientId });
-    if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
-    }
+    console.debug("[campaign-control-ui-success]", { action: "archive", campaignId });
   } catch {
     alert("Could not archive campaign.");
   }
@@ -5560,6 +5562,58 @@ const handleHideFromHistory = async (campaignId) => {
     }
   } catch {
     console.warn("[Smartemark] hide-history request error for", campaignId);
+  }
+  setLoading(false);
+};
+
+// Stops the campaign on Meta (ARCHIVED or PAUSED), pauses all adsets/ads, then removes
+// it from the Smartemark active list. This is the only safe way to guarantee no further
+// Meta spend. Distinct from handleHideFromHistory which is Smartemark-only.
+const handleStopArchiveOnMeta = async (campaignId) => {
+  if (!campaignId || campaignId === "__DRAFT__" || !selectedAccount) return;
+  setArchiveMetaConfirmId(null);
+  setShowCampaignMenu(false);
+  const acctId = String(selectedAccount).trim().replace(/^act_/, "");
+  setLoading(true);
+  try {
+    let r;
+    if (adminClientId) {
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const headers = { "Content-Type": "application/json" };
+      if (sid) headers["x-sm-sid"] = sid;
+      r = await fetch(
+        `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/archive-meta`,
+        { method: "POST", credentials: "include", headers, body: JSON.stringify({ accountId: acctId }) }
+      );
+    } else {
+      r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive-meta`, {
+        method: "POST",
+      });
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || "Failed to stop campaign on Meta");
+
+    // Remove from all frontend state maps
+    setCampaigns((prev) =>
+      Array.isArray(prev) ? prev.filter((c) => c.id !== campaignId) : prev
+    );
+    setMetricsMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+    setOptimizerStateMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+    setCampaignCreativesMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+    setPublicSummaryMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+    setOptimizerCreativeMap((prev) => { const { [campaignId]: _, ...rest } = prev || {}; return rest; });
+
+    // Select next non-archived campaign — never fall back to __DRAFT__
+    const remaining = (campaigns || []).filter(
+      (c) => c.id !== campaignId && !c.smArchived && !c.hiddenFromHistory
+    );
+    setSelectedCampaignId(remaining[0]?.id || "");
+    setExpandedId(remaining[0]?.id || null);
+
+    console.debug("[campaign-control-ui-success]", { action: "archive-meta", campaignId, adminClientId, metaStatus: data.metaStatus });
+    alert("Campaign stopped on Meta and archived in Smartemark.");
+  } catch (e) {
+    alert("Could not stop campaign on Meta: " + (e?.message || ""));
   }
   setLoading(false);
 };
@@ -5640,6 +5694,13 @@ const handleDeleteCampaign = async (campaignId) => {
   return;
 }
 
+  // Defense-in-depth: in admin-client mode this function would call the Meta "cancel"
+  // route via adminCampaignControlFetch. That must never happen — use Stop & Archive on Meta.
+  if (adminClientId) {
+    alert("Use Stop & Archive on Meta for admin-managed campaigns.");
+    return;
+  }
+
   if (!selectedAccount) {
     alert("No ad account selected.");
     return;
@@ -5651,14 +5712,10 @@ const handleDeleteCampaign = async (campaignId) => {
 
   setLoading(true);
   try {
-    // Admin-client mode: dedicated route with client's FB token.
-    // Normal mode: existing cancel route.
-    const r = adminClientId
-      ? await adminCampaignControlFetch(adminClientId, idToDelete, "cancel", acctId)
-      : await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
 
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j?.ok === false) {
@@ -5725,10 +5782,6 @@ const handleDeleteCampaign = async (campaignId) => {
     setCampaignStatus("ARCHIVED");
     setLaunched(false);
     setLaunchResult(null);
-
-    if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
-    }
 
     alert("Campaign canceled and removed from active list.");
   } catch (e) {
@@ -8513,8 +8566,8 @@ ${pendingTest ? `
     {/* ── Status strip + Refresh ── */}
     {selectedLiveCampaign && (() => {
       const rawSt = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
-      const stColor = rawSt === "ACTIVE" ? "#16a34a" : rawSt === "PAUSED" ? "#d97706" : "#6b7280";
-      const stLabel = rawSt === "ACTIVE" ? "Live" : rawSt === "PAUSED" ? "Paused" : rawSt || "Unknown";
+      const stColor = rawSt === "ACTIVE" ? "#16a34a" : rawSt === "PAUSED" ? "#d97706" : rawSt === "ARCHIVED" ? "#6b7280" : "#9ca3af";
+      const metaLabel = rawSt || "UNKNOWN";
       const metrics = metricsMap[selectedLiveCampaign.id] || {};
       const hasImpressions = Number(metrics.impressions) > 0;
       const statusMsg = rawSt === "ACTIVE" && !hasImpressions
@@ -8532,14 +8585,18 @@ ${pendingTest ? `
         : (selectedLiveCampaign.launchComplete || _smHasRealStatus)
         ? "Launched"
         : "Draft";
+      // Warn if Smartemark has archived the campaign but Meta status suggests it could still spend
+      const smArchivedButMetaLive = selectedLiveCampaign.smArchived &&
+        ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"].includes(rawSt);
+      const lastChecked = freshOverride ? ov.verifiedAt : selectedLiveCampaign.lastStatusCheckedAt;
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: stColor, display: "inline-block" }} />
-            <span style={{ fontWeight: 800, fontSize: 12, color: stColor }}>{stLabel}</span>
+            <span style={{ fontWeight: 800, fontSize: 12, color: stColor }}>Meta: {metaLabel}</span>
             {metaConfirmed && (
               <span style={{ fontSize: 10, fontWeight: 700, color: "#16a34a", background: "#dcfce7", borderRadius: 4, padding: "1px 6px" }}>
-                Meta confirmed
+                confirmed
               </span>
             )}
           </div>
@@ -8551,13 +8608,18 @@ ${pendingTest ? `
               ID: {selectedLiveCampaign.id}
             </span>
           )}
-          {freshOverride && ov.verifiedAt && (
+          {lastChecked && (
             <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
-              Last checked: {new Date(ov.verifiedAt).toLocaleTimeString()}
+              Last checked: {new Date(lastChecked).toLocaleTimeString()}
             </span>
           )}
           {statusMsg && (
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{statusMsg}</span>
+          )}
+          {smArchivedButMetaLive && (
+            <span style={{ fontSize: 11, color: "#b45309", fontWeight: 700, background: "#fef3c7", borderRadius: 4, padding: "2px 8px" }}>
+              Hidden from Smartemark only. This may still exist in Meta Ads Manager.
+            </span>
           )}
           {adminClientId && (
             <button
@@ -8791,7 +8853,7 @@ ${pendingTest ? `
               onClick={() => handleHideFromHistory(selectedLiveCampaign.id)}
               style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
             >
-              Remove from history
+              Hide from Smartemark only
             </button>
             <button
               type="button"
@@ -8809,13 +8871,49 @@ ${pendingTest ? `
           </>
         ) : selectedLiveCampaign ? (
           <>
-            <button
-              type="button"
-              onClick={() => handleArchiveCampaign(selectedLiveCampaign.id)}
-              style={{ background: "#ffffff", color: "#374151", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
-            >
-              Archive campaign
-            </button>
+            {/* "Archive in Smartemark only" has no admin-client DB-only path —
+                in admin-client mode the cancel route would hit Meta.
+                Only show this in normal-user mode where /archive PATCH is DB-only. */}
+            {!adminClientId && (
+              <button
+                type="button"
+                onClick={() => handleArchiveCampaign(selectedLiveCampaign.id)}
+                style={{ background: "#ffffff", color: "#374151", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+              >
+                Archive in Smartemark only
+              </button>
+            )}
+            {archiveMetaConfirmId === selectedLiveCampaign.id ? (
+              <div style={{ padding: "10px 12px", background: "#fff7ed", borderRadius: 10, border: "1px solid #fed7aa" }}>
+                <div style={{ fontSize: 12, color: "#92400e", fontWeight: 700, marginBottom: 8 }}>
+                  This will stop this campaign from running on Meta and remove it from the active Smartemark list. This is different from hiding it from Smartemark only.
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleStopArchiveOnMeta(selectedLiveCampaign.id)}
+                    style={{ background: "#b91c1c", color: "#fff", border: "none", padding: "6px 14px", borderRadius: 7, fontWeight: 800, fontSize: 12, cursor: "pointer" }}
+                  >
+                    Confirm stop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveMetaConfirmId(null)}
+                    style={{ background: "#f3f4f6", color: "#374151", border: "none", padding: "6px 14px", borderRadius: 7, fontWeight: 800, fontSize: 12, cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setArchiveMetaConfirmId(selectedLiveCampaign.id)}
+                style={{ background: "#ffffff", color: "#b91c1c", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+              >
+                Stop &amp; Archive on Meta
+              </button>
+            )}
             {campaigns.some((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory) && (
               <button
                 type="button"
@@ -8859,7 +8957,10 @@ ${pendingTest ? `
           const _isTrulyLive = ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"].includes(_st) &&
                                !selectedLiveCampaign.smArchived &&
                                isUsefulCurrentCampaign(selectedLiveCampaign, _snap);
-          if (_isTrulyLive) {
+          // In admin-client mode "Stop & Archive on Meta" (above) is the authoritative stop action.
+          // "Cancel live campaign" would also hit Meta via the cancel route — suppress it so the
+          // only Meta-touching actions in admin-client mode are Pause, Unpause, and Stop & Archive on Meta.
+          if (_isTrulyLive && !adminClientId) {
             return (
               <button
                 type="button"
@@ -8877,7 +8978,7 @@ ${pendingTest ? `
               onClick={() => handleHideFromHistory(selectedLiveCampaign.id)}
               style={{ background: "#ffffff", color: "#b42318", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
             >
-              Remove from Smartemark History
+              Hide from Smartemark only — does not stop Meta ads
             </button>
           );
         })()}
