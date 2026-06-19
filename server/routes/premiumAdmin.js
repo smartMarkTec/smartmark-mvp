@@ -1297,10 +1297,34 @@ router.post('/admin/clients/:id/launch-campaign', limitAdmin, requireAdmin, asyn
 
     const adminSid = getSidFromReq(req);
 
+    // Override destination URL with the client's latest intake websiteUrl.
+    // This ensures that after admin edits the intake URL (e.g. to offers.aspen-hvac.com),
+    // future launches pick it up without the frontend needing to be rebuilt.
+    const intakeWebsiteUrl = String(user.premiumIntake?.websiteUrl || '').trim();
+    let mergedCampaignBody = { ...campaignBody };
+    if (intakeWebsiteUrl) {
+      mergedCampaignBody = {
+        ...mergedCampaignBody,
+        websiteUrl: intakeWebsiteUrl,
+        url: intakeWebsiteUrl,
+        form: {
+          ...(mergedCampaignBody.form || {}),
+          websiteUrl: intakeWebsiteUrl,
+          url: intakeWebsiteUrl,
+        },
+        answers: {
+          ...(mergedCampaignBody.answers || {}),
+          url: intakeWebsiteUrl,
+          websiteUrl: intakeWebsiteUrl,
+        },
+      };
+      console.log('[Admin Launch] destination URL from intake:', intakeWebsiteUrl);
+    }
+
     const launchRes = await axios.post(
       `${selfBase}/auth/facebook/adaccount/${normalizedAccountId}/launch-campaign`,
       {
-        ...campaignBody,
+        ...mergedCampaignBody,
         ownerKey: clientOwnerKey,
       },
       {

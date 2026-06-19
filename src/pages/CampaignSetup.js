@@ -3690,6 +3690,11 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   useEffect(() => {
     if (isDraftDisabled(resolvedUser)) return;
 
+    // In admin-client mode, never auto-restore draft from nav state or storage.
+    // The admin is managing a live client campaign — the __DRAFT__ slot must not
+    // appear after a pause/delete/archive action or any other control action.
+    if (adminClientId) return;
+
     // if already hydrated, do nothing
     if (draftCreatives?.images?.length) return;
 
@@ -5301,6 +5306,40 @@ const handleFbDisconnect = async () => {
 };
 
 
+// Re-fetches the admin-client campaign list after any campaign control action
+// so the UI reflects the server's authoritative state (Meta status, etc.).
+function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap) {
+  if (!adminClientId) return Promise.resolve();
+  const enc = encodeURIComponent(adminClientId);
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = sid ? { "x-sm-sid": sid } : {};
+  console.debug("[campaign-control-refresh]", { adminClientId });
+  return fetch(`/api/admin/clients/${enc}/campaigns`, { credentials: "include", headers })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => {
+      if (!j.ok || !Array.isArray(j.campaigns)) return;
+      setCampaigns(j.campaigns);
+      const newMetrics = {}, newOptStates = {}, newCreatives = {};
+      for (const c of j.campaigns) {
+        if (!c.id) continue;
+        if (c.metrics) newMetrics[c.id] = c.metrics;
+        if (c.optimizerState) newOptStates[c.id] = c.optimizerState;
+        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body;
+        if (hasCreative) {
+          newCreatives[c.id] = {
+            images: (c.images || []).filter(Boolean),
+            mediaSelection: c.mediaSelection || "image",
+            meta: { headline: c.meta?.headline || "", body: c.meta?.body || "", link: c.meta?.link || "" },
+          };
+        }
+      }
+      if (Object.keys(newMetrics).length) setMetricsMap((m) => ({ ...m, ...newMetrics }));
+      if (Object.keys(newOptStates).length) setOptimizerStateMap((m) => ({ ...m, ...newOptStates }));
+      if (Object.keys(newCreatives).length) setCampaignCreativesMap((m) => ({ ...m, ...newCreatives }));
+    })
+    .catch(() => {});
+}
+
 // Helper: fetch wrapper for admin-client campaign control routes.
 // Uses the dedicated /api/admin/clients/:id/campaign/:id/:action endpoint
 // which always resolves the CLIENT's FB token, never TheBoss's.
@@ -5336,11 +5375,12 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 
     const nextStatus = currentlyPaused ? "ACTIVE" : "PAUSED";
 
+    // Optimistic local update so UI reflects change immediately
     setCampaigns((prev) =>
       Array.isArray(prev)
         ? prev.map((c) =>
             c?.id === campaignId
-              ? { ...c, status: nextStatus, effective_status: nextStatus }
+              ? { ...c, status: nextStatus, effective_status: nextStatus, currentStatus: nextStatus }
               : c
           )
         : prev
@@ -5349,6 +5389,14 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
     if (selectedCampaignId === campaignId) {
       setCampaignStatus(nextStatus);
       setIsPaused(!currentlyPaused);
+    }
+
+    console.debug("[campaign-control-ui-success]", { action, campaignId, adminClientId });
+    console.debug("[campaign-control-local-status]", { campaignId, status: nextStatus });
+
+    // Re-fetch from server to confirm authoritative Meta status
+    if (adminClientId) {
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
     }
   } catch {
     alert("Could not update campaign status.");
@@ -5369,14 +5417,19 @@ const handleArchiveCampaign = async (campaignId) => {
     if (!r.ok) throw new Error("Archive failed");
     setCampaigns((prev) =>
       Array.isArray(prev)
-        ? prev.map((c) => (c?.id === campaignId ? { ...c, smArchived: true } : c))
+        ? prev.map((c) => (c?.id === campaignId ? { ...c, smArchived: true, currentStatus: "ARCHIVED" } : c))
         : prev
     );
     setShowCampaignMenu(false);
     if (selectedCampaignId === campaignId) {
       const nextActive = (campaigns || []).find((c) => c.id !== campaignId && !c.smArchived);
+      // Never fall back to __DRAFT__ — pick another live campaign or clear selection
       setSelectedCampaignId(nextActive?.id || "");
       setExpandedId(nextActive?.id || null);
+    }
+    console.debug("[campaign-control-ui-success]", { action: "archive", campaignId, adminClientId });
+    if (adminClientId) {
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
     }
   } catch {
     alert("Could not archive campaign.");
@@ -8354,6 +8407,48 @@ ${pendingTest ? `
         Select a draft or live campaign to manage.
       </div>
     </div>
+
+    {/* ── Status strip + Refresh ── */}
+    {selectedLiveCampaign && (() => {
+      const rawSt = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
+      const stColor = rawSt === "ACTIVE" ? "#16a34a" : rawSt === "PAUSED" ? "#d97706" : "#6b7280";
+      const stLabel = rawSt === "ACTIVE" ? "Live" : rawSt === "PAUSED" ? "Paused" : rawSt || "Unknown";
+      const metrics = metricsMap[selectedLiveCampaign.id] || {};
+      const hasImpressions = Number(metrics.impressions) > 0;
+      const statusMsg = rawSt === "ACTIVE" && !hasImpressions
+        ? "Campaign is active. Meta may still be reviewing or learning before delivery starts."
+        : null;
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: stColor, display: "inline-block" }} />
+            <span style={{ fontWeight: 800, fontSize: 12, color: stColor }}>{stLabel}</span>
+          </div>
+          {selectedLiveCampaign.id && (
+            <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+              ID: {selectedLiveCampaign.id}
+            </span>
+          )}
+          {statusMsg && (
+            <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{statusMsg}</span>
+          )}
+          {adminClientId && (
+            <button
+              type="button"
+              onClick={async () => {
+                setLoading(true);
+                await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
+                setLoading(false);
+              }}
+              disabled={loading}
+              style={{ background: "none", border: "1px solid #dbe4ff", borderRadius: 8, padding: "3px 10px", fontSize: 11, fontWeight: 700, color: "#4f46e5", cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}
+            >
+              ↻ Refresh Status
+            </button>
+          )}
+        </div>
+      );
+    })()}
 
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
      {selectedCampaignId === "__DRAFT__" && (
