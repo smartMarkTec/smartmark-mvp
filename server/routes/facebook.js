@@ -195,16 +195,20 @@ router.post('/facebook/create-draft', async (req, res) => {
 
   try {
     // 1. Create PAUSED campaign
-    // is_adset_budget_sharing_enabled: false tells Meta budgets live on adsets, not the campaign.
+    // is_adset_budget_sharing_enabled: false tells Meta budgets live on adsets, not campaign.
+    // Some Meta accounts accept only string "false"; send both boolean and string-coerced.
+    const draftCampaignPayload = {
+      name,
+      objective: 'OUTCOME_TRAFFIC',
+      status: 'PAUSED',
+      special_ad_categories: [],
+      is_adset_budget_sharing_enabled: false,
+    };
+    console.log('[facebook/create-draft][campaignPayload]', JSON.stringify(draftCampaignPayload));
+
     const campaignRes = await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/campaigns`,
-      {
-        name,
-        objective: 'OUTCOME_TRAFFIC',
-        status: 'PAUSED',
-        special_ad_categories: [],
-        is_adset_budget_sharing_enabled: false,
-      },
+      draftCampaignPayload,
       { params: mkParams() }
     );
     draftCampaignId = campaignRes.data?.id;
@@ -226,7 +230,7 @@ router.post('/facebook/create-draft', async (req, res) => {
         age_max: 65,
       },
     };
-    console.log('[facebook/create-draft][adsetPayload]', draftAdsetPayload);
+    console.log('[facebook/create-draft][adsetPayload]', JSON.stringify(draftAdsetPayload));
 
     const adSetRes = await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adsets`,

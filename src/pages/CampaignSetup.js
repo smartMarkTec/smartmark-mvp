@@ -1762,12 +1762,22 @@ function isUsefulCurrentCampaign(campaign, metricsSnap) {
     if (imp === 0 && sp === 0 && cl === 0) return false;
   }
 
-  // PAUSED with zero confirmed delivery → clutter
-  if (status === "PAUSED" && metricsSnap != null) {
-    const imp = Number(metricsSnap.impressions || 0);
-    const sp  = Number(metricsSnap.spend      || 0);
-    const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
-    if (imp === 0 && sp === 0 && cl === 0) return false;
+  // PAUSED campaigns:
+  // - If launched through Smartemark (launchComplete=true) → ALWAYS show. The user
+  //   paused a real campaign; it must remain selectable in the dropdown.
+  // - If not Smartemark-launched AND has a real non-generic name → show (might be an
+  //   external campaign the user imported or a campaign from an older session).
+  // - ONLY hide when: no launchComplete + generic name + zero delivery (stale test stub).
+  if (status === "PAUSED") {
+    if (campaign.launchComplete) return true; // always keep Smartemark-launched paused campaigns
+    if (!isGenericName) return true;          // non-generic name → always keep
+    // Generic name + no launchComplete → apply zero-delivery clutter check
+    if (metricsSnap != null) {
+      const imp = Number(metricsSnap.impressions || 0);
+      const sp  = Number(metricsSnap.spend      || 0);
+      const cl  = Number(metricsSnap.clicks     || metricsSnap.linkClicks || 0);
+      if (imp === 0 && sp === 0 && cl === 0) return false;
+    }
   }
 
   return true;
@@ -5313,7 +5323,10 @@ const handleFbDisconnect = async () => {
 // Re-fetches the admin-client campaign list after any campaign control action.
 // statusOverrides: plain object snapshot from recentStatusOverridesRef.current —
 // ensures a fresh verified PAUSED status is never overwritten by a stale DB ACTIVE.
-function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, statusOverrides) {
+// currentSelectedId: the currently selected campaign ID — logged for debugging but NOT
+// auto-changed here; the selection is preserved because the dropdown options now include
+// PAUSED campaigns (fixed in isUsefulCurrentCampaign).
+function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, statusOverrides, currentSelectedId) {
   if (!adminClientId) return Promise.resolve();
   const enc = encodeURIComponent(adminClientId);
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
@@ -5338,6 +5351,17 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
         }
         return c;
       });
+      // Log whether the current selection is preserved
+      if (currentSelectedId && currentSelectedId !== "__DRAFT__") {
+        const found = list.find((c) => String(c.id) === String(currentSelectedId));
+        console.debug("[campaign-selection-preserve]", {
+          selectedCampaignId: currentSelectedId,
+          existsInRefreshedList: !!found,
+          status: found ? String(found.status || found.effective_status || "") : "—",
+          kept: !!found,
+          reason: found ? "campaign found in refreshed list" : "campaign not in refreshed list",
+        });
+      }
       setCampaigns(list);
       const newMetrics = {}, newOptStates = {}, newCreatives = {};
       for (const c of list) {
@@ -5428,7 +5452,7 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 
     // Re-fetch campaigns — pass overrides so stale DB response can't revert the verified status
     if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
     }
   } catch {
     alert("Could not update campaign status.");
@@ -5461,7 +5485,7 @@ const handleArchiveCampaign = async (campaignId) => {
     }
     console.debug("[campaign-control-ui-success]", { action: "archive", campaignId, adminClientId });
     if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
     }
   } catch {
     alert("Could not archive campaign.");
@@ -5703,7 +5727,7 @@ const handleDeleteCampaign = async (campaignId) => {
     setLaunchResult(null);
 
     if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
     }
 
     alert("Campaign canceled and removed from active list.");
@@ -6484,6 +6508,41 @@ console.log("[LAUNCH][creative-payload]", {
       const launchedId = json.campaignId || "";
       setSelectedCampaignId(launchedId);
       setExpandedId(launchedId);
+
+      // Immediately upsert the launched campaign into local campaigns state so it
+      // appears in the dropdown without waiting for a manual refresh.
+      if (launchedId) {
+        const newCampaignRecord = {
+          id: launchedId,
+          campaignId: launchedId,
+          metaCampaignId: launchedId,
+          name: json.campaignName || form.campaignName || "Campaign",
+          status: "ACTIVE",
+          effective_status: "ACTIVE",
+          currentStatus: "ACTIVE",
+          accountId: String(json.accountId || selectedAccount || "").replace(/^act_/, ""),
+          ownerKey: json.ownerKey || "",
+          launchComplete: true,
+          createdAt: new Date().toISOString(),
+          images: json.imageUrls || [],
+          meta: { headline: json.headline || "", body: json.body || "", link: "" },
+          mediaSelection: "image",
+        };
+        setCampaigns((prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          const idx = list.findIndex((c) => String(c.id) === launchedId);
+          if (idx !== -1) {
+            const updated = [...list];
+            updated[idx] = { ...list[idx], ...newCampaignRecord };
+            return updated;
+          }
+          return [newCampaignRecord, ...list];
+        });
+        // Refresh from server to get full data once
+        if (adminClientId) {
+          refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, launchedId);
+        }
+      }
 
       try {
         if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_budget"));
@@ -8464,7 +8523,15 @@ ${pendingTest ? `
       const ov = recentStatusOverridesRef.current[selectedLiveCampaign.id];
       const freshOverride = ov && Date.now() < ov.expiresAt;
       const metaConfirmed = freshOverride && ov.metaConfirmed;
-      const smStatus = selectedLiveCampaign.smArchived ? "Archived" : selectedLiveCampaign.launchComplete ? "Launched" : "Draft";
+      // "Launched" when launchComplete=true OR campaign has a real Meta status —
+      // a PAUSED campaign is still a launched campaign, never a "Draft".
+      const _smRawSt = String(selectedLiveCampaign.status || selectedLiveCampaign.effective_status || "").toUpperCase();
+      const _smHasRealStatus = ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"].includes(_smRawSt);
+      const smStatus = selectedLiveCampaign.smArchived
+        ? "Archived"
+        : (selectedLiveCampaign.launchComplete || _smHasRealStatus)
+        ? "Launched"
+        : "Draft";
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -8497,7 +8564,7 @@ ${pendingTest ? `
               type="button"
               onClick={async () => {
                 setLoading(true);
-                await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
+                await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId);
                 setLoading(false);
               }}
               disabled={loading}
