@@ -5301,31 +5301,36 @@ const handleFbDisconnect = async () => {
 };
 
 
+// Helper: fetch wrapper for admin-client campaign control routes.
+// Uses the dedicated /api/admin/clients/:id/campaign/:id/:action endpoint
+// which always resolves the CLIENT's FB token, never TheBoss's.
+async function adminCampaignControlFetch(adminClientId, campaignId, action, accountId) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (sid) headers["x-sm-sid"] = sid;
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/${action}`;
+  console.log("[campaign-control]", { action, adminClientId, campaignId, accountId, url });
+  return fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify({ accountId }),
+  });
+}
+
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
   if (!campaignId || !selectedAccount || campaignId === "__DRAFT__") return;
 
   const acctId = String(selectedAccount).trim();
   const action = currentlyPaused ? "unpause" : "pause";
-  const resolvedOwnerKey = adminClientId ? `user:${adminClientId}` : null;
-
-  console.log("[pause/unpause]", {
-    adminClientId: adminClientId || null,
-    ownerKey: resolvedOwnerKey || "(from session)",
-    accountId: acctId,
-    campaignId,
-    action,
-  });
 
   setLoading(true);
   try {
-    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/${action}`, {
-      method: "POST",
-      // In admin-client mode pass ownerKey explicitly so the backend resolves
-      // the client's FB token instead of TheBoss's session token.
-      ...(resolvedOwnerKey
-        ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerKey: resolvedOwnerKey }) }
-        : {}),
-    });
+    // Admin-client mode: use dedicated admin route that resolves the CLIENT's FB token.
+    // Normal mode: use existing authFetch which resolves from TheBoss's session.
+    const r = adminClientId
+      ? await adminCampaignControlFetch(adminClientId, campaignId, action, acctId)
+      : await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/${action}`, { method: "POST" });
 
     if (!r.ok) throw new Error(`${action} failed`);
 
@@ -5356,9 +5361,11 @@ const handleArchiveCampaign = async (campaignId) => {
   const acctId = String(selectedAccount).trim().replace(/^act_/, "");
   setLoading(true);
   try {
-    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive`, {
-      method: "PATCH",
-    });
+    // Admin-client mode: reuse the cancel route (pauses + removes from DB) which
+    // is equivalent to archive for admin-client management purposes.
+    const r = adminClientId
+      ? await adminCampaignControlFetch(adminClientId, campaignId, "cancel", acctId)
+      : await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/archive`, { method: "PATCH" });
     if (!r.ok) throw new Error("Archive failed");
     setCampaigns((prev) =>
       Array.isArray(prev)
@@ -5535,10 +5542,14 @@ const handleDeleteCampaign = async (campaignId) => {
 
   setLoading(true);
   try {
-    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
+    // Admin-client mode: dedicated route with client's FB token.
+    // Normal mode: existing cancel route.
+    const r = adminClientId
+      ? await adminCampaignControlFetch(adminClientId, idToDelete, "cancel", acctId)
+      : await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
 
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j?.ok === false) {

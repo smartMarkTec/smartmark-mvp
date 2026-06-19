@@ -1681,4 +1681,93 @@ router.get('/admin/lead-summary', limitAdmin, requireAdmin, async (req, res) => 
   }
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Admin-client campaign control routes
+   These routes bypass resolveFacebookTokenFromReq entirely and go directly
+   to the client's stored FB token. They are the authoritative admin path
+   for pause/unpause/cancel so TheBoss's session token is never used by mistake.
+───────────────────────────────────────────────────────────────────────── */
+
+function buildAdminCampaignControlHandler(action) {
+  return async (req, res) => {
+    const clientId = decodeURIComponent(req.params.clientId || '');
+    const campaignId = String(req.params.campaignId || '').trim();
+    const accountId  = String(req.body?.accountId || '').replace(/^act_/, '').trim();
+
+    const ownerKey  = `user:${clientId}`;
+    const userToken = getFbUserToken(ownerKey);
+
+    console.log('[campaign-control]', {
+      action,
+      adminClientId: clientId,
+      resolvedOwnerKey: ownerKey,
+      accountId,
+      campaignId,
+    });
+
+    if (!userToken) {
+      return res.status(401).json({
+        ok: false,
+        error: `Client ${clientId} does not have Facebook connected.`,
+        action,
+        resolvedOwnerKey: ownerKey,
+      });
+    }
+
+    let metaStatus;
+    if (action === 'pause')   metaStatus = 'PAUSED';
+    if (action === 'unpause') metaStatus = 'ACTIVE';
+    if (action === 'cancel')  metaStatus = 'PAUSED'; // safe archive: pause first, then mark in DB
+
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/${campaignId}`,
+        { status: metaStatus },
+        { params: { access_token: userToken } }
+      );
+
+      // For cancel: also remove the campaign_creatives record from DB
+      if (action === 'cancel') {
+        try {
+          await db.read();
+          if (Array.isArray(db.data.campaign_creatives)) {
+            const before = db.data.campaign_creatives.length;
+            db.data.campaign_creatives = db.data.campaign_creatives.filter(
+              (r) => !(String(r.campaignId) === String(campaignId) && String(r.ownerKey) === ownerKey)
+            );
+            if (db.data.campaign_creatives.length !== before) await db.write();
+          }
+        } catch {}
+      }
+
+      return res.json({
+        ok: true,
+        success: true,
+        action,
+        campaignId,
+        accountId,
+        resolvedOwnerKey: ownerKey,
+        metaStatus,
+      });
+    } catch (err) {
+      const metaError = err?.response?.data?.error?.message || err.message;
+      console.error('[campaign-control] Meta call failed:', { action, campaignId, accountId, ownerKey, metaError });
+      return res.status(500).json({
+        error: metaError,
+        action,
+        campaignId,
+        accountId,
+        resolvedOwnerKey: ownerKey,
+      });
+    }
+  };
+}
+
+// POST /api/admin/clients/:clientId/campaign/:campaignId/pause
+router.post('/admin/clients/:clientId/campaign/:campaignId/pause',   limitAdmin, requireAdmin, buildAdminCampaignControlHandler('pause'));
+// POST /api/admin/clients/:clientId/campaign/:campaignId/unpause
+router.post('/admin/clients/:clientId/campaign/:campaignId/unpause', limitAdmin, requireAdmin, buildAdminCampaignControlHandler('unpause'));
+// POST /api/admin/clients/:clientId/campaign/:campaignId/cancel
+router.post('/admin/clients/:clientId/campaign/:campaignId/cancel',  limitAdmin, requireAdmin, buildAdminCampaignControlHandler('cancel'));
+
 module.exports = router;
