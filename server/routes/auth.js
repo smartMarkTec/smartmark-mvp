@@ -1568,6 +1568,71 @@ router.post('/facebook/defaults/select', (req, res) => {
   return res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId });
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+   POST /auth/facebook/disconnect
+   Removes the Facebook token and saved selection for the current context only.
+   In normal mode: disconnects the logged-in user (e.g. TheBoss).
+   In admin-client mode: disconnects the named client only (requires admin auth).
+   Never touches other clients or unrelated ownerKeys.
+───────────────────────────────────────────────────────────────────────── */
+router.post('/facebook/disconnect', async (req, res) => {
+  try {
+    await db.read();
+    const ADMIN_UN = process.env.ADMIN_BYPASS_USERNAME || 'TheBoss';
+    const stateAdminClientId = String(req.body?.adminClientId || '').trim();
+
+    // Resolve the ownerKey whose token+selection we will delete
+    let targetOwnerKey = ownerKeyFromReq(req);
+
+    if (stateAdminClientId) {
+      // Admin disconnecting a specific client — verify admin first
+      const sid = getSidFromReq(req);
+      const sess = (db.data.sessions || []).find((s) => String(s.sid) === sid);
+      const username = String(sess?.username || '').trim();
+      const adminUser = (db.data.users || []).find(
+        (u) => String(u?.username || '').trim() === username
+      );
+      const isAdmin = username === ADMIN_UN || adminUser?.role === 'admin';
+
+      if (!isAdmin) {
+        return res.status(403).json({ ok: false, error: 'Admin access required to disconnect a client.' });
+      }
+
+      // Resolve client ownerKey (adminClientId is the client's username/email)
+      const clientUser = (db.data.users || []).find(
+        (u) => String(u?.username || '').trim() === stateAdminClientId
+      );
+      targetOwnerKey = clientUser
+        ? `user:${String(clientUser.username).trim()}`
+        : `user:${stateAdminClientId}`;
+    }
+
+    // Clear token + meta for this ownerKey only
+    await clearFbUserToken(targetOwnerKey);
+    await clearFbUserTokenMeta(targetOwnerKey);
+
+    // Clear in-memory defaults cache
+    DEFAULTS_BY_OWNER.delete(targetOwnerKey);
+
+    // Remove the fb_selections row for this ownerKey
+    try {
+      await db.read();
+      if (Array.isArray(db.data.fb_selections)) {
+        db.data.fb_selections = db.data.fb_selections.filter(
+          (s) => s.ownerKey !== targetOwnerKey
+        );
+        await db.write();
+      }
+    } catch {}
+
+    console.log('[FB Disconnect] cleared token + selection for ownerKey:', targetOwnerKey);
+    return res.json({ ok: true, ownerKey: targetOwnerKey });
+  } catch (err) {
+    console.error('[FB Disconnect] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Disconnect failed' });
+  }
+});
+
 async function ensureUsersAndSessions() {
   await db.read();
   let needsWrite = false;

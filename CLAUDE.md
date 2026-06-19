@@ -80,32 +80,41 @@ const adminClientId = useMemo(
 ```
 Route state is *not* checked. If the URL doesn't contain `?adminClientId=`, FormPage will be in TheBoss normal mode regardless of what's in localStorage or route state.
 
-**CampaignSetup.js** — route state → URL param → localStorage:
+**CampaignSetup.js** — URL query param only (same rule as FormPage):
 ```js
-const adminClientId = (() => {
-  const fromState = String(state.adminClientId || "").trim();
-  if (fromState) return fromState;
-  const fromUrl = new URLSearchParams(location.search || "").get("adminClientId") || "";
-  if (fromUrl) return fromUrl;
-  return localStorage.getItem("sm_admin_target_client_id") || "";
-})();
+// URL is the ONLY authority. Clean /setup = TheBoss mode, always.
+const adminClientId = useMemo(() => {
+  try { return new URLSearchParams(location.search || "").get("adminClientId") || ""; }
+  catch { return ""; }
+}, [location.search]);
+
+// Route state may carry supplemental data (business name, images) but ONLY
+// trust it when it matches the URL's adminClientId.
+const routeStateAdminClientId = String(state.adminClientId || "").trim();
+const routeStateMatchesClient = !!(adminClientId && routeStateAdminClientId === adminClientId);
 ```
+If the URL is `/setup` with no query param, `adminClientId === ""` unconditionally — even if `location.state.adminClientId` is non-empty.
 
 ### Navigation must preserve adminClientId in the URL
 
-Because FormPage only reads from the URL, **every navigation that goes to `/form` must include `?adminClientId=<id>` in the URL path**, not just in route state. Route state alone is not enough. Example:
-```js
-// CORRECT — preserves admin context in FormPage
-navigate(`/form?adminClientId=${encodeURIComponent(adminClientId)}`);
+**Every** navigate call to `/form` or `/setup` must include `?adminClientId=<id>` in the URL path when in admin mode. Both pages now share a `withAdminClientQuery` helper:
 
-// WRONG — FormPage won't see adminClientId
-navigate("/form", { state: { adminClientId } });
+```js
+function withAdminClientQuery(path, adminClientId) {
+  if (!adminClientId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}adminClientId=${encodeURIComponent(adminClientId)}`;
+}
+
+// Usage — always wrap navigate paths:
+navigate(withAdminClientQuery("/form", adminClientId));
+navigate(withAdminClientQuery("/setup", adminClientId), { state: { ... } });
 ```
 
-Navigations to `/setup` can use route state OR URL param — CampaignSetup checks both. But prefer the URL param for consistency and refresh-safety.
+FormPage also reads a `?creativeMode=ai_image|upload_photo|upload_video` URL param, written by CampaignSetup's 3-dot creative-replace menu, to pre-select the creative pill on arrival.
 
 ### sm_admin_target_client_id localStorage key
-Written by FormPage and CampaignSetup when entering admin-client mode. Used only as a last-resort fallback in CampaignSetup (not in FormPage at all). `exitClientMode()` explicitly removes it. It must **not** force client mode when the URL has no `adminClientId` — if the URL is clean, treat as normal user mode even if this key exists.
+Written when entering admin mode. `exitClientMode()` explicitly removes it. It is **not** used as a fallback for adminClientId resolution in either page — the URL is authoritative. Never use this key to force admin-client mode.
 
 ### Backend ownerKey routing
 When `adminClientId` is present in a request body or query, backend routes resolve the ownerKey as `user:<adminClientId>` (the client's key), not the admin's key. This applies to:
@@ -129,10 +138,11 @@ All per-user localStorage keys follow the pattern `u:<namespace>:<key>`. The nam
 `FormPage.js` uses `getUserNS()` (reads `sm_user_ns_v1`) to build `u:<ns>:key` via `nsKey(baseKey)`. In admin mode, the raw `lsSet`/`ssSet` wrappers would write to TheBoss's namespace. For creative draft keys specifically, admin-mode writes must use explicit `localStorage.setItem("u:adminClient:" + adminClientId + ":" + key, ...)`.
 
 ### CampaignSetup isolation
-- `adminClientId` is computed synchronously from URL/localStorage at render time (not a React state)
-- Draft re-hydration reads from `u:adminClient:<id>:*` in admin mode, then returns early — never touches TheBoss's keys
-- When `adminClientId` transitions from non-empty to `""`, the `_prevAdminClientIdRef` effect clears all client-derived React state immediately
-- `isExitingAdminClientModeRef` (a `useRef`) is set to `true` in `exitClientMode()` before state clears, and checked in the server-save effect to skip any race-window write
+- `adminClientId` is a `useMemo` computed from `location.search` only — not from route state, not from localStorage
+- Draft re-hydration reads from `u:adminClient:<id>:*` in admin mode, then `return`s early — never touches TheBoss's keys; `applyDraft()` also rejects drafts whose `adminClientId` field doesn't match the current URL context
+- When `adminClientId` transitions from non-empty to `""`, the `_prevAdminClientIdRef` effect clears all client-derived React state immediately (accounts, pages, campaigns, maps, `draftCreatives`, `previewCopy`, `facebookConnectionStatus`)
+- `isExitingAdminClientModeRef` (a `useRef`) is set to `true` in `exitClientMode()` before state clears, checked in the server-save effect to skip race-window writes
+- CampaignSetup has a 3-dot creative-replace menu (`creativeMenuOpen` + `creativeReplaceConfirm` state) that navigates to FormPage with `?creativeMode=` pre-selection; live-campaign replacements show a stronger confirm and alert that live Meta ad mutation is not yet automatic
 
 ### Login namespace cleanup
 `Login.js` clears stale bare/legacy selection keys on every successful login:

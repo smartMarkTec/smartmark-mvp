@@ -97,13 +97,34 @@ function stripQuestionsIfNotAllowed(reply = "", allowed = false) {
 
 // ---------- Route: chat ----------
 router.post("/gpt-chat", limitChat, async (req, res) => {
-  const { message, history } = req.body || {};
+  const { message, history, campaignState } = req.body || {};
   if (!message || typeof message !== "string") {
     return res.status(400).json({ reply: "Please provide a message." });
   }
 
   const trimmedHistory = normalizeHistory(history);
   const allowQuestions = userAllowsAssistantQuestions(message);
+
+  // Build campaign context block from the frontend's current state so the AI
+  // can reference the business, creative, and uploaded image without saying
+  // "I can't view uploaded files" — within Smartemark the image is in session state.
+  let contextLines = [];
+  if (campaignState && typeof campaignState === "object") {
+    const cs = campaignState;
+    if (cs.businessName) contextLines.push(`Business: ${cs.businessName}`);
+    if (cs.objective) contextLines.push(`Campaign objective: ${cs.objective}`);
+    if (cs.creativeSource) contextLines.push(`Creative type: ${String(cs.creativeSource).replace(/_/g, " ")}`);
+    if (cs.uploadedImageUrl) contextLines.push(`The user has uploaded a photo for their ad (treat this image as visible — describe/reference it using the campaign context below).`);
+    if (cs.headline) contextLines.push(`Current headline: "${cs.headline}"`);
+    if (cs.body) contextLines.push(`Current body copy: "${cs.body}"`);
+    if (cs.offer) contextLines.push(`Offer/promotion: ${cs.offer}`);
+    if (cs.service) contextLines.push(`Service/product: ${cs.service}`);
+    if (cs.location) contextLines.push(`Location: ${cs.location}`);
+    if (cs.idealCustomer) contextLines.push(`Ideal customer: ${cs.idealCustomer}`);
+  }
+  const contextBlock = contextLines.length
+    ? `\n\nCurrent campaign context:\n${contextLines.join("\n")}`
+    : "";
 
   const messages = [
     {
@@ -114,7 +135,9 @@ router.post("/gpt-chat", limitChat, async (req, res) => {
         "The UI handles business name, budget, industry, etc. " +
         "Do not ask questions unless the user explicitly asked for next steps or guidance. " +
         "Keep replies 1–3 sentences. " +
-        "If the user is off-topic, be helpful but brief."
+        "If the user is off-topic, be helpful but brief. " +
+        "If the user asks about their uploaded photo or image, use the campaign context below to generate relevant copy — never say you cannot view uploaded files, because within Smartemark the image is part of the session." +
+        contextBlock,
     },
     ...trimmedHistory,
     { role: "user", content: message.slice(0, 2000) }

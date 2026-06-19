@@ -3373,6 +3373,8 @@ useEffect(() => {
   // This prevents the "Connected → Checking → Connected" flicker for returning users.
   if (!fbConnected) setFbConnectionStatus("checking");
 
+  console.debug("[FB Context]", { adminClientId, resolvedUser, fbSelectionScope });
+
   authFetch('/facebook/status')
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
@@ -3411,12 +3413,29 @@ useEffect(() => {
         return;
       }
 
-      // ── Server says not connected but NOT due to a confirmed expired token ──
-      // Could be: ownerKey mismatch, cold-start db miss, session drift, etc.
-      // Trust localStorage / existing fbConnected state — do NOT disconnect.
+      // ── Server definitively says no token for this ownerKey ──
+      // tokenPresent:false + !error means the db was read and no token was found.
+      // This clears stale FB_CONN_KEY flags that were set by a previous admin-client
+      // connection (e.g. TheBoss connected Max's account, then opened clean /setup).
+      if (data.tokenPresent === false && !data.error) {
+        try { localStorage.removeItem(FB_CONN_KEY); } catch {}
+        if (!cancelled) {
+          setFbConnected(false);
+          setFbExpired(false);
+          setFbConnectionStatus("not_connected");
+          console.debug("[FB State Cleared - wrong context]", {
+            reason: "server returned tokenPresent:false — no token for this ownerKey",
+            adminClientId,
+            selectedAccount,
+            selectedPageId,
+          });
+        }
+        return;
+      }
+
+      // ── Inconclusive (server error, transient network, etc.) — keep current state ──
       if (!cancelled) {
         if (fbConnected) {
-          // Keep showing connected; the adaccounts fetch will confirm or deny.
           setFbConnectionStatus("connected");
         } else {
           setFbConnectionStatus("not_connected");
@@ -3496,6 +3515,9 @@ useEffect(() => {
   const [creativeMenuOpen, setCreativeMenuOpen] = useState(false);
   // null | { action: "ai_image"|"upload_photo"|"upload_video", confirmed: false }
   const [creativeReplaceConfirm, setCreativeReplaceConfirm] = useState(null);
+  // Facebook disconnect
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(false);
   const [campaignSettingsMap, setCampaignSettingsMap] = useState(() =>
     readCampaignSettingsMap(resolvedUser)
@@ -5231,6 +5253,52 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [pages, adminClientId]);
 // ────────────────────────────────────────────────────────────────────────────
+
+// Disconnect Facebook for the current context only.
+// In normal mode: clears TheBoss's token. In admin-client mode: clears the client's token.
+// Never touches other clients or TheBoss when disconnecting a client.
+const handleFbDisconnect = async () => {
+  setDisconnecting(true);
+  try {
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const headers = { "Content-Type": "application/json" };
+    if (sid) headers["x-sm-sid"] = sid;
+    const r = await fetch("/auth/facebook/disconnect", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify(adminClientId ? { adminClientId } : {}),
+    });
+    if (!r.ok) throw new Error("Disconnect failed");
+
+    // Clear only the current context's FB state
+    setFbConnected(false);
+    setFbConnectionStatus("not_connected");
+    setFbExpired(false);
+    setAdAccounts([]);
+    setPages([]);
+    setSelectedAccount("");
+    setSelectedPageId("");
+    try { localStorage.removeItem(FB_CONN_KEY); } catch {}
+    if (!adminClientId) {
+      // TheBoss normal mode — clear TheBoss's localStorage selection keys only
+      try {
+        localStorage.removeItem("smartmark_last_selected_account");
+        localStorage.removeItem("smartmark_last_selected_pageId");
+        if (resolvedUser) {
+          localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_account"));
+          localStorage.removeItem(withUser(resolvedUser, "smartmark_last_selected_pageId"));
+        }
+      } catch {}
+    }
+    // Admin-client mode: client keys live under u:adminClient:* which is already isolated
+    setShowDisconnectConfirm(false);
+  } catch {
+    alert("Disconnect failed. Please try again.");
+  } finally {
+    setDisconnecting(false);
+  }
+};
 
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
@@ -7345,6 +7413,61 @@ ${pendingTest ? `
               ? "Facebook Ads Connected"
               : "Connect Facebook Ads"}
           </button>
+
+          {/* ── Disconnect button + confirmation ── */}
+          {fbConnected && (
+            <div style={{ width: "100%", maxWidth: 680 }}>
+              {!showDisconnectConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDisconnectConfirm(true)}
+                  style={{
+                    background: "none",
+                    border: "1px solid #fecaca",
+                    borderRadius: 10,
+                    padding: "7px 14px",
+                    color: "#b91c1c",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  Disconnect Facebook
+                </button>
+              ) : (
+                <div style={{
+                  background: "#fff1f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: 12,
+                  padding: "12px 16px",
+                  fontSize: 13,
+                }}>
+                  <div style={{ fontWeight: 700, color: "#7f1d1d", marginBottom: 8 }}>
+                    {adminClientId
+                      ? `Disconnect Facebook for this client only? This will remove the saved Facebook connection for ${adminClientBusinessName || adminClientId} and will not affect other clients.`
+                      : "Disconnect Facebook from this Smartemark account? This will remove the saved Facebook connection for this account only."}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowDisconnectConfirm(false)}
+                      style={{ background: "none", border: "1px solid #fca5a5", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, color: "#7f1d1d", cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFbDisconnect}
+                      disabled={disconnecting}
+                      style={{ background: "#b91c1c", border: "none", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 700, color: "#fff", cursor: disconnecting ? "not-allowed" : "pointer", opacity: disconnecting ? 0.7 : 1 }}
+                    >
+                      {disconnecting ? "Disconnecting…" : "Yes, Disconnect"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Account + Page dropdowns ── */}
           {fbConnected && (

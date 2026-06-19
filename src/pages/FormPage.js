@@ -2025,7 +2025,7 @@ useEffect(() => {
     setModalImg("");
   }
 
-  /* ---- Ask OpenAI (side chat) ---- */
+  /* ---- Ask OpenAI (side chat) — creative-aware ---- */
   async function askGPT(userText) {
     try {
       const history = chatHistory.slice(-8).map((m) => ({
@@ -2034,12 +2034,29 @@ useEffect(() => {
       }));
       history.push({ role: "user", content: userText });
 
+      // Include current campaign and creative state so the AI can reference the
+      // uploaded image, headline, objective, etc. without saying "I can't view files."
+      const campaignState = {
+        adminClientId: adminClientId || null,
+        businessName: answers?.businessName || null,
+        objective: selectedObjective?.label || aiRecommendedObjective?.label || null,
+        creativeSource,
+        uploadedImageUrl: imageUrls[0] || userUploadedImage || null,
+        headline: result?.headline || editHeadline || null,
+        body: result?.body || editBody || null,
+        offer: answers?.offer || answers?.saveAmount || null,
+        service: answers?.service || answers?.mainServices || null,
+        location: answers?.location || null,
+        idealCustomer: answers?.idealCustomer || null,
+        answers: answers || {},
+      };
+
       const data = await fetchJsonWithRetry(
         `${API_BASE}/gpt-chat`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: userText, history }),
+          body: JSON.stringify({ message: userText, history, campaignState }),
         },
         { tries: 3, warm: true }
       );
@@ -2047,6 +2064,36 @@ useEffect(() => {
     } catch (e) {
       console.warn("gpt-chat failed:", e.message);
       return null;
+    }
+  }
+
+  /* ---- Generate ad copy from uploaded photo ---- */
+  async function handleGenerateCopyForUpload() {
+    if (!imageUrls[0] && !userUploadedImage) return;
+    setLoading(true);
+    setChatHistory((ch) => [...ch, { from: "gpt", text: "Generating ad copy for your photo…" }]);
+    try {
+      const smartCopy = await summarizeAdCopy({
+        ...(answers || {}),
+        ...(imageUrls[0] || userUploadedImage
+          ? { userImage: imageUrls[0] || userUploadedImage }
+          : {}),
+      });
+      const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
+      const aiBody = smartCopy?.subline || smartCopy?.body || "";
+      if (aiHeadline || aiBody) {
+        setResult((prev) => ({ ...(prev || {}), headline: aiHeadline, body: aiBody }));
+        setCopyGenerated(true);
+        const msg = `Here's your ad copy:\n\n**${aiHeadline}**\n\n${aiBody}`;
+        setChatHistory((ch) => [
+          ...ch.filter((m) => m.text !== "Generating ad copy for your photo…"),
+          { from: "gpt", text: msg },
+        ]);
+      }
+    } catch {
+      setChatHistory((ch) => [...ch, { from: "gpt", text: "Copy generation failed. Please try again." }]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -3433,12 +3480,20 @@ async function generatePosterBPair(runToken) {
                     <Dotty /> Uploading photo...
                   </div>
                 ) : imageUrls[0] ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <img src={imageUrls[0]} alt="Your photo" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 8, border: "2px solid #6c63d4" }} />
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 13, color: "#4c3db0" }}>Photo selected</div>
                       <div style={{ fontSize: 11, color: "#7b74c0" }}>Ready to continue</div>
                     </div>
+                    <button
+                      onClick={handleGenerateCopyForUpload}
+                      disabled={loading}
+                      title="Generate ad copy matched to this photo"
+                      style={{ background: "#eeecff", border: "1.5px solid #6c63d4", borderRadius: 7, padding: "4px 10px", fontSize: 12, color: "#4c3db0", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}
+                    >
+                      ✨ Generate Copy
+                    </button>
                     <button onClick={() => uploadInputRef.current?.click()} style={{ background: "none", border: "1px solid #c8c2d8", borderRadius: 7, padding: "4px 10px", fontSize: 12, color: "#7b74c0", fontWeight: 600, cursor: "pointer" }}>Change</button>
                     <button onClick={() => { setUserUploadedImage(null); setImageUrls([]); setImageUrl(""); setHasGenerated(false); }} style={{ background: "none", border: "none", color: "#a09ab8", cursor: "pointer", fontSize: 15, padding: "0 4px", lineHeight: 1 }}>×</button>
                   </div>
