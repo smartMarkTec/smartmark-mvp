@@ -1738,30 +1738,102 @@ function buildAdminCampaignControlHandler(action) {
       });
     }
 
-    let metaStatus;
-    if (action === 'pause')   metaStatus = 'PAUSED';
-    if (action === 'unpause') metaStatus = 'ACTIVE';
-    if (action === 'cancel')  metaStatus = 'PAUSED'; // safe archive: pause first, then mark in DB
+    // Expected status after action (used as fallback if Meta verify fails)
+    let expectedStatus;
+    if (action === 'pause')   expectedStatus = 'PAUSED';
+    if (action === 'unpause') expectedStatus = 'ACTIVE';
+    if (action === 'cancel')  expectedStatus = 'PAUSED';
 
     try {
+      // ── Step 1: Call Meta to change status ──────────────────────────────
       await axios.post(
         `https://graph.facebook.com/${META_API_VERSION}/${campaignId}`,
-        { status: metaStatus },
+        { status: expectedStatus },
         { params: { access_token: userToken } }
       );
 
-      // For cancel: also remove the campaign_creatives record from DB
-      if (action === 'cancel') {
-        try {
-          await db.read();
-          if (Array.isArray(db.data.campaign_creatives)) {
+      // ── Step 2: Immediately verify by reading back from Meta ─────────────
+      // This is the authoritative status — never trust only the write response.
+      let metaStatus = expectedStatus;
+      let effectiveStatus = expectedStatus;
+      let configuredStatus = expectedStatus;
+      let metaCampaignName = '';
+      const lastStatusCheckedAt = new Date().toISOString();
+
+      try {
+        const verifyRes = await axios.get(
+          `https://graph.facebook.com/${META_API_VERSION}/${campaignId}`,
+          {
+            params: {
+              access_token: userToken,
+              fields: 'id,name,status,effective_status,configured_status',
+            },
+            timeout: 8000,
+          }
+        );
+        const mc = verifyRes.data || {};
+        metaStatus        = String(mc.status           || expectedStatus).toUpperCase();
+        effectiveStatus   = String(mc.effective_status || expectedStatus).toUpperCase();
+        configuredStatus  = String(mc.configured_status || expectedStatus).toUpperCase();
+        metaCampaignName  = String(mc.name || '').trim();
+      } catch (verifyErr) {
+        console.warn('[campaign-control] Meta verify fetch failed, using expected status:', verifyErr?.message);
+      }
+
+      console.log('[campaign-control-verified]', {
+        action, campaignId, ownerKey,
+        metaStatus, effectiveStatus, configuredStatus,
+      });
+
+      // ── Step 3: Update DB so campaigns list returns correct status ────────
+      const now = new Date().toISOString();
+      try {
+        await db.read();
+        let needsWrite = false;
+
+        // Update campaign_creatives record
+        if (Array.isArray(db.data.campaign_creatives)) {
+          const idx = db.data.campaign_creatives.findIndex(
+            (r) => String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey
+          );
+          if (idx !== -1) {
+            db.data.campaign_creatives[idx].status = effectiveStatus;
+            db.data.campaign_creatives[idx].lastStatusUpdatedAt = now;
+            db.data.campaign_creatives[idx].lastStatusCheckedAt = now;
+            if (action === 'cancel') {
+              db.data.campaign_creatives[idx].smArchived = true;
+              db.data.campaign_creatives[idx].archivedAt = now;
+            }
+            needsWrite = true;
+          }
+          // For cancel: also remove the record so it stops appearing in the list
+          if (action === 'cancel') {
             const before = db.data.campaign_creatives.length;
             db.data.campaign_creatives = db.data.campaign_creatives.filter(
-              (r) => !(String(r.campaignId) === String(campaignId) && String(r.ownerKey) === ownerKey)
+              (r) => !(String(r.campaignId || '') === campaignId && String(r.ownerKey || '') === ownerKey)
             );
-            if (db.data.campaign_creatives.length !== before) await db.write();
+            if (db.data.campaign_creatives.length !== before) needsWrite = true;
           }
-        } catch {}
+        }
+
+        // Update optimizer_campaign_state record
+        if (Array.isArray(db.data.optimizer_campaign_state)) {
+          const oIdx = db.data.optimizer_campaign_state.findIndex(
+            (s) => String(s?.campaignId || '').trim() === campaignId && String(s?.ownerKey || '').trim() === ownerKey
+          );
+          if (oIdx !== -1) {
+            db.data.optimizer_campaign_state[oIdx].currentStatus = effectiveStatus;
+            db.data.optimizer_campaign_state[oIdx].lastStatusCheckedAt = now;
+            if (action === 'cancel') {
+              db.data.optimizer_campaign_state[oIdx].smArchived = true;
+            }
+            needsWrite = true;
+          }
+        }
+
+        if (needsWrite) await db.write();
+      } catch (dbErr) {
+        console.warn('[campaign-control] DB status update failed (non-critical):', dbErr?.message);
       }
 
       return res.json({
@@ -1772,6 +1844,10 @@ function buildAdminCampaignControlHandler(action) {
         accountId,
         resolvedOwnerKey: ownerKey,
         metaStatus,
+        effectiveStatus,
+        configuredStatus,
+        metaCampaignName,
+        lastStatusCheckedAt,
       });
     } catch (err) {
       const metaError = err?.response?.data?.error?.message || err.message;

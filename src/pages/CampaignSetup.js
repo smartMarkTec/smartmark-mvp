@@ -4695,6 +4695,10 @@ const _prevAdminClientIdRef = React.useRef(adminClientId);
 // True during the brief window when exitClientMode fires but React state batches
 // haven't committed yet. The server-save effect checks this to skip any stale write.
 const isExitingAdminClientModeRef = React.useRef(false);
+// Stores freshly-verified Meta statuses from campaign control actions.
+// Prevents stale DB data from overwriting a verified PAUSED/ACTIVE for 60 s.
+// Shape: { [campaignId]: { status, expiresAt, metaConfirmed, verifiedAt } }
+const recentStatusOverridesRef = React.useRef({});
 
 useEffect(() => {
   const prev = _prevAdminClientIdRef.current;
@@ -5306,9 +5310,10 @@ const handleFbDisconnect = async () => {
 };
 
 
-// Re-fetches the admin-client campaign list after any campaign control action
-// so the UI reflects the server's authoritative state (Meta status, etc.).
-function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap) {
+// Re-fetches the admin-client campaign list after any campaign control action.
+// statusOverrides: plain object snapshot from recentStatusOverridesRef.current —
+// ensures a fresh verified PAUSED status is never overwritten by a stale DB ACTIVE.
+function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, statusOverrides) {
   if (!adminClientId) return Promise.resolve();
   const enc = encodeURIComponent(adminClientId);
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
@@ -5318,9 +5323,24 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
     .then((r) => r.json().catch(() => ({})))
     .then((j) => {
       if (!j.ok || !Array.isArray(j.campaigns)) return;
-      setCampaigns(j.campaigns);
+      const now = Date.now();
+      // Apply fresh status overrides so a stale DB response never reverts a
+      // just-verified pause/unpause that came back from Meta seconds ago.
+      const list = j.campaigns.map((c) => {
+        const ov = statusOverrides?.[c.id];
+        if (ov && now < ov.expiresAt) {
+          return {
+            ...c,
+            status: ov.status,
+            effective_status: ov.status,
+            currentStatus: ov.status,
+          };
+        }
+        return c;
+      });
+      setCampaigns(list);
       const newMetrics = {}, newOptStates = {}, newCreatives = {};
-      for (const c of j.campaigns) {
+      for (const c of list) {
         if (!c.id) continue;
         if (c.metrics) newMetrics[c.id] = c.metrics;
         if (c.optimizerState) newOptStates[c.id] = c.optimizerState;
@@ -5373,30 +5393,42 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 
     if (!r.ok) throw new Error(`${action} failed`);
 
-    const nextStatus = currentlyPaused ? "ACTIVE" : "PAUSED";
+    // Use Meta-verified status from backend response (effectiveStatus > metaStatus > fallback)
+    const data = await r.json().catch(() => ({}));
+    const verifiedStatus = (data.effectiveStatus || data.metaStatus || (currentlyPaused ? "ACTIVE" : "PAUSED")).toUpperCase();
+    const metaConfirmed = !!(data.effectiveStatus || data.metaStatus);
+    const lastCheckedAt = data.lastStatusCheckedAt || new Date().toISOString();
 
-    // Optimistic local update so UI reflects change immediately
+    // Store override so a stale DB refresh won't revert the verified status for 60 s
+    recentStatusOverridesRef.current[campaignId] = {
+      status: verifiedStatus,
+      metaConfirmed,
+      verifiedAt: lastCheckedAt,
+      expiresAt: Date.now() + 60000,
+    };
+
+    // Apply to local campaigns list immediately
     setCampaigns((prev) =>
       Array.isArray(prev)
         ? prev.map((c) =>
             c?.id === campaignId
-              ? { ...c, status: nextStatus, effective_status: nextStatus, currentStatus: nextStatus }
+              ? { ...c, status: verifiedStatus, effective_status: verifiedStatus, currentStatus: verifiedStatus }
               : c
           )
         : prev
     );
 
     if (selectedCampaignId === campaignId) {
-      setCampaignStatus(nextStatus);
-      setIsPaused(!currentlyPaused);
+      setCampaignStatus(verifiedStatus);
+      setIsPaused(verifiedStatus === "PAUSED");
     }
 
-    console.debug("[campaign-control-ui-success]", { action, campaignId, adminClientId });
-    console.debug("[campaign-control-local-status]", { campaignId, status: nextStatus });
+    console.debug("[campaign-control-ui-success]", { action, campaignId, adminClientId, verifiedStatus, metaConfirmed });
+    console.debug("[campaign-control-local-status]", { campaignId, status: verifiedStatus, metaConfirmed });
 
-    // Re-fetch from server to confirm authoritative Meta status
+    // Re-fetch campaigns — pass overrides so stale DB response can't revert the verified status
     if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
     }
   } catch {
     alert("Could not update campaign status.");
@@ -5429,7 +5461,7 @@ const handleArchiveCampaign = async (campaignId) => {
     }
     console.debug("[campaign-control-ui-success]", { action: "archive", campaignId, adminClientId });
     if (adminClientId) {
-      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
     }
   } catch {
     alert("Could not archive campaign.");
@@ -5648,7 +5680,14 @@ const handleDeleteCampaign = async (campaignId) => {
       return rest;
     });
 
-    const fallbackId = String(nextCampaigns?.[0]?.id || "").trim();
+    // Pick next active (non-archived) campaign — never fall back to __DRAFT__
+    const nextActive = nextCampaigns.find((c) => !c.smArchived && String(c.id || "").trim());
+    const fallbackId = nextActive?.id ? String(nextActive.id).trim() : "";
+
+    console.debug("[campaign-control-selection-after-cancel]", {
+      deletedCampaignId: idToDelete,
+      nextSelectedCampaignId: fallbackId || "(none)",
+    });
 
     if (selectedCampaignId === idToDelete) {
       setSelectedCampaignId(fallbackId || "");
@@ -5663,7 +5702,11 @@ const handleDeleteCampaign = async (campaignId) => {
     setLaunched(false);
     setLaunchResult(null);
 
-    alert("Campaign deleted.");
+    if (adminClientId) {
+      await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
+    }
+
+    alert("Campaign canceled and removed from active list.");
   } catch (e) {
     alert("Could not delete campaign: " + (e?.message || ""));
   } finally {
@@ -8418,15 +8461,32 @@ ${pendingTest ? `
       const statusMsg = rawSt === "ACTIVE" && !hasImpressions
         ? "Campaign is active. Meta may still be reviewing or learning before delivery starts."
         : null;
+      const ov = recentStatusOverridesRef.current[selectedLiveCampaign.id];
+      const freshOverride = ov && Date.now() < ov.expiresAt;
+      const metaConfirmed = freshOverride && ov.metaConfirmed;
+      const smStatus = selectedLiveCampaign.smArchived ? "Archived" : selectedLiveCampaign.launchComplete ? "Launched" : "Draft";
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: stColor, display: "inline-block" }} />
             <span style={{ fontWeight: 800, fontSize: 12, color: stColor }}>{stLabel}</span>
+            {metaConfirmed && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#16a34a", background: "#dcfce7", borderRadius: 4, padding: "1px 6px" }}>
+                Meta confirmed
+              </span>
+            )}
           </div>
+          <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+            Smartemark: {smStatus}
+          </span>
           {selectedLiveCampaign.id && (
-            <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+            <span style={{ fontSize: 11, color: "#cbd5e1", fontWeight: 600 }}>
               ID: {selectedLiveCampaign.id}
+            </span>
+          )}
+          {freshOverride && ov.verifiedAt && (
+            <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
+              Last checked: {new Date(ov.verifiedAt).toLocaleTimeString()}
             </span>
           )}
           {statusMsg && (
@@ -8437,7 +8497,7 @@ ${pendingTest ? `
               type="button"
               onClick={async () => {
                 setLoading(true);
-                await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap);
+                await refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current);
                 setLoading(false);
               }}
               disabled={loading}
