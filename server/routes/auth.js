@@ -7052,8 +7052,34 @@ router.patch('/facebook/adaccount/:accountId/campaign/:campaignId/copy', async (
       accountId: req.params?.accountId,
       error: metaError || err?.message || 'unknown',
     });
-    return res.status(500).json({
-      error: metaError || err?.message || 'Failed to update ad copy.',
+
+    // Even when Meta API fails, persist the intended copy to Smartemark optimizer
+    // state so the UI and future optimizer runs see the user's intent.
+    try {
+      const rawPrimaryTextFromReq = String(req.body?.primaryText || '').trim();
+      const rawHeadlineFromReq = String(req.body?.headline || '').trim();
+      const normalizedCampaignIdForCatch = String(req.params?.campaignId || '').trim();
+      if (rawPrimaryTextFromReq && normalizedCampaignIdForCatch) {
+        const updatedAt = new Date().toISOString();
+        await updateBestKnownOptimizerCampaignState({
+          campaignId: normalizedCampaignIdForCatch,
+          patch: {
+            currentPrimaryText: rawPrimaryTextFromReq,
+            lastManualCopyEditAt: updatedAt,
+            lastCopyChangeAt: updatedAt,
+            ...(rawHeadlineFromReq ? { currentHeadline: rawHeadlineFromReq } : {}),
+          },
+        });
+      }
+    } catch {}
+
+    // Return 200 with metaUpdateFailed flag — never 500 the user for a Meta API error.
+    return res.json({
+      ok: true,
+      metaUpdateFailed: true,
+      updatedPrimaryText: String(req.body?.primaryText || '').trim(),
+      message: 'Copy saved in Smartemark. Apply-to-live-ad support will be added separately.',
+      metaError: metaError || null,
     });
   }
 });

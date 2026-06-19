@@ -219,6 +219,8 @@ router.post('/facebook/create-draft', async (req, res) => {
         optimization_goal: 'LINK_CLICKS',
         bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
         status: 'PAUSED',
+        // Required by Meta when not using campaign-level budget sharing.
+        is_adset_budget_sharing_enabled: false,
         targeting: {
           geo_locations: { countries: ['US'] },
           age_min: 18,

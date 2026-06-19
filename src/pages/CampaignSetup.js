@@ -5306,11 +5306,25 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 
   const acctId = String(selectedAccount).trim();
   const action = currentlyPaused ? "unpause" : "pause";
+  const resolvedOwnerKey = adminClientId ? `user:${adminClientId}` : null;
+
+  console.log("[pause/unpause]", {
+    adminClientId: adminClientId || null,
+    ownerKey: resolvedOwnerKey || "(from session)",
+    accountId: acctId,
+    campaignId,
+    action,
+  });
 
   setLoading(true);
   try {
     const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/${action}`, {
       method: "POST",
+      // In admin-client mode pass ownerKey explicitly so the backend resolves
+      // the client's FB token instead of TheBoss's session token.
+      ...(resolvedOwnerKey
+        ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerKey: resolvedOwnerKey }) }
+        : {}),
     });
 
     if (!r.ok) throw new Error(`${action} failed`);
@@ -5455,11 +5469,27 @@ const handleSaveCopyEdit = async () => {
         body: JSON.stringify({
           primaryText: trimmedText,
           headline: String(copyEditHeadline || "").trim() || undefined,
+          // In admin-client mode pass ownerKey so backend uses client token, not TheBoss's.
+          ...(adminClientId ? { ownerKey: `user:${adminClientId}` } : {}),
         }),
       }
     );
 
     const data = await r.json().catch(() => ({}));
+
+    // Backend returns ok:true + metaUpdateFailed:true when Smartemark saved the copy
+    // but the live Meta ad could not be updated (e.g. token resolved to wrong context).
+    if (data?.metaUpdateFailed) {
+      const updatedText = String(data?.updatedPrimaryText || trimmedText).trim();
+      setOptimizerStateMap((prev) => ({
+        ...prev,
+        [selectedCampaignId]: { ...(prev[selectedCampaignId] || {}), currentPrimaryText: updatedText },
+      }));
+      setCopyEditMode(false);
+      alert(data.message || "Copy saved in Smartemark. Apply-to-live-ad support will be added separately.");
+      return;
+    }
+
     if (!r.ok) throw new Error(data?.error || `Copy update failed (HTTP ${r.status})`);
 
     // Immediately update the optimizer state map so the UI reflects the new copy

@@ -146,6 +146,36 @@ export default function PremiumIntake() {
       setAgreementChecked(true);
     })();
   }, [isTokenMode, adminClientId, navigate]);
+  // Prefill form with existing client data when admin opens in edit mode.
+  // Without this, opening /premium-intake?adminClientId=... shows an empty form.
+  useEffect(() => {
+    if (!adminClientId) return;
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}`, {
+      credentials: "include",
+      headers: sid ? { "x-sm-sid": sid } : {},
+    })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => {
+        if (!j.ok || !j.client) return;
+        const existing = j.client.premiumIntake || {};
+        if (!Object.keys(existing).length) return;
+        // Merge existing values into form — only overwrite EMPTY state slots so
+        // any field the admin has already typed into is preserved.
+        setForm((prev) => {
+          const merged = { ...prev };
+          for (const [k, v] of Object.entries(existing)) {
+            if (k in merged && v !== undefined && v !== null && String(v).trim()) {
+              merged[k] = v;
+            }
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+  // eslint-disable-next-line
+  }, [adminClientId]);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState([]);

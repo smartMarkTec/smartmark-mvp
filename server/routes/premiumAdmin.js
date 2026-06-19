@@ -176,48 +176,53 @@ function fmtBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Helper: build the intake object from request body (shared by normal + admin routes)
+// Helper: build the intake object from request body (shared by normal + admin routes).
+// Merge-safe: if a submitted field is empty, the existing value is preserved.
+// This prevents a partial edit from blanking out fields the admin didn't touch.
 function buildIntakeFromBody(b, existingIntake) {
+  const e = existingIntake || {};
   const now = new Date().toISOString();
+  // Returns submitted value if non-empty, otherwise falls back to existing DB value.
+  const pick = (k) => String(b[k] || '').trim() || String(e[k] || '').trim();
   return {
     // Business basics
-    businessName:                   String(b.businessName || '').trim(),
-    websiteUrl:                     String(b.websiteUrl || '').trim(),
-    mainPhone:                      String(b.mainPhone || '').trim(),
-    serviceArea:                    String(b.serviceArea || '').trim(),
-    mainServices:                   String(b.mainServices || '').trim(),
-    callForwardingNumber:           String(b.callForwardingNumber || '').trim(),
+    businessName:                   pick('businessName'),
+    websiteUrl:                     pick('websiteUrl'),
+    mainPhone:                      pick('mainPhone'),
+    serviceArea:                    pick('serviceArea'),
+    mainServices:                   pick('mainServices'),
+    callForwardingNumber:           pick('callForwardingNumber'),
     // Offers / specials
-    currentSpecialOrOffer:          String(b.currentSpecialOrOffer || '').trim(),
-    seasonalSpecials:               String(b.seasonalSpecials || '').trim(),
-    servicesNotToAdvertise:         String(b.servicesNotToAdvertise || '').trim(),
-    preferredAdBudget:              String(b.preferredAdBudget || '').trim(),
+    currentSpecialOrOffer:          pick('currentSpecialOrOffer'),
+    seasonalSpecials:               pick('seasonalSpecials'),
+    servicesNotToAdvertise:         pick('servicesNotToAdvertise'),
+    preferredAdBudget:              pick('preferredAdBudget'),
     // Campaign strategy
-    serviceToPromoteFirst:          String(b.serviceToPromoteFirst || '').trim(),
-    targetCities:                   String(b.targetCities || '').trim(),
-    idealCustomer:                  String(b.idealCustomer || '').trim(),
-    businessDifferentiator:         String(b.businessDifferentiator || '').trim(),
-    customerProblem:                String(b.customerProblem || '').trim(),
-    promotionOffer:                 String(b.promotionOffer || '').trim(),
-    preferredTone:                  String(b.preferredTone || '').trim(),
+    serviceToPromoteFirst:          pick('serviceToPromoteFirst'),
+    targetCities:                   pick('targetCities'),
+    idealCustomer:                  pick('idealCustomer'),
+    businessDifferentiator:         pick('businessDifferentiator'),
+    customerProblem:                pick('customerProblem'),
+    promotionOffer:                 pick('promotionOffer'),
+    preferredTone:                  pick('preferredTone'),
     // Website access (no passwords)
-    websitePlatform:                String(b.websitePlatform || '').trim(),
-    websiteLoginOrWebPersonContact: String(b.websiteLoginOrWebPersonContact || '').trim(),
-    websiteAccessMethod:            String(b.websiteAccessMethod || '').trim(),
-    canAddSmartemark:               String(b.canAddSmartemark || '').trim(),
+    websitePlatform:                pick('websitePlatform'),
+    websiteLoginOrWebPersonContact: pick('websiteLoginOrWebPersonContact'),
+    websiteAccessMethod:            pick('websiteAccessMethod'),
+    canAddSmartemark:               pick('canAddSmartemark'),
     // Facebook / tracking
-    facebookPageUrl:                String(b.facebookPageUrl || '').trim(),
-    facebookAdAccountNotes:         String(b.facebookAdAccountNotes || '').trim(),
+    facebookPageUrl:                pick('facebookPageUrl'),
+    facebookAdAccountNotes:         pick('facebookAdAccountNotes'),
     // Contact
-    bestContactName:                String(b.bestContactName || '').trim(),
-    bestContactEmail:               String(b.bestContactEmail || '').trim(),
-    bestContactPhone:               String(b.bestContactPhone || '').trim(),
-    additionalNotes:                String(b.additionalNotes || '').trim(),
+    bestContactName:                pick('bestContactName'),
+    bestContactEmail:               pick('bestContactEmail'),
+    bestContactPhone:               pick('bestContactPhone'),
+    additionalNotes:                pick('additionalNotes'),
     // Media assets — preserved from DB (uploaded separately via /api/intake-media/upload)
-    mediaAssets: Array.isArray(existingIntake?.mediaAssets) ? existingIntake.mediaAssets : [],
-    mediaUploadNotes: String(b.mediaUploadNotes || existingIntake?.mediaUploadNotes || '').trim(),
+    mediaAssets: Array.isArray(e.mediaAssets) ? e.mediaAssets : [],
+    mediaUploadNotes: pick('mediaUploadNotes'),
     // Timestamps — preserve original submission date on re-submit
-    submittedAt: existingIntake?.submittedAt || now,
+    submittedAt: e.submittedAt || now,
     updatedAt: now,
   };
 }
