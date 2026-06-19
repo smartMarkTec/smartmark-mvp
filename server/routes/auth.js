@@ -2949,7 +2949,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     ).trim(),
   });
 
-  const ownerKey = String(
+  let ownerKey = String(
     resolved?.ownerKey ||
     ownerKeyFromReq(req) ||
     ''
@@ -2964,6 +2964,26 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       ownerKeyUsed: ownerKey || null,
       sid: String(getSidFromReq(req) || '').trim() || null,
     });
+  }
+
+  // Canonicalise ownerKey: if the token was found under a raw SID (sm_xxx...),
+  // upgrade to user:<username> for all DB persistence so campaigns are visible
+  // in the user's list and in admin views. Never persist under SID ownerKey.
+  if (ownerKey && !ownerKey.startsWith('user:')) {
+    try {
+      await ensureUsersAndSessions();
+      await db.read();
+      const sess = (db.data.sessions || []).find(
+        (s) => String(s?.sid || '') === String(ownerKey)
+      );
+      if (sess?.username) {
+        const canonicalKey = `user:${String(sess.username).trim()}`;
+        // Also persist the token under the canonical key so future lookups succeed
+        try { await setFbUserToken(userToken, canonicalKey); } catch {}
+        console.log('[launch] ownerKey upgraded:', { from: ownerKey, to: canonicalKey });
+        ownerKey = canonicalKey;
+      }
+    } catch {}
   }
 
   const allowNoSpend = process.env.ALLOW_NO_SPEND === '1' || !isProd;
@@ -3772,6 +3792,8 @@ const adsetPayload = {
   optimization_goal: 'LINK_CLICKS',
   bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
   status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+  // Required by Meta when budgets live on adsets and not at the campaign level.
+  is_adset_budget_sharing_enabled: false,
   start_time: startISO,
   ...(endISO ? { end_time: endISO } : {}),
   targeting: adsetTargeting,
@@ -6695,18 +6717,50 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
       { status: 'PAUSED' },
       { params: { access_token: userToken } }
     );
-      try {
+
+    // Verify the status Meta actually set (same pattern as admin-client control routes)
+    let metaStatus = 'PAUSED';
+    let effectiveStatus = 'PAUSED';
+    let configuredStatus = 'PAUSED';
+    const lastStatusCheckedAt = new Date().toISOString();
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
+        { params: { access_token: userToken, fields: 'id,name,status,effective_status,configured_status' }, timeout: 8000 }
+      );
+      const mc = verifyRes.data || {};
+      metaStatus       = String(mc.status            || 'PAUSED').toUpperCase();
+      effectiveStatus  = String(mc.effective_status  || 'PAUSED').toUpperCase();
+      configuredStatus = String(mc.configured_status || 'PAUSED').toUpperCase();
+    } catch {}
+
+    // Update campaign_creatives so the campaigns list reflects the verified status
+    try {
+      await db.read();
+      if (Array.isArray(db.data.campaign_creatives)) {
+        const idx = db.data.campaign_creatives.findIndex(
+          (r) => String(r.campaignId || '') === normalizedCampaignId && String(r.ownerKey || '') === ownerKey
+        );
+        if (idx !== -1) {
+          db.data.campaign_creatives[idx].status = effectiveStatus;
+          db.data.campaign_creatives[idx].lastStatusCheckedAt = lastStatusCheckedAt;
+          await db.write();
+        }
+      }
+    } catch {}
+
+    try {
       await markManualOverride(campaignId, {
         manualOverride: true,
         manualOverrideType: 'paused_by_user',
         manualOverrideReason: 'User manually paused campaign.',
         accountId: String(req.params.accountId || '').replace(/^act_/, '').trim(),
         ownerKey: String(ownerKey || '').trim(),
-        currentStatus: 'PAUSED',
+        currentStatus: effectiveStatus,
       });
 
       await updateOptimizerCampaignState(campaignId, {
-        currentStatus: 'PAUSED',
+        currentStatus: effectiveStatus,
         ownerKey: String(ownerKey || '').trim(),
       });
     } catch (e) {
@@ -6714,9 +6768,14 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
     }
 
     res.json({
+      ok: true,
       success: true,
       accessMode: usingDebugKey ? 'debug_key' : 'session',
       ownerKey,
+      metaStatus,
+      effectiveStatus,
+      configuredStatus,
+      lastStatusCheckedAt,
       message: `Campaign ${campaignId} paused.`,
     });
   } catch (err) {
@@ -6796,18 +6855,49 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
       { params: { access_token: userToken } }
     );
 
-     try {
+    // Verify Meta status after unpause
+    let metaStatus = 'ACTIVE';
+    let effectiveStatus = 'ACTIVE';
+    let configuredStatus = 'ACTIVE';
+    const lastStatusCheckedAt = new Date().toISOString();
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`,
+        { params: { access_token: userToken, fields: 'id,name,status,effective_status,configured_status' }, timeout: 8000 }
+      );
+      const mc = verifyRes.data || {};
+      metaStatus       = String(mc.status            || 'ACTIVE').toUpperCase();
+      effectiveStatus  = String(mc.effective_status  || 'ACTIVE').toUpperCase();
+      configuredStatus = String(mc.configured_status || 'ACTIVE').toUpperCase();
+    } catch {}
+
+    // Update campaign_creatives with verified status
+    try {
+      await db.read();
+      if (Array.isArray(db.data.campaign_creatives)) {
+        const idx = db.data.campaign_creatives.findIndex(
+          (r) => String(r.campaignId || '') === normalizedCampaignId && String(r.ownerKey || '') === ownerKey
+        );
+        if (idx !== -1) {
+          db.data.campaign_creatives[idx].status = effectiveStatus;
+          db.data.campaign_creatives[idx].lastStatusCheckedAt = lastStatusCheckedAt;
+          await db.write();
+        }
+      }
+    } catch {}
+
+    try {
       await markManualOverride(campaignId, {
         manualOverride: false,
         manualOverrideType: '',
         manualOverrideReason: '',
         accountId: String(req.params.accountId || '').replace(/^act_/, '').trim(),
         ownerKey: String(ownerKey || '').trim(),
-        currentStatus: 'ACTIVE',
+        currentStatus: effectiveStatus,
       });
 
       await updateOptimizerCampaignState(campaignId, {
-        currentStatus: 'ACTIVE',
+        currentStatus: effectiveStatus,
         ownerKey: String(ownerKey || '').trim(),
       });
     } catch (e) {
@@ -6815,9 +6905,14 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
     }
 
     res.json({
+      ok: true,
       success: true,
       accessMode: usingDebugKey ? 'debug_key' : 'session',
       ownerKey,
+      metaStatus,
+      effectiveStatus,
+      configuredStatus,
+      lastStatusCheckedAt,
       message: `Campaign ${campaignId} unpaused.`,
     });
   } catch (err) {

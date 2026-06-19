@@ -195,6 +195,7 @@ router.post('/facebook/create-draft', async (req, res) => {
 
   try {
     // 1. Create PAUSED campaign
+    // is_adset_budget_sharing_enabled: false tells Meta budgets live on adsets, not the campaign.
     const campaignRes = await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/campaigns`,
       {
@@ -202,6 +203,7 @@ router.post('/facebook/create-draft', async (req, res) => {
         objective: 'OUTCOME_TRAFFIC',
         status: 'PAUSED',
         special_ad_categories: [],
+        is_adset_budget_sharing_enabled: false,
       },
       { params: mkParams() }
     );
@@ -209,24 +211,26 @@ router.post('/facebook/create-draft', async (req, res) => {
     if (!draftCampaignId) throw new Error('Campaign creation returned no ID');
 
     // 2. Create PAUSED adset
+    const draftAdsetPayload = {
+      name: `${name} — Ad Set`,
+      campaign_id: draftCampaignId,
+      daily_budget: budget,
+      billing_event: 'IMPRESSIONS',
+      optimization_goal: 'LINK_CLICKS',
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      status: 'PAUSED',
+      is_adset_budget_sharing_enabled: false,
+      targeting: {
+        geo_locations: { countries: ['US'] },
+        age_min: 18,
+        age_max: 65,
+      },
+    };
+    console.log('[facebook/create-draft][adsetPayload]', draftAdsetPayload);
+
     const adSetRes = await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adsets`,
-      {
-        name: `${name} — Ad Set`,
-        campaign_id: draftCampaignId,
-        daily_budget: budget,
-        billing_event: 'IMPRESSIONS',
-        optimization_goal: 'LINK_CLICKS',
-        bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-        status: 'PAUSED',
-        // Required by Meta when not using campaign-level budget sharing.
-        is_adset_budget_sharing_enabled: false,
-        targeting: {
-          geo_locations: { countries: ['US'] },
-          age_min: 18,
-          age_max: 65,
-        },
-      },
+      draftAdsetPayload,
       { params: mkParams() }
     );
     draftAdSetId = adSetRes.data?.id;
