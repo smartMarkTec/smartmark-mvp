@@ -3513,7 +3513,7 @@ useEffect(() => {
 
   const [showCampaignMenu, setShowCampaignMenu] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  // null | campaignId — when set, the 3-dot menu shows an inline "Stop & Archive on Meta" confirm
+  // null | campaignId — when set, the 3-dot menu shows an inline "Delete / Stop Campaign" confirm
   const [archiveMetaConfirmId, setArchiveMetaConfirmId] = useState(null);
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
@@ -4796,6 +4796,38 @@ useEffect(() => {
         }
       }
 
+      // ── Stale-draft reconciliation ──────────────────────────────────────────
+      // If the loaded campaigns list contains a live campaign with the same name
+      // as the current draft, the draft was already launched — clear it so the
+      // real campaign is shown instead of a phantom "(Draft)" entry.
+      // Primary protection against the admin-client post-launch page-reload bug.
+      if (hasDraft) {
+        const _draftName = String(form?.campaignName || "").trim().toLowerCase();
+        if (_draftName) {
+          const _matchingLive = list.find((c) => {
+            if (c.smArchived || c.hiddenFromHistory) return false;
+            const _cName = String(c.name || "").trim().toLowerCase();
+            const _cSt   = String(c.status || c.effective_status || "").toUpperCase();
+            const _isLive = c.launchComplete === true ||
+              ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"].includes(_cSt);
+            return _isLive && _cName === _draftName;
+          });
+          if (_matchingLive) {
+            console.debug("[draft-reconciliation] clearing stale draft — live campaign found:", _matchingLive.id, _matchingLive.name);
+            setDraftCreatives({ images: [], mediaSelection: "image" });
+            setDraftDisabled(resolvedUser, true);
+            try { purgeDraftStorages(resolvedUser); } catch {}
+            if (adminClientId) {
+              try { localStorage.removeItem(`u:adminClient:${adminClientId}:${CREATIVE_DRAFT_KEY}`); } catch {}
+              try { localStorage.removeItem(`u:adminClient:${adminClientId}:sm_setup_creatives_backup_v1`); } catch {}
+            }
+            setSelectedCampaignId(_matchingLive.id);
+            setExpandedId(_matchingLive.id);
+          }
+        }
+      }
+      // ───────────────────────────────────────────────────────────────────────
+
       // ✅ preload live creatives from backend so they show on incognito / other browsers
       await Promise.all(
         list.map(async (c) => {
@@ -5468,7 +5500,7 @@ const handleArchiveCampaign = async (campaignId) => {
   // which is NOT Smartemark-only. Block it unconditionally even if the button is hidden.
   // Admin-client campaigns must use handleStopArchiveOnMeta instead.
   if (adminClientId) {
-    alert("Use Stop & Archive on Meta for admin-managed campaigns.");
+    alert("Use Delete / Stop Campaign for admin-managed campaigns.");
     return;
   }
   const acctId = String(selectedAccount).trim().replace(/^act_/, "");
@@ -5685,6 +5717,24 @@ const handleDeleteCampaign = async (campaignId) => {
   const idToDelete = String(campaignId || "").trim();
 
   if (!idToDelete || idToDelete === "__DRAFT__") {
+    // Safety: if any live campaign in the current list has the same name as the
+    // current draft, the draft was already launched — deleting it locally would
+    // hide the campaign from Smartemark while it continues spending on Meta.
+    const _safeDraftName = String(form?.campaignName || "").trim().toLowerCase();
+    if (_safeDraftName && Array.isArray(campaigns) && campaigns.length > 0) {
+      const _hasLaunchedMatch = campaigns.some((c) => {
+        if (c.smArchived || c.hiddenFromHistory) return false;
+        const _cName = String(c.name || "").trim().toLowerCase();
+        const _cSt   = String(c.status || c.effective_status || "").toUpperCase();
+        const _isLive = c.launchComplete === true ||
+          ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"].includes(_cSt);
+        return _isLive && _cName === _safeDraftName;
+      });
+      if (_hasLaunchedMatch) {
+        alert("This campaign has launched on Meta. Use Delete / Stop Campaign to stop it safely.");
+        return;
+      }
+    }
   handleClearDraft();
   purgeDraftArtifactsEverywhere();
   setDraftDisabled(resolvedUser, true);
@@ -5697,7 +5747,7 @@ const handleDeleteCampaign = async (campaignId) => {
   // Defense-in-depth: in admin-client mode this function would call the Meta "cancel"
   // route via adminCampaignControlFetch. That must never happen — use Stop & Archive on Meta.
   if (adminClientId) {
-    alert("Use Stop & Archive on Meta for admin-managed campaigns.");
+    alert("Use Delete / Stop Campaign for admin-managed campaigns.");
     return;
   }
 
@@ -6484,6 +6534,15 @@ console.log("[LAUNCH][creative-payload]", {
       try {
         // 1) remove ALL draft storages used by Setup/Form
         purgeDraftStorages(resolvedUser);
+
+        // In admin-client mode the draft is stored under the admin-client namespace,
+        // which purgeDraftStorages does not touch. Clear it explicitly so it cannot
+        // be restored on the next page load and re-mask the live campaign as a draft.
+        if (adminClientId) {
+          try { localStorage.removeItem(`u:adminClient:${adminClientId}:${CREATIVE_DRAFT_KEY}`); } catch {}
+          try { localStorage.removeItem(`u:adminClient:${adminClientId}:sm_setup_creatives_backup_v1`); } catch {}
+          try { localStorage.removeItem(`u:adminClient:${adminClientId}:draft_form_creatives`); } catch {}
+        }
 
         // also clear legacy creative draft keys (extra safety)
         try {
@@ -8886,7 +8945,7 @@ ${pendingTest ? `
             {archiveMetaConfirmId === selectedLiveCampaign.id ? (
               <div style={{ padding: "10px 12px", background: "#fff7ed", borderRadius: 10, border: "1px solid #fed7aa" }}>
                 <div style={{ fontSize: 12, color: "#92400e", fontWeight: 700, marginBottom: 8 }}>
-                  This will stop this campaign from running on Meta and remove it from the active Smartemark list. This is different from hiding it from Smartemark only.
+                  This will stop this campaign from running on Meta. Meta treats deleted campaigns as archived, so it will be removed from your active campaign list and should no longer spend. This is different from hiding it from Smartemark only.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
@@ -8911,7 +8970,7 @@ ${pendingTest ? `
                 onClick={() => setArchiveMetaConfirmId(selectedLiveCampaign.id)}
                 style={{ background: "#ffffff", color: "#b91c1c", border: "none", textAlign: "left", padding: "10px 12px", borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: "pointer" }}
               >
-                Stop &amp; Archive on Meta
+                Delete / Stop Campaign
               </button>
             )}
             {campaigns.some((c) => isEffectivelyArchived(c) && !c.hiddenFromHistory) && (
@@ -8957,9 +9016,9 @@ ${pendingTest ? `
           const _isTrulyLive = ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"].includes(_st) &&
                                !selectedLiveCampaign.smArchived &&
                                isUsefulCurrentCampaign(selectedLiveCampaign, _snap);
-          // In admin-client mode "Stop & Archive on Meta" (above) is the authoritative stop action.
+          // In admin-client mode "Delete / Stop Campaign" (above) is the authoritative stop action.
           // "Cancel live campaign" would also hit Meta via the cancel route — suppress it so the
-          // only Meta-touching actions in admin-client mode are Pause, Unpause, and Stop & Archive on Meta.
+          // only Meta-touching actions in admin-client mode are Pause, Unpause, and Delete / Stop Campaign.
           if (_isTrulyLive && !adminClientId) {
             return (
               <button

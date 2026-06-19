@@ -3954,10 +3954,13 @@ const { data: adsetData } = await axios.post(
     const record = {
       ownerKey,
       campaignId,
+      metaCampaignId: campaignId,
       accountId: String(accountId || ''),
       pageId: String(pageIdFinal || ''),
       name: campaignName,
       status: campaignStatus,
+      effective_status: campaignStatus,
+      currentStatus: campaignStatus,
       mediaSelection: isVideoLaunch ? 'video' : 'image',
       mediaType: isVideoLaunch ? 'video' : 'image',
       images: usedImages,
@@ -3966,6 +3969,10 @@ const { data: adsetData } = await axios.post(
       // launchComplete=true is proof that campaign, adset, and all ads were fully created.
       // This write only happens AFTER every Meta object succeeds — it is the success marker.
       launchComplete: true,
+      isDraft: false,
+      smArchived: false,
+      hiddenFromHistory: false,
+      lastStatusCheckedAt: nowIso,
       updatedAt: nowIso,
       ...(idx === -1 ? { createdAt: nowIso } : {}),
     };
@@ -4081,10 +4088,16 @@ const optimizerPayload = {
     res.json({
       success: true,
       campaignId,
+      campaignName,
       adSetIds: [imageAdSetId].filter(Boolean),
       adIds,
       variantPlan: plan,
       campaignStatus,
+      effective_status: campaignStatus,
+      launchComplete: true,
+      isDraft: false,
+      ownerKey,
+      accountId: String(accountId || ''),
       validateOnly: VALIDATE_ONLY,
       resolvedPageId: pageIdFinal,
     });
