@@ -1744,16 +1744,78 @@ function buildAdminCampaignControlHandler(action) {
     if (action === 'unpause') expectedStatus = 'ACTIVE';
     if (action === 'cancel')  expectedStatus = 'PAUSED';
 
+    const mkTok = () => ({ access_token: userToken });
+
     try {
-      // ── Step 1: Call Meta to change status ──────────────────────────────
+      // ── Step 1: Set campaign status on Meta ──────────────────────────────
       await axios.post(
         `https://graph.facebook.com/${META_API_VERSION}/${campaignId}`,
         { status: expectedStatus },
-        { params: { access_token: userToken } }
+        { params: mkTok() }
       );
 
+      // ── Step 1b (unpause only): also activate every PAUSED adset and ad ──
+      // Meta requires child objects to be individually activated when the campaign
+      // was paused at the adset/ad level. Skips DELETED/ARCHIVED items.
+      if (action === 'unpause') {
+        // Fetch adsets
+        try {
+          const adsetsRes = await axios.get(
+            `https://graph.facebook.com/${META_API_VERSION}/${campaignId}/adsets`,
+            { params: { ...mkTok(), fields: 'id,name,status,effective_status', limit: 50 } }
+          );
+          const adsets = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data : [];
+          for (const adset of adsets) {
+            const st = String(adset.status || adset.effective_status || '').toUpperCase();
+            if (st === 'DELETED' || st === 'ARCHIVED') continue;
+            try {
+              await axios.post(
+                `https://graph.facebook.com/${META_API_VERSION}/${adset.id}`,
+                { status: 'ACTIVE' },
+                { params: mkTok() }
+              );
+              console.log('[campaign-control] adset activated:', adset.id);
+            } catch (adsetErr) {
+              const ae = adsetErr?.response?.data?.error || null;
+              console.warn('[campaign-control] adset activation failed (non-fatal):', {
+                adsetId: adset.id, message: ae?.message || adsetErr.message, code: ae?.code,
+              });
+            }
+          }
+        } catch (adsetsListErr) {
+          console.warn('[campaign-control] could not list adsets:', adsetsListErr?.message);
+        }
+
+        // Fetch ads
+        try {
+          const adsRes = await axios.get(
+            `https://graph.facebook.com/${META_API_VERSION}/${campaignId}/ads`,
+            { params: { ...mkTok(), fields: 'id,name,status,effective_status', limit: 100 } }
+          );
+          const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+          for (const ad of ads) {
+            const st = String(ad.status || ad.effective_status || '').toUpperCase();
+            if (st === 'DELETED' || st === 'ARCHIVED') continue;
+            try {
+              await axios.post(
+                `https://graph.facebook.com/${META_API_VERSION}/${ad.id}`,
+                { status: 'ACTIVE' },
+                { params: mkTok() }
+              );
+              console.log('[campaign-control] ad activated:', ad.id);
+            } catch (adErr) {
+              const ae = adErr?.response?.data?.error || null;
+              console.warn('[campaign-control] ad activation failed (non-fatal):', {
+                adId: ad.id, message: ae?.message || adErr.message, code: ae?.code,
+              });
+            }
+          }
+        } catch (adsListErr) {
+          console.warn('[campaign-control] could not list ads:', adsListErr?.message);
+        }
+      }
+
       // ── Step 2: Immediately verify by reading back from Meta ─────────────
-      // This is the authoritative status — never trust only the write response.
       let metaStatus = expectedStatus;
       let effectiveStatus = expectedStatus;
       let configuredStatus = expectedStatus;
@@ -1850,14 +1912,30 @@ function buildAdminCampaignControlHandler(action) {
         lastStatusCheckedAt,
       });
     } catch (err) {
-      const metaError = err?.response?.data?.error?.message || err.message;
-      console.error('[campaign-control] Meta call failed:', { action, campaignId, accountId, ownerKey, metaError });
+      const metaErr = err?.response?.data?.error || null;
+      console.error('[campaign-control] Meta call failed:', {
+        action,
+        campaignId,
+        accountId,
+        ownerKey,
+        status: err?.response?.status,
+        metaError: metaErr,
+        message: metaErr?.message || err.message,
+        code: metaErr?.code,
+        subcode: metaErr?.error_subcode,
+        userTitle: metaErr?.error_user_title,
+        userMessage: metaErr?.error_user_msg,
+        fbtrace_id: metaErr?.fbtrace_id,
+      });
       return res.status(500).json({
-        error: metaError,
+        error: metaErr?.message || err.message,
         action,
         campaignId,
         accountId,
         resolvedOwnerKey: ownerKey,
+        metaErrorCode: metaErr?.code || null,
+        metaErrorSubcode: metaErr?.error_subcode || null,
+        metaUserMessage: metaErr?.error_user_msg || null,
       });
     }
   };
