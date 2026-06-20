@@ -3678,28 +3678,41 @@ const requestedImageOverride =
     ? Number(overrideCountPerType.images || 0)
     : 0;
 
+// When a multi-creative set is explicitly provided, bypass the plan image-variant
+// cap so all N ads are created (up to 4). The cap is for single-variant testing,
+// not for explicit creative-set launches where the user chose the count.
+const isMultiCreativeSet = Array.isArray(adCopySet) && adCopySet.length > 1;
+const effectiveImageCount = isMultiCreativeSet
+  ? Math.min(adCopySet.length, 4)
+  : Math.min(launchPlanLimits.imageVariants, requestedImageOverride > 0 ? requestedImageOverride : launchPlanLimits.imageVariants);
+
 const plan = policy.decideVariantPlan({
   assetTypes: 'image',
   dailyBudget,
   flightHours: hours,
-  overrideCountPerType: {
-    images: Math.min(
-      launchPlanLimits.imageVariants,
-      requestedImageOverride > 0 ? requestedImageOverride : launchPlanLimits.imageVariants
-    ),
-  },
+  overrideCountPerType: { images: effectiveImageCount },
 });
 
-const needImg = Math.min(Number(plan.images || 0), launchPlanLimits.imageVariants);
+// For multi-creative sets: needImg = number of creatives in the set.
+// For normal launches: apply plan limit as before.
+const needImg = isMultiCreativeSet
+  ? Math.min(adCopySet.length, 4)
+  : Math.min(Number(plan.images || 0), launchPlanLimits.imageVariants);
 
-    if (!isVideoLaunch && needImg > 0 && imageVariants.length < needImg) {
+    // For multi-creative sets, each creative supplies its own image via adCopySet[i].imageUrl.
+    // We do NOT require imageVariants to contain N images in that case.
+    if (!isVideoLaunch && needImg > 0 && !isMultiCreativeSet && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
 
     const parsedVariants = [];
     if (!isVideoLaunch) {
       for (let i = 0; i < needImg; i++) {
-        const v = parseImageVariant(imageVariants[i]);
+        // For multi-creative sets use each creative's own imageUrl; fall back to imageVariants.
+        const sourceUrl = isMultiCreativeSet && adCopySet[i]?.imageUrl
+          ? adCopySet[i].imageUrl
+          : (imageVariants[i] || imageVariants[0] || '');
+        const v = parseImageVariant(sourceUrl);
         const normalized = normalizeImageUrl(v.url);
         const inline = v.bytes ? extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim() : null;
 
@@ -3893,10 +3906,19 @@ const { data: adsetData } = await axios.post(
     } else {
       for (let i = 0; i < needImg; i++) {
         const variant = parsedVariants[i];
+        if (!variant) {
+          console.warn('[LAUNCH_AD_SKIPPED]', { index: i, reason: 'no_variant', needImg, parsedVariantsCount: parsedVariants.length });
+          continue;
+        }
         const hash = await uploadImage(variant, i);
+        if (!hash) {
+          console.warn('[LAUNCH_AD_SKIPPED]', { index: i, reason: 'image_upload_failed', variantUrl: variant?.url?.slice(0, 80) });
+          continue;
+        }
 
         // Per-ad copy: use the angle-specific headline/body when adCopySet is provided
         const perAdCopy  = isMultiCreative ? (adCopySet[i] || adCopySet[0]) : null;
+        console.log('[LAUNCH_CREATIVE_SET]', { index: i, angle: perAdCopy?.angle || 'single', headline: (perAdCopy?.headline || creativeTitle).slice(0, 60), hasImage: !!hash });
         const adName     = perAdCopy?.angleLabel
           ? `${campaignName} — ${perAdCopy.angleLabel}`
           : `${campaignName} (Image v${i + 1})`;
@@ -3954,6 +3976,7 @@ const { data: adsetData } = await axios.post(
         );
 
         const metaAdId = ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`;
+        console.log('[LAUNCH_AD_CREATED]', { index: i, metaAdId, adName, angle: perAdCopy?.angle || 'single' });
         adIds.push(metaAdId);
         usedImages.push(variant.bytes ? '(inline_base64)' : String(variant.url || ''));
         creativeResults.push({

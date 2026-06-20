@@ -11,7 +11,7 @@
  *  - InputBox is module-level (no focus-loss typing bug)
  */
 import React, { memo, useCallback, useEffect, useRef, useState } from "react";
-import { FaChevronLeft, FaChevronRight, FaPaperPlane, FaRobot, FaUpload, FaSyncAlt } from "react-icons/fa";
+import { FaChevronLeft, FaChevronRight, FaHistory, FaPaperPlane, FaRobot, FaTimes, FaUpload, FaSyncAlt } from "react-icons/fa";
 import {
   buildIntakeAnswers,
   fetchAdCopy,
@@ -284,6 +284,8 @@ export default function InlineAdAgent({
   const [creatives,  setCreatives] = useState([]);
   const [ctx,        setCtx]       = useState(null);
   const [regenning,  setRegenning] = useState(null); // index of creative being regenerated
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState([]); // saved sessions for drawer
 
   const bottomRef = useRef(null);
   const timerRef  = useRef(null);
@@ -353,13 +355,14 @@ export default function InlineAdAgent({
     const biz = ci?.premiumIntake?.businessName || ctxRecord?.businessName || ci?.displayName || adminClientId?.split("@")[0] || "there";
     const enriched = {
       ...(ctxRecord || {}),
-      _biz: biz,
+      _biz:     biz,
       _offer:   ci?.premiumIntake?.currentSpecialOrOffer || ctxRecord?.offer    || "",
       _service: ci?.premiumIntake?.mainServices          || ctxRecord?.industry  || "",
+      _restoredCreatives: null,  // filled below after draft restore
     };
     setCtx(enriched);
 
-    // 2) Restore saved draft SILENTLY (no chat message)
+    // 2) Restore saved draft SILENTLY — copy/images must persist across refreshes
     let hadDraft = false;
     try {
       const url = adminClientId
@@ -367,12 +370,17 @@ export default function InlineAdAgent({
         : "/api/campaign-context/creative-draft";
       const r = await fetch(url, { credentials: "include", headers: hdr });
       const j = await r.json().catch(() => ({}));
-      if (j.ok && Array.isArray(j.creativeDraft?.creativeSet) && j.creativeDraft.creativeSet.length > 0) {
+      // Only restore if creativeSet has real content (headline or imageUrl on at least one creative)
+      const savedSet = j.creativeDraft?.creativeSet;
+      const hasRealContent = Array.isArray(savedSet) && savedSet.length > 0 &&
+        savedSet.some((c) => String(c?.headline || "").trim() || String(c?.imageUrl || "").trim());
+      if (j.ok && hasRealContent) {
         const saved = j.creativeDraft;
         setCreatives(saved.creativeSet);
         onCreativesGenerated?.({ images: saved.images || [], creativeSet: saved.creativeSet, creativeTestCount: saved.creativeSet.length });
         if (saved.campaignName) onSetCampaignName?.(saved.campaignName);
         if (saved.budget)       onSetBudget?.(saved.budget);
+        enriched._restoredCreatives = saved.creativeSet;  // for re-injecting into chat
         hadDraft = true;
       }
     } catch {}
@@ -394,9 +402,16 @@ export default function InlineAdAgent({
     if (!hadHistory && !hadDraft) {
       setPhase("welcome");
     } else if (!hadHistory && hadDraft) {
-      // Draft exists but no history — show minimal welcome + hint
+      // Draft exists but no chat history — show creatives silently + action chips
+      // The creative cards re-appear so copy/images are visible immediately
+      const restoredSet = enriched._restoredCreatives;
+      if (restoredSet?.length) {
+        push({ role: "assistant", type: "creatives",
+          content: `Your **${restoredSet.length} saved creatives** are ready:`,
+          creatives: restoredSet });
+      }
       push({ role: "assistant", type: "chips",
-        content: "Your saved creatives are ready. What would you like to do?",
+        content: "What would you like to do?",
         chips: [
           { label: "View Creatives", action: "go-creatives" },
           { label: "Campaign & Launch →", action: "go-campaign", primary: true },
@@ -404,8 +419,20 @@ export default function InlineAdAgent({
         ],
       });
       setPhase("done");
+    } else if (hadHistory && hadDraft) {
+      // Both history and draft — append creative cards after history if not already there
+      const restoredSet = enriched._restoredCreatives;
+      if (restoredSet?.length) {
+        push({ role: "assistant", type: "creatives",
+          content: `Your **${restoredSet.length} saved creatives** (restored):`,
+          creatives: restoredSet });
+        push({ role: "assistant", type: "chips", content: null, chips: [
+          { label: "View Creatives", action: "go-creatives" },
+          { label: "Campaign & Launch →", action: "go-campaign", primary: true },
+        ]});
+      }
+      setPhase("done");
     } else {
-      // History restored — figure out appropriate phase
       setPhase("done");
     }
     scroll();
@@ -812,6 +839,7 @@ export default function InlineAdAgent({
       fontFamily: FONT, background: "#fff",
       border: "1px solid " + BORDER, borderRadius: 20,
       overflow: "hidden", boxShadow: "0 2px 16px rgba(0,0,0,0.05)",
+      position: "relative",   // needed for history drawer absolute positioning
     }}>
       {/* Header */}
       <div style={{ padding: "13px 20px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", gap: 10, background: "#fff" }}>
@@ -827,17 +855,89 @@ export default function InlineAdAgent({
              "Smartemark campaign brain"}
           </div>
         </div>
-        {showTopNav && (
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => clearDrafts()} title="Clear all drafts"
-              style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #fca5a5", background: "#fff", color: "#ef4444", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: FONT }}>
-              Clear Drafts
-            </button>
-            <button onClick={onGoToCreatives} style={hdrBtn("#f1f5f9", TEXT)}>Creatives</button>
-            <button onClick={onGoToCampaign}  style={hdrBtn(ACCENT, "#fff")}>Launch →</button>
-          </div>
-        )}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {/* History icon — always visible */}
+          <button
+            title="Chat history"
+            onClick={async () => {
+              setShowHistory((v) => !v);
+              if (!showHistory) {
+                // Load history list preview
+                try {
+                  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+                  const url = adminClientId
+                    ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(adminClientId)}`
+                    : "/api/ad-agent/history";
+                  const r = await fetch(url, { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} });
+                  const j = await r.json().catch(() => ({}));
+                  if (j.ok && Array.isArray(j.history)) setHistoryList(j.history);
+                } catch {}
+              }
+            }}
+            style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid " + BORDER, background: showHistory ? ACCENT : "#fff", color: showHistory ? "#fff" : SOFT, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>
+            <FaHistory />
+          </button>
+          {showTopNav && (
+            <>
+              <button onClick={() => clearDrafts()} title="Clear all drafts"
+                style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #fca5a5", background: "#fff", color: "#ef4444", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: FONT }}>
+                Clear
+              </button>
+              <button onClick={onGoToCreatives} style={hdrBtn("#f1f5f9", TEXT)}>Creatives</button>
+              <button onClick={onGoToCampaign}  style={hdrBtn(ACCENT, "#fff")}>Launch →</button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* ElevenLabs-style history drawer */}
+      {showHistory && (
+        <div style={{
+          position: "absolute", top: 61, right: 0, width: 280, bottom: 0,
+          background: "#fff", borderLeft: "1px solid #f1f5f9",
+          zIndex: 10, display: "flex", flexDirection: "column",
+          boxShadow: "-4px 0 16px rgba(0,0,0,0.07)",
+        }}>
+          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontWeight: 800, fontSize: 13, color: TEXT }}>Chat History</span>
+            <button onClick={() => setShowHistory(false)}
+              style={{ border: "none", background: "none", cursor: "pointer", color: SOFT, fontSize: 14, padding: 4 }}>
+              <FaTimes />
+            </button>
+          </div>
+          {/* New chat */}
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid #f8f9fa" }}>
+            <button
+              onClick={() => { clearDrafts(); setShowHistory(false); }}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid " + BORDER, background: "#fff", color: TEXT, fontWeight: 700, fontSize: 12, cursor: "pointer", textAlign: "left", fontFamily: FONT }}>
+              + New campaign
+            </button>
+          </div>
+          {/* Session list */}
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {historyList.length === 0 ? (
+              <div style={{ padding: "16px", color: SOFT, fontSize: 12 }}>No saved history yet.</div>
+            ) : (
+              <div style={{ padding: "8px 0" }}>
+                {/* Current session summary */}
+                <div
+                  onClick={() => setShowHistory(false)}
+                  style={{ padding: "10px 16px", cursor: "pointer", background: "#f8f8ff", borderLeft: `3px solid ${ACCENT}` }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: TEXT, marginBottom: 2 }}>
+                    {ctx?._biz ? `${ctx._biz} campaign` : "Current campaign"}
+                  </div>
+                  <div style={{ fontSize: 11, color: SOFT }}>
+                    {creatives.length > 0 ? `${creatives.length} creatives ready` : "In progress"}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+                    {historyList.length} messages · Now
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Welcome screen */}
       {(phase === "welcome" || phase === "loading" || phase === "init") && (
