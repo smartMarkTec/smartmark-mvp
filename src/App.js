@@ -121,6 +121,9 @@ function App() {
       <Route path="/admin/leads" element={<AdminLeads />} />
       {/* ── Public client landing pages — no auth required ── */}
       <Route path="/lp/:slug" element={<LandingPage />} />
+      {/* ── Pro Teks HVAC offer pages ── */}
+      <Route path="/offers/proteks-austin" element={<LandingPage slug="proteks-austin" />} />
+      <Route path="/offers/proteks-san-antonio" element={<LandingPage slug="proteks-san-antonio" />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

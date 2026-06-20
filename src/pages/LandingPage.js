@@ -209,7 +209,7 @@ export default function LandingPage({ slug: slugProp }) {
           phone: phone.trim(),
           preferredDate,
           preferredTime,
-          source: "Aspen Landing Page",
+          source: `${page.businessName} Landing Page`,
           pageUrl: window.location.href,
         }),
       });
@@ -217,7 +217,7 @@ export default function LandingPage({ slug: slugProp }) {
       if (!json.ok) throw new Error(json.error || "Submission failed.");
       setSubmitSuccess(true);
       track("Lead", {
-        content_name: "Aspen Schedule Service Form Submitted",
+        content_name: `${page.businessName} Schedule Service Form Submitted`,
         business_name: page.businessName,
       });
     } catch (err) {
@@ -271,7 +271,7 @@ export default function LandingPage({ slug: slugProp }) {
             <a
               href={`tel:${page.phone}`}
               onClick={() => track("Contact", {
-                content_name: "Aspen Call Button",
+                content_name: `${page.businessName} Call Button`,
                 business_name: page.businessName,
                 phone: page.phone,
               })}
@@ -323,7 +323,7 @@ export default function LandingPage({ slug: slugProp }) {
             textTransform: "uppercase", padding: "4px 12px",
             borderRadius: 4, marginBottom: 20,
           }}>
-            Houston, TX
+            {page.locationBadge || "Texas"}
           </div>
 
           <h1 style={{
@@ -349,7 +349,7 @@ export default function LandingPage({ slug: slugProp }) {
               label={page.primaryButtonText}
               size="lg"
               onClick={() => track("Contact", {
-                content_name: "Aspen Call Button",
+                content_name: `${page.businessName} Call Button`,
                 business_name: page.businessName,
                 phone: page.phone,
               })}
@@ -374,7 +374,7 @@ export default function LandingPage({ slug: slugProp }) {
             Promotion
           </div>
           <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>
-            $75 AC Tune-Up
+            {page.offerHeadline || "Special Offer"}
           </div>
           <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 0 22px", maxWidth: 560 }}>
             {page.offer}
@@ -383,7 +383,7 @@ export default function LandingPage({ slug: slugProp }) {
             phone={page.phone}
             label={`Call: ${page.phoneDisplay}`}
             onClick={() => track("Contact", {
-              content_name: "Aspen Call Button",
+              content_name: `${page.businessName} Call Button`,
               business_name: page.businessName,
               phone: page.phone,
             })}
@@ -421,7 +421,7 @@ export default function LandingPage({ slug: slugProp }) {
       <div style={{ background: "#fff", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
         <div style={{ maxWidth: 740, margin: "0 auto" }}>
           <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
-            Why Choose Aspen
+            Why Choose {page.businessName}
           </h2>
           <div style={{
             display: "grid",
@@ -461,7 +461,7 @@ export default function LandingPage({ slug: slugProp }) {
               label={page.primaryButtonText}
               size="lg"
               onClick={() => track("Contact", {
-                content_name: "Aspen Call Button",
+                content_name: `${page.businessName} Call Button`,
                 business_name: page.businessName,
                 phone: page.phone,
               })}
@@ -511,7 +511,7 @@ export default function LandingPage({ slug: slugProp }) {
               Schedule AC Service
             </h2>
             <p style={{ fontSize: "0.88rem", color: "#6b7280", margin: "0 0 22px", lineHeight: 1.55 }}>
-              Tell us the best time to reach you. Aspen will follow up to confirm your appointment.
+              Tell us the best time to reach you. {page.businessName} will follow up to confirm your appointment.
             </p>
 
             {submitSuccess ? (
@@ -520,7 +520,7 @@ export default function LandingPage({ slug: slugProp }) {
                 borderRadius: 10, padding: "16px 18px",
                 fontSize: "0.93rem", color: "#15803d", lineHeight: 1.6, fontWeight: 600,
               }}>
-                Thanks — your request was sent. Aspen will follow up shortly to confirm.
+                Thanks — your request was sent. {page.businessName} will follow up shortly to confirm.
               </div>
             ) : (
               <form onSubmit={handleScheduleSubmit} noValidate>

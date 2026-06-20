@@ -2257,4 +2257,89 @@ router.patch('/admin/clients/:clientId/campaign/:campaignId/ai-settings', limitA
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/multi-area-launch
+// Admin-only. Launches one Meta campaign per area using the client's FB token.
+// Delegates to POST /api/facebook/multi-area-launch, injecting the client's
+// ownerKey so each child launch resolves the correct FB token.
+// Body: same shape as /api/facebook/multi-area-launch (launchMode, areaCampaigns, …)
+//       plus adAccountId at the top level.
+// Returns: { ok, partialSuccess, parentCampaignGroupId, results, errors }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/multi-area-launch', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const clientOwnerKey = `user:${String(user.username || '').trim()}`;
+
+    const clientToken = getFbUserToken(clientOwnerKey);
+    if (!clientToken) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Client does not have Facebook connected. They must connect Facebook first.',
+      });
+    }
+
+    const { adAccountId, ...campaignBody } = req.body || {};
+    if (!adAccountId) {
+      return res.status(400).json({ ok: false, error: 'adAccountId is required.' });
+    }
+
+    if (!Array.isArray(campaignBody.areaCampaigns) || campaignBody.areaCampaigns.length === 0) {
+      return res.status(400).json({ ok: false, error: 'areaCampaigns must be a non-empty array.' });
+    }
+
+    const selfBase =
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.PUBLIC_BASE_URL ||
+      `http://localhost:${process.env.PORT || 3001}`;
+
+    const adminSid = getSidFromReq(req);
+
+    // Override destinationUrl on each area from the client's intake websiteUrl when
+    // the area didn't supply one (same policy as the single-campaign admin launch).
+    const intakeWebsiteUrl = String(user.premiumIntake?.websiteUrl || '').trim();
+    let mergedBody = { ...campaignBody };
+    if (intakeWebsiteUrl) {
+      mergedBody.areaCampaigns = (mergedBody.areaCampaigns || []).map((area) => ({
+        ...area,
+        destinationUrl: area.destinationUrl || intakeWebsiteUrl,
+      }));
+    }
+
+    const launchRes = await axios.post(
+      `${selfBase}/api/facebook/multi-area-launch`,
+      {
+        ...mergedBody,
+        adAccountId,
+        ownerKey: clientOwnerKey,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          [SID_HEADER]: adminSid,
+          Cookie: req.headers.cookie || '',
+        },
+        timeout: 180000, // 3 min — allows multiple sequential area launches
+      }
+    );
+
+    return res.json({ ok: true, ...launchRes.data });
+  } catch (err) {
+    const upstream = err?.response?.data;
+    if (upstream) {
+      console.error('[Admin] multi-area-launch upstream error:', upstream);
+      return res.status(err.response?.status || 500).json({
+        ok: false,
+        error: upstream?.error || 'Multi-area launch failed.',
+        upstream,
+      });
+    }
+    console.error('[Admin] multi-area-launch error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Multi-area campaign launch failed. Please try again.' });
+  }
+});
+
 module.exports = router;

@@ -2672,7 +2672,7 @@ function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
 // Creative A/B Test Panel
 // Shows original ad vs AI challenger when a pendingCreativeTest exists.
 // ─────────────────────────────────────────────────────────────────────────────
-function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved }) {
+function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved, campaignMetrics }) {
   const [testMetrics, setTestMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState(null);
@@ -2690,6 +2690,24 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   const controlAdIds = Array.isArray(pending?.controlAdIds) ? pending.controlAdIds.filter(Boolean) : [];
   const candidateAdIds = Array.isArray(pending?.candidateAdIds) ? pending.candidateAdIds.filter(Boolean) : [];
   const hasLiveAds = (isLive || isStaged) && (controlAdIds.length > 0 || candidateAdIds.length > 0);
+
+  // Launched creative set — source of truth for the initial ads the campaign launched with.
+  // Filter out archived/deleted/replaced entries so only visible live ads show.
+  const launchedSet = Array.isArray(campaignCreatives?.launchedCreativeSet)
+    ? campaignCreatives.launchedCreativeSet.filter((c) => {
+        const s = String(c.status || "").toLowerCase();
+        return !["archived", "deleted", "replaced"].includes(s);
+      })
+    : [];
+  const adCount = launchedSet.length;
+
+  // Determine Creative Test header/subtitle/count based on ad count
+  const testLabel = (() => {
+    if (adCount === 0) return { header: "Creative Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "No launched ad creatives found yet." };
+    if (adCount === 1) return { header: "Creative Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "1 ad running — add another variation to compare performance." };
+    if (adCount === 2) return { header: "A/B Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "2 ad variations running" };
+    return { header: "A/B/C Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `${adCount} ad variations running` };
+  })();
 
   useEffect(() => {
     if (!hasLiveAds || !campaignId) return;
@@ -2860,33 +2878,35 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
     }
   };
 
-  const panelTitle = campaignName ? `Creative A/B Test for ${campaignName}` : "A/B Test";
+  const panelTitle = campaignName ? `Creative Test — ${campaignName}` : "Creative Test";
 
   if (!campaignId || campaignId === "__DRAFT__") {
     return (
       <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 18, padding: 40, textAlign: "center", color: "#64748b", fontSize: 14, fontWeight: 600 }}>
-          Select a campaign to view A/B test data.
+          Select a campaign to view creative test data.
         </div>
       </div>
     );
   }
 
-  if (!pending) {
+  // When no AI challenger test is pending, still show the launched creative set.
+  // We only show the old "no test" empty state if there are also no launched ads.
+  if (!pending && adCount === 0) {
     return (
       <div style={{ padding: isMobile ? 16 : 0, display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>Creative Test</div>
           <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.6 }}>
-            Original ad vs AI challenger performance.
+            Smartemark is comparing the active ad variations in this campaign.
           </div>
         </div>
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 18, padding: 40, textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 14 }}>🧪</div>
-          <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a", marginBottom: 8 }}>No A/B test active yet</div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a", marginBottom: 8 }}>No launched ad creatives found yet</div>
           <div style={{ fontSize: 14, color: "#64748b", lineHeight: 1.7, maxWidth: 420, margin: "0 auto" }}>
-            When Smartemark creates a challenger creative, it will appear here. You'll see the original and AI-generated ad side-by-side with live impressions, CTR, spend, and CPC so you can judge whether the optimizer is improving performance.
+            Launch a campaign to see the active ad variations here. When Smartemark creates an AI challenger, it will also appear for comparison.
           </div>
         </div>
       </div>
@@ -2898,25 +2918,128 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {/* Header */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{panelTitle}</div>
-          <span style={{
-            background: isLive ? "#dcfce7" : isStaged ? "#fef9c3" : "#f1f5f9",
-            color: isLive ? "#16a34a" : isStaged ? "#b45309" : "#475569",
-            border: `1px solid ${isLive ? "#bbf7d0" : isStaged ? "#fde68a" : "#e2e8f0"}`,
-            borderRadius: 999, fontSize: 11, fontWeight: 700, padding: "3px 10px",
-          }}>
-            {isLive ? "Live" : isStaged ? "Staged (paused)" : isReady ? "Ready to launch" : "Pending"}
-          </span>
+          <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{testLabel.header}</div>
+          {adCount > 0 && (
+            <span style={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 999, fontSize: 11, fontWeight: 700, padding: "3px 10px" }}>
+              {testLabel.count}
+            </span>
+          )}
         </div>
         <div style={{ color: "#667085", fontWeight: 600, fontSize: 14, lineHeight: 1.5 }}>
-          Original ad vs AI challenger{startedAt ? ` · Test started ${new Date(startedAt).toLocaleDateString()}` : ""}
+          {testLabel.sub}
         </div>
-        {(generationReason || creativeGoal) && (
-          <div style={{ background: "#f5f3ff", border: "1px solid #e9d5ff", borderRadius: 10, padding: "8px 14px", fontSize: 12, color: "#7c3aed", fontWeight: 600, display: "inline-block", alignSelf: "flex-start" }}>
-            Why this test: {generationReason || creativeGoal}
-          </div>
-        )}
       </div>
+
+      {/* ── Launched Creative Cards ── */}
+      {adCount > 0 && (
+        <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 12, flexWrap: "wrap" }}>
+          {launchedSet.map((creative, idx) => {
+            const statusStr = String(creative.status || "").toLowerCase();
+            const isPaused  = statusStr === "paused";
+            const badgeBg   = isPaused ? "#fef9c3" : "#dcfce7";
+            const badgeFg   = isPaused ? "#854d0e" : "#15803d";
+            const badgeBd   = isPaused ? "#fde68a" : "#bbf7d0";
+            const badgeLabel = isPaused ? "Paused" : "Active";
+            const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
+            const label  = creative.angleLabel || creative.angle || `Ad ${idx + 1}`;
+            return (
+              <div
+                key={creative.id || idx}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 14,
+                  padding: 14,
+                  flex: "1 1 180px",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>{label}</span>
+                  <span style={{ background: badgeBg, color: badgeFg, border: `1px solid ${badgeBd}`, borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
+                    {badgeLabel}
+                  </span>
+                </div>
+
+                {imgUrl ? (
+                  <img src={imgUrl} alt={label} style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                ) : (
+                  <div style={{ height: 80, background: "#f8fafc", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 11, border: "1px dashed #e2e8f0" }}>
+                    No image
+                  </div>
+                )}
+
+                {creative.headline && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.4 }}>{creative.headline}</div>
+                )}
+                {creative.body && (
+                  <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.5, maxHeight: 56, overflow: "hidden" }}>{creative.body}</div>
+                )}
+
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto" }}>
+                  Waiting for delivery data
+                </div>
+
+                {!!adminClientId && creative.metaAdId && (
+                  <div style={{ fontSize: 10, color: "#cbd5e1" }}>Ad ID: {creative.metaAdId}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Campaign-level aggregate metrics (if available) */}
+      {adCount > 0 && campaignMetrics && (Number(campaignMetrics.impressions) > 0 || Number(campaignMetrics.spend) > 0) && (
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 16px" }}>
+          <div style={{ fontWeight: 800, fontSize: 11, color: "#64748b", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Campaign Total</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 20px" }}>
+            {[
+              ["Impressions", Number(campaignMetrics.impressions || 0).toLocaleString()],
+              ["Clicks",      Number(campaignMetrics.clicks      || 0).toLocaleString()],
+              ["CTR",         `${Number(campaignMetrics.ctr  || 0).toFixed(2)}%`],
+              ["Spend",       `$${Number(campaignMetrics.spend || 0).toFixed(2)}`],
+              ["CPC",         campaignMetrics.cpc ? `$${Number(campaignMetrics.cpc).toFixed(2)}` : "—"],
+            ].map(([label, val]) => (
+              <div key={label}>
+                <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700 }}>{label}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{val}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
+            Per-ad breakdown requires Meta Ads Manager. Aggregate data shown above.
+          </div>
+        </div>
+      )}
+
+      {/* ── AI Challenger section (only when pendingCreativeTest exists) ── */}
+      {pending && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, borderTop: adCount > 0 ? "1px solid #e2e8f0" : "none", paddingTop: adCount > 0 ? 20 : 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ color: "#0f172a", fontWeight: 800, fontSize: 16 }}>AI Challenger Test</div>
+            <span style={{
+              background: isLive ? "#dcfce7" : isStaged ? "#fef9c3" : "#f1f5f9",
+              color: isLive ? "#16a34a" : isStaged ? "#b45309" : "#475569",
+              border: `1px solid ${isLive ? "#bbf7d0" : isStaged ? "#fde68a" : "#e2e8f0"}`,
+              borderRadius: 999, fontSize: 11, fontWeight: 700, padding: "3px 10px",
+            }}>
+              {isLive ? "Live" : isStaged ? "Staged (paused)" : isReady ? "Ready to launch" : "Pending"}
+            </span>
+          </div>
+          <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.5 }}>
+            Original ad vs AI challenger{startedAt ? ` · Test started ${new Date(startedAt).toLocaleDateString()}` : ""}
+          </div>
+          {(generationReason || creativeGoal) && (
+            <div style={{ background: "#f5f3ff", border: "1px solid #e9d5ff", borderRadius: 10, padding: "8px 14px", fontSize: 12, color: "#7c3aed", fontWeight: 600, display: "inline-block", alignSelf: "flex-start" }}>
+              Why this test: {generationReason || creativeGoal}
+            </div>
+          )}
+        </div>
 
       {/* Two-card layout */}
       <div style={{ display: "flex", gap: 16, flexDirection: isMobile ? "column" : "row", alignItems: "flex-start" }}>
@@ -3011,6 +3134,8 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
         <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "#16a34a", fontWeight: 700 }}>
           AI challenger removed. Your original ad is the only active ad. Ask the Ad Agent to generate a new challenger when ready.
         </div>
+      )}
+      </div>
       )}
     </div>
   );
@@ -3514,6 +3639,9 @@ useEffect(() => {
   const [optimizerStateMap, setOptimizerStateMap] = useState({});
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
+  // Multi-area launch mode: "single" (default) | "multi_area"
+  const [launchMode, setLaunchMode] = useState("single");
+  const [multiAreaResult, setMultiAreaResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [, setCampaignStatus] = useState("ACTIVE");
   const [campaignCount, setCampaignCount] = useState(0);
@@ -7106,6 +7234,175 @@ console.log("[LAUNCH][creative-payload]", {
     setLoading(false);
   };
 
+  // ── Multi-area launch handler ──────────────────────────────────────────────
+  // Resolves images the same way handleLaunch does, then sends to
+  // /api/facebook/multi-area-launch (non-admin) or
+  // /api/admin/clients/:id/multi-area-launch (admin).
+  // Each area supplies its own budget, destinationUrl, and targeting cities.
+  const handleMultiAreaLaunch = async (areaCampaigns, parentCampaignGroupName) => {
+    if (!billingInfo?.hasAccess) {
+      setPendingLaunchAfterCheckout(true);
+      setShowPlanModal(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const acctId  = String(selectedAccount  || "").trim().replace(/^act_/, "");
+      const pageIdV = String(selectedPageId   || "").trim();
+
+      if (!acctId)   throw new Error("Please select a Facebook ad account.");
+      if (!pageIdV)  throw new Error("Please select a Facebook page.");
+      if (!Array.isArray(areaCampaigns) || areaCampaigns.length === 0) {
+        throw new Error("No area campaigns configured.");
+      }
+
+      // ── Resolve images (same logic as handleLaunch) ──
+      let filteredImages = [];
+      if (!isVideoCreative) {
+        let candidateImgs = [];
+        const hasDraftImages = Array.isArray(draftCreatives?.images) && draftCreatives.images.length > 0;
+        if (hasDraftImages) {
+          candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
+          if (Array.isArray(navImageUrls) && navImageUrls.length) {
+            candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+          }
+        } else {
+          if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+            try {
+              const saved = getSavedCreatives(selectedCampaignId);
+              if (Array.isArray(saved?.images)) candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+            } catch {}
+          }
+          if (Array.isArray(navImageUrls) && navImageUrls.length) {
+            candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+          }
+        }
+        filteredImages = await forceHostOnRenderMedia(candidateImgs);
+        if (!filteredImages.length) filteredImages = await forceHostOnRenderMedia(draftCreatives?.images || []);
+        if (!filteredImages.length) throw new Error("No launchable images. Please regenerate creatives (images must be hosted on Render /api/media).");
+        try { saveFetchableImagesBackup(resolvedUser, filteredImages); } catch {}
+      }
+
+      const finalHeadline = (form?.headline || form?.adHeadline || previewCopy?.headline || headline || "").toString().trim();
+      const finalBody     = (form?.primaryText || form?.body || previewCopy?.body || body || "").toString().trim();
+
+      const sharedPayload = {
+        form: { ...form },
+        adCopy: [finalHeadline, finalBody].filter(Boolean).join("\n\n"),
+        answers: { ...(answers || {}) },
+        mediaSelection: "image",
+        mediaType:      "image",
+        imageVariants:  filteredImages,
+        imageUrls:      filteredImages,
+        images:         filteredImages,
+        overrideCountPerType: { images: Math.min(2, filteredImages.length) },
+        ...(draftCreatives?.creativeSet && draftCreatives.creativeSet.length > 1
+          ? {
+              adCopySet: draftCreatives.creativeSet.map((c, i) => ({
+                localCreativeId: c.id,
+                angle:      c.angle,
+                angleLabel: c.angleLabel,
+                headline:   c.headline  || "",
+                body:       c.body      || "",
+                cta:        c.cta       || "",
+                imageUrl:   c.imageUrl  || filteredImages[i] || filteredImages[0] || "",
+              })),
+            }
+          : {}),
+      };
+
+      const isAdminLaunch = !!adminClientId;
+      const adminSid = (localStorage.getItem("sm_sid_v1") || "").trim();
+
+      let res;
+      if (isAdminLaunch) {
+        res = await fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}/multi-area-launch`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(adminSid ? { "x-sm-sid": adminSid } : {}),
+          },
+          body: JSON.stringify({
+            adAccountId:            acctId,
+            pageId:                 pageIdV,
+            launchMode:             "multi_area",
+            parentCampaignGroupName,
+            areaCampaigns,
+            ...sharedPayload,
+          }),
+        });
+      } else {
+        // Use direct fetch (not authFetch which prepends /auth): the route lives at
+        // /api/facebook/multi-area-launch, not /auth/facebook/multi-area-launch.
+        const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+        res = await fetch(`/api/facebook/multi-area-launch`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(sid ? { "x-sm-sid": sid } : {}),
+          },
+          body: JSON.stringify({
+            adAccountId:            acctId,
+            pageId:                 pageIdV,
+            launchMode:             "multi_area",
+            parentCampaignGroupName,
+            areaCampaigns,
+            ...sharedPayload,
+          }),
+        });
+      }
+
+      const rawText = await res.text().catch(() => "");
+      let json = null;
+      try { json = rawText ? JSON.parse(rawText) : null; } catch { json = null; }
+
+      if (!res.ok && !json?.partialSuccess) {
+        throw new Error(json?.error || rawText?.slice(0, 400) || `HTTP ${res.status}`);
+      }
+
+      json = json || {};
+      setMultiAreaResult(json);
+      setDraftDisabled(resolvedUser, true);
+
+      try {
+        purgeDraftStorages(resolvedUser);
+        if (adminClientId) {
+          try { localStorage.removeItem(`u:adminClient:${adminClientId}:${CREATIVE_DRAFT_KEY}`); } catch {}
+        }
+      } catch {}
+
+      setDraftCreatives({ images: [], mediaSelection: "image" });
+
+      if (adminClientId) {
+        refreshAdminCampaigns(
+          adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap,
+          setCampaignCreativesMap, recentStatusOverridesRef.current, null
+        );
+      }
+
+      const launched = json.results || [];
+      const failed   = json.errors  || [];
+      if (failed.length > 0) {
+        alert(
+          `Multi-area launch partially complete.\n\n` +
+          `Launched (${launched.length}): ${launched.map((r) => r.areaName).join(", ")}\n` +
+          `Failed (${failed.length}):\n${failed.map((e) => `  ${e.areaName}: ${e.error}`).join("\n")}`
+        );
+      } else {
+        alert(`All ${launched.length} area campaigns launched successfully!\n\nGroup: ${parentCampaignGroupName}`);
+      }
+
+      setLaunchMode("single"); // reset after launch
+    } catch (err) {
+      alert("Multi-area launch failed:\n\n" + (err.message || "Unknown error. Please try again."));
+      console.error("[SM][multi-area launch error]", err);
+    }
+    setLoading(false);
+  };
+
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
       alert("Please select an ad account first.");
@@ -9910,6 +10207,7 @@ ${pendingTest ? `
             isMobile={isMobile}
             campaignCreatives={selectedCampaignCreatives}
             campaignName={selectedLiveCampaign?.name || ""}
+            campaignMetrics={metricsMap[selectedCampaignId] || null}
             onChallengerRemoved={() => {
               setOptimizerStateMap((prev) => ({
                 ...prev,
@@ -10424,7 +10722,137 @@ ${pendingTest ? `
             </div>
           )}
 
-          <button
+          {/* ── Multi-area launch toggle (admin only) ── */}
+          {!!adminClientId && !metaDraft?.status && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Launch Mode</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[
+                  { key: "single",     label: "One broad campaign" },
+                  { key: "multi_area", label: "Split by area" },
+                ].map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setLaunchMode(key)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: `2px solid ${launchMode === key ? "#5b5cf0" : "#dbe4ff"}`,
+                      background: launchMode === key ? "#eef2ff" : "#fff",
+                      color: launchMode === key ? "#4338ca" : "#667085",
+                      fontWeight: 800,
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Area review cards ── */}
+              {launchMode === "multi_area" && (() => {
+                const PROTEKS_AREAS = [
+                  {
+                    areaKey:   "austin_hill_country",
+                    areaName:  "Austin / Hill Country",
+                    monthlyBudget: 250,
+                    dailyBudget:   8.33,
+                    offer:     "$500 Off Full System Replacement + Free Replacement Estimate",
+                    priceLine: "AC system replacements starting at $6,995 installed",
+                    destinationUrl: "https://smartemark.com/offers/proteks-austin",
+                    targetingLocations: [
+                      "Austin","Round Rock","Georgetown","Leander","Cedar Park",
+                      "Liberty Hill","Hutto","Dripping Springs","Bee Cave",
+                      "West Lake","Horseshoe Bay","Burnet","Blanco",
+                    ],
+                  },
+                  {
+                    areaKey:   "north_san_antonio",
+                    areaName:  "North San Antonio",
+                    monthlyBudget: 250,
+                    dailyBudget:   8.33,
+                    offer:     "$500 Off Full System Replacement + Free Replacement Estimate",
+                    priceLine: "AC system replacements starting at $6,495 installed",
+                    destinationUrl: "https://smartemark.com/offers/proteks-san-antonio",
+                    targetingLocations: [
+                      "North San Antonio","Boerne","New Braunfels","San Marcos",
+                      "Bulverde","Blanco","Spring Branch",
+                    ],
+                  },
+                ];
+                const GROUP_NAME = "Pro Teks HVAC — AC Replacement Split Test";
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ color: "#374151", fontWeight: 800, fontSize: 13 }}>{GROUP_NAME}</div>
+                    {PROTEKS_AREAS.map((area) => (
+                      <div
+                        key={area.areaKey}
+                        style={{
+                          background: "#f7f9ff",
+                          border: "1px solid #dbe4ff",
+                          borderRadius: 12,
+                          padding: "14px 16px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>{area.areaName}</div>
+                        <div style={{ color: "#667085", fontSize: 12 }}>${area.monthlyBudget}/mo · ${area.dailyBudget.toFixed(2)}/day</div>
+                        <div style={{ color: "#374151", fontSize: 12 }}>{area.priceLine}</div>
+                        <div style={{ color: "#667085", fontSize: 11, marginTop: 2 }}>
+                          {area.targetingLocations.slice(0, 5).join(", ")}{area.targetingLocations.length > 5 ? ` +${area.targetingLocations.length - 5} more` : ""}
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => handleMultiAreaLaunch(PROTEKS_AREAS, GROUP_NAME)}
+                      disabled={
+                        loading ||
+                        !(fbConnected && selectedAccount && selectedPageId)
+                      }
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        borderRadius: 14,
+                        padding: "14px 16px",
+                        background: loading ? "#a5b4fc" : "#5b5cf0",
+                        color: "#fff",
+                        fontWeight: 900,
+                        fontSize: 15,
+                        cursor: loading ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {loading ? "Launching areas…" : `Launch ${PROTEKS_AREAS.length} Area Campaigns`}
+                    </button>
+
+                    {multiAreaResult && (
+                      <div style={{
+                        padding: "10px 14px",
+                        borderRadius: 10,
+                        background: multiAreaResult.errors?.length > 0 ? "#fff7ed" : "#f0fdf4",
+                        border: `1px solid ${multiAreaResult.errors?.length > 0 ? "#fed7aa" : "#bbf7d0"}`,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: multiAreaResult.errors?.length > 0 ? "#92400e" : "#15803d",
+                      }}>
+                        {multiAreaResult.errors?.length > 0
+                          ? `Partial success — ${multiAreaResult.results?.length} launched, ${multiAreaResult.errors?.length} failed`
+                          : `All ${multiAreaResult.results?.length} area campaigns launched`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ── Single-campaign launch button (default mode) ── */}
+          {launchMode === "single" && <button
             onClick={
               metaDraft?.status === "draft_review"
                 ? handleLaunchDraft
@@ -10485,7 +10913,7 @@ ${pendingTest ? `
               : metaDraft?.status === "draft_review"
               ? "Launch Campaign"
               : "Launch Campaign"}
-          </button>
+          </button>}
         </div>
       </>
     )}

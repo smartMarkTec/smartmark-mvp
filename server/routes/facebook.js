@@ -392,4 +392,226 @@ router.post('/facebook/launch-draft', async (req, res) => {
   }
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+   POST /api/facebook/multi-area-launch
+   Launches one Meta campaign per area entry, using the caller's existing
+   single-campaign flow as the engine for each area. Grouping metadata is
+   saved on every resulting campaign record so the dashboard can group them.
+
+   Payload:
+   {
+     adAccountId, pageId,
+     launchMode: "multi_area",
+     parentCampaignGroupName,
+     areaCampaigns: [
+       { areaKey, areaName, monthlyBudget, dailyBudget, offer, priceLine,
+         destinationUrl, targetingLocations: [...] }
+     ],
+     // shared creative / copy fields forwarded as-is to each child launch:
+     form, answers, adCopy, imageVariants, mediaSelection, ...
+   }
+
+   Body may also include ownerKey (for admin-client forwarding from the admin
+   route below). Non-admin callers must be authenticated via session cookie/header.
+
+   Partial success: if some areas launch and others fail, ok:true is returned
+   with partialSuccess:true. Do NOT automatically roll back already-created
+   Meta campaigns — that is a human decision.
+─────────────────────────────────────────────────────────────────────────── */
+router.post('/facebook/multi-area-launch', async (req, res) => {
+  const {
+    adAccountId,
+    pageId,
+    launchMode,
+    parentCampaignGroupName,
+    areaCampaigns,
+    ownerKey: bodyOwnerKey,
+    adminClientId: bodyAdminClientId,
+    ...sharedPayload
+  } = req.body || {};
+
+  if (launchMode !== 'multi_area') {
+    return res.status(400).json({ ok: false, error: 'launchMode must be "multi_area".' });
+  }
+
+  if (!Array.isArray(areaCampaigns) || areaCampaigns.length === 0) {
+    return res.status(400).json({ ok: false, error: 'areaCampaigns must be a non-empty array.' });
+  }
+
+  const normalizedAccountId = String(adAccountId || '').replace(/^act_/, '').trim();
+  if (!normalizedAccountId) {
+    return res.status(400).json({ ok: false, error: 'adAccountId is required.' });
+  }
+
+  const callerSid = getSidFromReq(req);
+
+  const selfBase =
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    `http://localhost:${process.env.PORT || 5176}`;
+
+  const parentCampaignGroupId = `multi-area-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+  console.log('[MULTI_AREA_LAUNCH_START]', {
+    adAccountId: normalizedAccountId,
+    parentCampaignGroupName,
+    parentCampaignGroupId,
+    areaCount: areaCampaigns.length,
+    callerHasSid: !!callerSid,
+    hasBodyOwnerKey: !!bodyOwnerKey,
+  });
+
+  const results = [];
+  const errors = [];
+
+  for (const area of areaCampaigns) {
+    const areaKey  = String(area.areaKey  || '').trim();
+    const areaName = String(area.areaName || '').trim();
+
+    console.log('[MULTI_AREA_CHILD_LAUNCH_START]', { areaKey, areaName });
+
+    try {
+      // Derive a primary city for the existing single-launch geo lookup.
+      // The single launch route resolves one city + 50-mile radius from
+      // bodyAnswers.city + bodyAnswers.state. We pick the first location in
+      // the area's targetingLocations list as the anchor city.
+      const firstLoc = Array.isArray(area.targetingLocations) && area.targetingLocations[0]
+        ? String(area.targetingLocations[0]).trim()
+        : areaName;
+      // Strip anything after a comma (e.g. "Austin, TX" → "Austin")
+      const anchorCity = firstLoc.split(',')[0].trim();
+
+      const areaPayload = {
+        ...sharedPayload,
+        form: {
+          ...(sharedPayload.form || {}),
+          campaignName: `${parentCampaignGroupName || 'Campaign'} — ${areaName}`,
+          websiteUrl: area.destinationUrl,
+          url:        area.destinationUrl,
+        },
+        budget:     area.dailyBudget,
+        pageId:     pageId || sharedPayload.pageId,
+        websiteUrl: area.destinationUrl,
+        answers: {
+          ...(sharedPayload.answers || {}),
+          city:  anchorCity,
+          state: 'TX',
+          offer: String(area.offer || sharedPayload.answers?.offer || '').trim(),
+        },
+        // Pass ownerKey through so the single-launch route can resolve the
+        // right FB token (required for admin-client mode).
+        ...(bodyOwnerKey ? { ownerKey: bodyOwnerKey } : {}),
+      };
+
+      const launchResp = await axios.post(
+        `${selfBase}/auth/facebook/adaccount/${normalizedAccountId}/launch-campaign`,
+        areaPayload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            [SID_HEADER]: callerSid || '',
+            Cookie: req.headers.cookie || '',
+          },
+          timeout: 90000,
+        }
+      );
+
+      const data = launchResp.data || {};
+      console.log('[MULTI_AREA_CHILD_LAUNCHED]', {
+        areaKey,
+        areaName,
+        campaignId: data.campaignId,
+      });
+
+      // Patch the campaign record with grouping metadata so the dashboard
+      // can group children under the parent group.
+      if (data.campaignId) {
+        try {
+          await ensureCollections();
+          const cIdx = (db.data.campaign_creatives || []).findIndex(
+            (c) => String(c.campaignId || '') === String(data.campaignId)
+          );
+          if (cIdx !== -1) {
+            Object.assign(db.data.campaign_creatives[cIdx], {
+              parentCampaignGroupId,
+              parentCampaignGroupName: String(parentCampaignGroupName || ''),
+              areaKey,
+              areaName,
+              isMultiAreaChild: true,
+            });
+          }
+
+          const optArr = db.data.optimizer_campaign_state || [];
+          const oIdx = optArr.findIndex(
+            (s) => String(s.campaignId || '') === String(data.campaignId)
+          );
+          if (oIdx !== -1) {
+            Object.assign(optArr[oIdx], {
+              parentCampaignGroupId,
+              parentCampaignGroupName: String(parentCampaignGroupName || ''),
+              areaKey,
+              areaName,
+              isMultiAreaChild: true,
+            });
+          }
+
+          await db.write();
+        } catch (patchErr) {
+          // Non-fatal — campaign already launched, grouping metadata can be applied later
+          console.error('[MULTI_AREA] grouping-metadata patch failed:', patchErr?.message);
+        }
+      }
+
+      results.push({
+        areaKey,
+        areaName,
+        ok:         true,
+        campaignId: data.campaignId,
+        campaignName: data.campaignName,
+        adSetIds:   data.adSetIds,
+        adIds:      data.adIds,
+      });
+    } catch (err) {
+      const upstream = err?.response?.data;
+      const errMsg   = String(upstream?.error || err?.message || 'Launch failed').trim();
+      console.error('[MULTI_AREA_CHILD_LAUNCH_FAILED]', { areaKey, areaName, error: errMsg });
+      errors.push({ areaKey, areaName, ok: false, error: errMsg });
+    }
+  }
+
+  const partialFail = errors.length > 0 && results.length > 0;
+  const allFailed   = errors.length > 0 && results.length === 0;
+
+  if (partialFail) {
+    console.log('[MULTI_AREA_LAUNCH_PARTIAL_FAIL]', {
+      parentCampaignGroupId,
+      parentCampaignGroupName,
+      launched: results.length,
+      failed:   errors.length,
+    });
+  } else if (!allFailed) {
+    console.log('[MULTI_AREA_LAUNCH_DONE]', {
+      parentCampaignGroupId,
+      parentCampaignGroupName,
+      launched: results.length,
+    });
+  } else {
+    console.log('[MULTI_AREA_LAUNCH_PARTIAL_FAIL]', {
+      parentCampaignGroupId,
+      parentCampaignGroupName,
+      launched: 0,
+      failed:   errors.length,
+    });
+  }
+
+  return res.status(allFailed ? 500 : 200).json({
+    ok:                    !allFailed,
+    partialSuccess:        partialFail,
+    parentCampaignGroupId,
+    parentCampaignGroupName,
+    results,
+    errors,
+  });
+});
+
 module.exports = router;
