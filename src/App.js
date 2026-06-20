@@ -5,7 +5,8 @@ import Landing from "./pages/Landing";
 import Pricing from "./pages/Pricing";
 import LandingTest from "./pages/LandingTest";
 import PricingTest from "./pages/PricingTest";
-import FormPage from "./pages/FormPage";
+// FormPage removed from primary flow — AI Agent tab is the campaign creation UI.
+// File kept for reference; import removed to ensure no stale routes use it.
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
 import Signup from "./Signup";
@@ -39,6 +40,17 @@ function HostnameGateway() {
   );
   if (match) return <LandingPage slug={match.slug} />;
   return <Landing />;
+}
+
+/** Redirects legacy /form traffic to the AI Agent tab in CampaignSetup. */
+function FormRedirect() {
+  const loc = useLocation();
+  const qs  = new URLSearchParams(loc.search);
+  const adminClientId = qs.get("adminClientId") || "";
+  const dest = adminClientId
+    ? `/setup?adminClientId=${encodeURIComponent(adminClientId)}&tab=ai-agent`
+    : "/setup?tab=ai-agent";
+  return <Navigate to={dest} replace />;
 }
 
 function NotFound() {
@@ -82,7 +94,8 @@ function App() {
       <Route path="/growth-pricing" element={<PricingTest />} />
       <Route path="/test" element={<Navigate to="/growth" replace />} />
       <Route path="/pricing-test" element={<Navigate to="/growth-pricing" replace />} />
-      <Route path="/form" element={<FormPage />} />
+      {/* /form is no longer the primary flow — redirect to AI Agent tab */}
+      <Route path="/form" element={<FormRedirect />} />
       <Route path="/setup" element={<CampaignSetup />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
