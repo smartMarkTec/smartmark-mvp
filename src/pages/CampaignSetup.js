@@ -7589,8 +7589,8 @@ ${pendingTest ? `
       );
     })}
 
-    {/* ── Ad Agent sidebar item ── */}
-    {(() => {
+    {/* Duplicate "Ad Agent" button removed — AI Ad Agent is now the tab in the tabs array above */}
+    {false && (() => {
       const pk = String(billingInfo?.planKey || selectedPlan || "").trim().toLowerCase();
       const locked = !pk || pk === "base" || pk === "starter" || pk === "standard";
       return (

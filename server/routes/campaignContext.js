@@ -706,8 +706,28 @@ router.post('/campaign-context/save-creative-draft', async (req, res) => {
     if (!callerOwnerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
 
     const { adminClientId, creativeDraft } = req.body || {};
-    if (!creativeDraft || !Array.isArray(creativeDraft.images) || !creativeDraft.images.length) {
-      return res.status(400).json({ ok: false, error: 'creativeDraft with images is required.' });
+
+    // Accept if: at least one real image URL OR at least one creative with real content.
+    // Rejects truly empty/failed saves while allowing image-free but copy-complete drafts.
+    const hasImages =
+      Array.isArray(creativeDraft?.images) &&
+      creativeDraft.images.some(Boolean);
+
+    const hasCreativeSet =
+      Array.isArray(creativeDraft?.creativeSet) &&
+      creativeDraft.creativeSet.some(
+        (c) => c && (
+          String(c.imageUrl || '').trim() ||
+          String(c.headline || '').trim() ||
+          String(c.body    || '').trim()
+        )
+      );
+
+    if (!creativeDraft || (!hasImages && !hasCreativeSet)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'creativeDraft with images or creativeSet is required.',
+      });
     }
 
     let ownerKey = callerOwnerKey;
