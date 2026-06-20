@@ -3989,23 +3989,38 @@ useEffect(() => {
     // ctxKey setup effect and this draft restore effect on CampaignSetup mount.
     if (!adminClientId && !isDraftForActiveCtx(draftObj, resolvedUser)) return false;
 
-    const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
-    const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
-    if (!norm.length) return false;
+    // Restore multi-creative set if present (from AI Agent).
+    // creativeSet takes priority for both images and copy — do NOT cap to 2.
+    const restoredSet = Array.isArray(draftObj.creativeSet) && draftObj.creativeSet.length > 0
+      ? draftObj.creativeSet
+      : null;
+
+    // Build image list: prefer creativeSet images (all N of them), fall back to images array.
+    // Do NOT slice to 2 — AI Agent generates 3+ images and all must show.
+    const rawImgs = restoredSet
+      ? restoredSet.map((c) => c.imageUrl || "").filter(Boolean)
+      : (Array.isArray(draftObj.images) ? draftObj.images : []);
+    const norm = rawImgs.map(toAbsoluteMedia).filter(Boolean);
+    if (!norm.length && !restoredSet?.length) return false;
 
     console.debug("[CREATIVE PERSIST RESTORE]", {
       page: "CampaignSetup",
       adminClientId: adminClientId || null,
-      draftAdminClientId: draftObj.adminClientId || null,
       ctxKey: draftObj.ctxKey || null,
-      mediaSelection: draftObj.mediaSelection || "image",
-      imageUrls: norm,
+      creativeSetLength: restoredSet?.length || 0,
+      imagesLength: norm.length,
+      headlines: (restoredSet || []).map((c) => (c.headline || "").slice(0, 40)),
     });
 
-    // Restore multi-creative set if present in the draft
-    const restoredSet = Array.isArray(draftObj.creativeSet) && draftObj.creativeSet.length > 1
-      ? draftObj.creativeSet
-      : null;
+    // Restore previewCopy from first creative so copy shows in Campaign tab.
+    const fc = restoredSet?.[0];
+    if (fc?.headline || fc?.body) {
+      setPreviewCopy({
+        headline: String(fc.headline || "").trim(),
+        body:     String(fc.body     || "").trim(),
+        link:     String(fc.link     || "").trim(),
+      });
+    }
 
     setDraftCreatives({
       images: norm,
@@ -6973,17 +6988,29 @@ const getSavedCreatives = (campaignId) => {
       ? campaigns.find((c) => String(c?.id) === String(selectedCampaignId)) || null
       : null;
 
+// For draft view, prefer creativeSet[0] copy when previewCopy/headline is not available.
+// This fixes "No copy available yet" when AI Agent generated the creatives (no previewCopy set).
+const _draftFirstCreative = draftCreatives?.creativeSet?.[0] || null;
+const _normCopy = (raw = {}) => ({
+  headline: String(raw.headline || raw.title || raw.name || raw.adHeadline || "").trim(),
+  body:     String(raw.body || raw.subline || raw.primaryText || raw.message || raw.adCopy || "").trim(),
+  cta:      String(raw.cta || raw.callToAction || "").trim(),
+});
+const _firstCopy = _draftFirstCreative ? _normCopy(_draftFirstCreative) : null;
 const selectedCampaignCreatives =
-  selectedCampaignId === "__DRAFT__" && (hasDraft || isVideoCreative)
+  selectedCampaignId === "__DRAFT__" && (hasDraft || isVideoCreative || draftCreatives?.creativeSet?.length > 0)
     ? {
-        images: draftCreatives?.images || [],
+        // Use all images from creativeSet if available, otherwise fall back to draftCreatives.images
+        images: draftCreatives?.creativeSet?.length > 0
+          ? draftCreatives.creativeSet.map((c) => c.imageUrl || "").filter(Boolean)
+          : (draftCreatives?.images || []),
         mediaType: isVideoCreative ? "video" : "image",
         mediaSelection: isVideoCreative ? "video" : "image",
         videos: isVideoCreative ? [navVideoUrl] : [],
         meta: {
-          headline: String(previewCopy?.headline || headline || "").trim(),
-          body: String(previewCopy?.body || body || "").trim(),
-          link: String(previewCopy?.link || inferredLink || "").trim(),
+          headline: String(previewCopy?.headline || _firstCopy?.headline || headline || "").trim(),
+          body:     String(previewCopy?.body     || _firstCopy?.body     || body    || "").trim(),
+          link:     String(previewCopy?.link     || _firstCopy?.link     || inferredLink || "").trim(),
         },
       }
     : selectedCampaignId && selectedCampaignId !== "__DRAFT__"
@@ -8133,7 +8160,13 @@ ${pendingTest ? `
             const aiCurrentHeadline =
               selectedOptimizerState?.currentHeadline ||
               null;
-            const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
+            // Do NOT cap to 2 — AI Agent may generate 3+ creatives, all must display.
+            const images = (selectedCampaignCreatives?.images || []);
+            console.debug("[CREATIVES_TAB_DRAFT]", isDraftView ? {
+              creativeSetLength: draftCreatives?.creativeSet?.length || 0,
+              imagesLength: images.length,
+              headlines: (draftCreatives?.creativeSet || []).map((c) => (c.headline || "").slice(0, 40)),
+            } : { mode: "live" });
             const creativeIsVideo = (selectedCampaignCreatives?.mediaType || selectedCampaignCreatives?.mediaSelection || "image") === "video";
             const creativeVideoUrl = creativeIsVideo
               ? (isDraftView ? navVideoUrl : String(selectedCampaignCreatives?.videos?.[0] || "").trim())
@@ -10452,11 +10485,26 @@ ${pendingTest ? `
     adminClientInfo={adminClientInfo}
     selectedCampaignId={selectedCampaignId}
     onCreativesGenerated={({ images, creativeSet, creativeTestCount }) => {
+      // Use all images (no .slice(0,2) cap) so 3-ad sets show all 3 creatives
+      const allImages = (Array.isArray(images) ? images : []).filter(Boolean);
       setDraftCreatives({
-        images: images.filter(Boolean),
+        images: allImages,
         mediaSelection: "image",
         creativeSet,
         creativeTestCount,
+      });
+      // Restore previewCopy from first creative so Campaign tab shows copy immediately
+      const fc = Array.isArray(creativeSet) ? creativeSet[0] : null;
+      if (fc?.headline || fc?.body) {
+        setPreviewCopy({
+          headline: String(fc.headline || "").trim(),
+          body:     String(fc.body     || "").trim(),
+          link:     String(fc.link     || "").trim(),
+        });
+      }
+      console.debug("[CAMPAIGN_REVIEW_CREATIVE_SET]", {
+        creativeSetLength: Array.isArray(creativeSet) ? creativeSet.length : 0,
+        headlines: (Array.isArray(creativeSet) ? creativeSet : []).map((c) => (c.headline || "").slice(0, 40)),
       });
       setSelectedCampaignId("__DRAFT__");
       setExpandedId("__DRAFT__");
