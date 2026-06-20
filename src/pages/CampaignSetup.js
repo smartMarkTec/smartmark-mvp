@@ -6710,8 +6710,40 @@ console.log("[LAUNCH][creative-payload]", {
         const expiresAt =
           endISO && !isNaN(new Date(endISO).getTime()) ? new Date(endISO).getTime() : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
+        // Build per-creative record from the adCopySet used at launch.
+        // This preserves each ad's unique headline/body/cta/image so the Creatives
+        // tab shows all N launched ads correctly — independent of draft state.
+        const _launchedCreativeSet = (() => {
+          const copySet = draftCreatives?.creativeSet;
+          if (!Array.isArray(copySet) || copySet.length < 1) return null;
+          return copySet.map((c, i) => {
+            const backendR = Array.isArray(json.creativeResults) ? (json.creativeResults[i] || {}) : {};
+            return {
+              id:         c.id         || `launched-${i}`,
+              angle:      c.angle      || backendR.angle      || null,
+              angleLabel: c.angleLabel || backendR.angleLabel || `Ad ${i + 1}`,
+              headline:   String(c.headline || "").trim(),
+              body:       String(c.body     || "").trim(),
+              cta:        String(c.cta      || "").trim(),
+              imageUrl:   String(c.imageUrl || filteredImages[i] || "").trim(),
+              link:       String(c.link     || websiteUrl || "").trim(),
+              metaAdId:   backendR.metaAdId || null,
+              status:     "launched",
+            };
+          });
+        })();
+
+        console.log("[LAUNCHED_CREATIVE_SET_SAVED]", {
+          campaignId: json.campaignId,
+          count: _launchedCreativeSet?.length || 0,
+          headlines: (_launchedCreativeSet || []).map((c) => c.headline.slice(0, 40)),
+        });
+
         map[json.campaignId] = {
-          images: filteredImages,
+          images: _launchedCreativeSet?.length > 0
+            ? _launchedCreativeSet.map((c) => c.imageUrl).filter(Boolean)
+            : filteredImages,
+          launchedCreativeSet: _launchedCreativeSet || null,
           mediaSelection: "image",
           time: Date.now(),
           expiresAt,
@@ -6719,8 +6751,8 @@ console.log("[LAUNCH][creative-payload]", {
           // Persist adset ID so post-launch edits (budget/date) can target the correct Meta entity.
           adsetId: String(Array.isArray(json.adSetIds) ? json.adSetIds[0] || "" : ""),
           meta: {
-            headline: String(finalHeadline || "").trim(),
-            body: String(finalBody || "").trim(),
+            headline: String(_launchedCreativeSet?.[0]?.headline || finalHeadline || "").trim(),
+            body:     String(_launchedCreativeSet?.[0]?.body     || finalBody     || "").trim(),
             link:
               String(websiteUrl || "").trim() ||
               String(previewCopy?.link || inferredLink || "").trim() ||
@@ -6728,6 +6760,23 @@ console.log("[LAUNCH][creative-payload]", {
           },
         };
         writeCreativeMap(resolvedUser, acctId, map);
+
+        // Also update React state immediately so Creatives tab shows all N ads without a page reload.
+        // refreshAdminCampaigns (below) may overwrite campaignCreativesMap from API; by setting it
+        // here first the user sees correct data immediately after launch.
+        if (_launchedCreativeSet?.length > 0) {
+          setCampaignCreativesMap((prev) => ({
+            ...prev,
+            [json.campaignId]: {
+              ...(prev[json.campaignId] || {}),
+              images:              _launchedCreativeSet.map((c) => c.imageUrl).filter(Boolean),
+              launchedCreativeSet: _launchedCreativeSet,
+              mediaType:           "image",
+              mediaSelection:      "image",
+              meta:                map[json.campaignId].meta,
+            },
+          }));
+        }
 
         // Seed campaignSettingsMap with original values at launch time so the
         // per-campaign details panel can always show original vs current.
@@ -6934,51 +6983,53 @@ console.log("[LAUNCH][creative-payload]", {
 const getSavedCreatives = (campaignId) => {
   const runtime = campaignCreativesMap[campaignId] || null;
 
-  if (runtime) {
+  // Always check localStorage for launchedCreativeSet — it's written at launch time
+  // and contains per-ad headline/body/cta/imageUrl for all N creatives.
+  // refreshAdminCampaigns can overwrite campaignCreativesMap from API data (which
+  // doesn't carry launchedCreativeSet), so we merge from localStorage as authoritative.
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const localMap = acctKey ? readCreativeMap(resolvedUser, acctKey) : {};
+  const saved = localMap[campaignId] || null;
+
+  // Prefer launchedCreativeSet from localStorage (has all N ads with per-ad copy).
+  const launchedSet = saved?.launchedCreativeSet || runtime?.launchedCreativeSet || null;
+
+  console.debug("[CAMPAIGN_CREATIVE_RENDER_SOURCE]", {
+    campaignId, hasRuntime: !!runtime, hasSaved: !!saved,
+    launchedSetCount: launchedSet?.length || 0,
+    source: launchedSet?.length > 0 ? "launchedCreativeSet" : runtime ? "runtime-api" : "localStorage",
+  });
+
+  if (runtime || saved) {
+    const fallbackImages = (runtime?.images || saved?.images || [])
+      .map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+
     return {
-      images: (runtime.images || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2),
-      mediaType: runtime.mediaType || "image",
-      mediaSelection: runtime.mediaSelection || "image",
-      videos: runtime.videos || [],
+      images: launchedSet?.length > 0
+        ? launchedSet.map((c) => toAbsoluteMedia(c.imageUrl)).filter(Boolean)
+        : fallbackImages,
+      launchedCreativeSet: launchedSet,
+      mediaType: runtime?.mediaType || saved?.mediaType || "image",
+      mediaSelection: runtime?.mediaSelection || saved?.mediaSelection || "image",
+      videos: runtime?.videos || saved?.videos || [],
       meta: {
-        headline: String(runtime?.meta?.headline || "").trim(),
-        body: String(runtime?.meta?.body || "").trim(),
-        link: String(runtime?.meta?.link || "").trim(),
+        headline: String(launchedSet?.[0]?.headline || runtime?.meta?.headline || saved?.meta?.headline || "").trim(),
+        body:     String(launchedSet?.[0]?.body     || runtime?.meta?.body     || saved?.meta?.body     || "").trim(),
+        link:     String(launchedSet?.[0]?.link     || runtime?.meta?.link     || saved?.meta?.link     || "").trim(),
       },
     };
   }
 
   if (!selectedAccount) {
-    return { images: [], mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
+    return { images: [], launchedCreativeSet: null, mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
   }
 
-  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-  const map = readCreativeMap(resolvedUser, acctKey);
-
-  const didPurge = purgeExpiredCreative(map, campaignId);
-  if (didPurge) writeCreativeMap(resolvedUser, acctKey, map);
-
-  const saved = map[campaignId] || null;
-  if (!saved) {
-    return { images: [], mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
+  if (acctKey) {
+    const didPurge = purgeExpiredCreative(localMap, campaignId);
+    if (didPurge) writeCreativeMap(resolvedUser, acctKey, localMap);
   }
 
-  const images = (saved.images || [])
-    .map(toAbsoluteMedia)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  return {
-    images,
-    mediaType: saved.mediaType || "image",
-    mediaSelection: saved.mediaSelection || "image",
-    videos: saved.videos || [],
-    meta: {
-      headline: String(saved?.meta?.headline || "").trim(),
-      body: String(saved?.meta?.body || "").trim(),
-      link: String(saved?.meta?.link || "").trim(),
-    },
-  };
+  return { images: [], launchedCreativeSet: null, mediaType: "image", mediaSelection: "image", videos: [], meta: { headline: "", body: "", link: "" } };
 };
 
   const hasDraft = draftCreatives.images && draftCreatives.images.length;
@@ -8455,6 +8506,63 @@ ${pendingTest ? `
                         </div>
                       </div>
                     )}
+                    {/* Launched campaign multi-creative cards — reads from launchedCreativeSet,
+                        NOT from draftCreatives, so Clear Drafts never affects this. */}
+                    {!isDraftView && selectedCampaignCreatives?.launchedCreativeSet?.length > 1 && (
+                      <div style={{ width: "100%", marginTop: 16 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                          {selectedCampaignCreatives.launchedCreativeSet.length}-Ad Creative Test — Launched
+                        </div>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          {selectedCampaignCreatives.launchedCreativeSet.map((c, idx) => (
+                            <div
+                              key={c.id || idx}
+                              onClick={() => setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx)}
+                              style={{
+                                flex: "1 1 200px", minWidth: 160, maxWidth: 260,
+                                background: "#fff",
+                                border: expandedCreativeCardIdx === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
+                                borderRadius: 14, padding: "10px 12px", cursor: "pointer",
+                                boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                  {c.angleLabel || `Ad ${idx + 1}`}
+                                </span>
+                              </div>
+                              {c.imageUrl && (
+                                <img src={toAbsoluteMedia(c.imageUrl)} alt="creative"
+                                  style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", marginBottom: 6 }}
+                                  onError={(e) => { e.target.style.display = "none"; }} />
+                              )}
+                              <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
+                                {c.headline || "(no headline)"}
+                              </div>
+                              {expandedCreativeCardIdx === idx && (
+                                <>
+                                  <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>{c.body || ""}</div>
+                                  <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>CTA: {c.cta || "Learn more"}</div>
+                                  {c.metaAdId && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>Meta Ad: {c.metaAdId}</div>}
+                                </>
+                              )}
+                              {expandedCreativeCardIdx !== idx && (
+                                <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                                  {(c.body || "").slice(0, 60)}{(c.body || "").length > 60 ? "…" : ""}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
+                          1 campaign · 1 ad set · {selectedCampaignCreatives.launchedCreativeSet.length} launched ads
+                        </div>
+                        <div style={{ marginTop: 12, padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 12, color: "#64748b", fontStyle: "italic" }}>
+                          Ad-level metrics will appear after delivery data is available.
+                        </div>
+                      </div>
+                    )}
+
                     {!isDraftView && !selectedLiveCampaign?.smArchived && (
                       <button
                         type="button"

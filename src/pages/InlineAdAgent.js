@@ -518,7 +518,15 @@ export default function InlineAdAgent({
   }
 
   async function clearDrafts() {
-    // Clear backend draft
+    // SCOPE: only clears AI Agent draft state — never touches launched campaign records.
+    // Launched creativeSet is stored in campaignCreativesMap / readCreativeMap (keyed by
+    // real campaignId), which is separate from the draft keys cleared here.
+    console.debug("[CLEAR_DRAFT_SCOPE]", {
+      adminClientId, cleared: ["backend creative-draft", "chat history", "localStorage draft keys", "draftCreatives state"],
+      notCleared: ["campaignCreativesMap", "readCreativeMap launched records", "campaign_creatives DB"],
+    });
+
+    // Clear backend creative draft
     if (adminClientId) await clearBackendDraft(adminClientId);
     // Clear chat history on backend
     try {
@@ -528,7 +536,7 @@ export default function InlineAdAgent({
         : "/api/ad-agent/history";
       await fetch(url, { method: "DELETE", credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} });
     } catch {}
-    // Clear localStorage backup
+    // Clear localStorage draft backup (admin-client namespace only — NOT readCreativeMap)
     try {
       if (adminClientId) {
         const ns = `u:adminClient:${adminClientId}`;
@@ -536,7 +544,8 @@ export default function InlineAdAgent({
         localStorage.removeItem(`${ns}:sm_setup_creatives_backup_v1`);
       }
     } catch {}
-    // Reset state
+    // Reset AI Agent draft state in parent (draftCreatives)
+    // This does NOT affect campaignCreativesMap which holds launched campaign data.
     setCreatives([]);
     setMsgs([]);
     setPendingN(null);
