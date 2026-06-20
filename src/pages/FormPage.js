@@ -31,6 +31,17 @@ const API_BASE = USE_LOCAL_BACKEND ? "/api" : "/api";
 
 const WARMUP_URL = `${API_BASE}/test`;
 
+/* -------- Creative angle definitions (multi-ad test) -------- */
+const CREATIVE_ANGLES = [
+  { id: "offer",   label: "Offer Angle",       description: "Focus on special offer or promotion" },
+  { id: "problem", label: "Problem Angle",      description: "Focus on customer pain point" },
+  { id: "trust",   label: "Local Trust Angle",  description: "Focus on local expertise and trust" },
+  { id: "urgency", label: "Urgency Angle",       description: "Focus on immediate action" },
+];
+function getAnglesForCount(n) {
+  return CREATIVE_ANGLES.slice(0, Math.min(n, CREATIVE_ANGLES.length));
+}
+
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v3";
@@ -805,13 +816,14 @@ function isLikelySideChat(s, currentQ) {
 }
 
 /* --- GPT copy summarizer --- */
-async function summarizeAdCopy(answers, { regenerateToken = "", variant = "" } = {}) {
+// angle: "offer" | "problem" | "trust" | "urgency" | "" (random)
+async function summarizeAdCopy(answers, { regenerateToken = "", variant = "", angle = "" } = {}) {
   const url = `${API_BASE}/summarize-ad-copy`;
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers, regenerateToken, variant }),
+      body: JSON.stringify({ answers, regenerateToken, variant, ...(angle ? { angle } : {}) }),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json?.ok) throw new Error(`summarize failed ${res.status}`);
@@ -928,6 +940,18 @@ export default function FormPage() {
     } catch {}
     return "ai_image";
   }); // "ai_image" | "upload_photo" | "upload_video"
+
+  // Multi-ad creative test: how many distinct ad angles to generate (1–4, default 3)
+  const [creativeTestCount, setCreativeTestCount] = useState(3);
+  // Full creative set: [{id, angle, angleLabel, headline, body, cta, imageUrl, link, status}]
+  const [creativeSet, setCreativeSet] = useState(null);
+
+  // Stable ref that always holds the latest copy + image state — safe to read inside
+  // visibilitychange / beforeunload handlers where React state closures are stale.
+  const latestDraftRef = useRef({
+    images: [], headline: "", body: "", cta: "", link: "",
+    creativeSet: null, creativeTestCount: 1, answers: {},
+  });
   const [awaitingAiImageConfirm, setAwaitingAiImageConfirm] = useState(false); // waiting for yes/no after "Generate AI Image" card click
   const [copyGenerated, setCopyGenerated] = useState(false); // true once copy-only generation ran for upload modes
 
@@ -1440,11 +1464,15 @@ useEffect(() => {
           const stateBody     = String(location.state?.body     || "").trim();
           const stateLink     = String(location.state?.link     || "").trim();
           if (stateHeadline || stateBody) {
+            // Copy from CampaignSetup back-nav route state
             setResult((prev) => ({
               ...(prev || {}),
               headline: stateHeadline || prev?.headline || "",
               body:     stateBody     || prev?.body     || "",
             }));
+            // Also set edit fields directly so they're available before result effect fires
+            if (stateHeadline) setEditHeadline(stateHeadline);
+            if (stateBody)     setEditBody(stripTrailingLearnMore(stateBody));
           } else {
             // No copy in route state — read from admin-client localStorage draft
             try {
@@ -1459,6 +1487,11 @@ useEffect(() => {
                     headline: draftObj.headline || prev?.headline || "",
                     body:     draftObj.body     || prev?.body     || "",
                   }));
+                  // Set edit fields directly — eliminates timing dependency on result effect
+                  if (draftObj.headline) setEditHeadline(draftObj.headline.slice(0, 55));
+                  if (draftObj.body)     setEditBody(stripTrailingLearnMore(draftObj.body));
+                  if (draftObj.imageOverlayCTA) setEditCTA(draftObj.imageOverlayCTA);
+                  if (draftObj.link)     setEditLink(draftObj.link);
                 }
               }
             } catch {}
@@ -1495,8 +1528,13 @@ useEffect(() => {
                 setResult((prev) => ({
                   ...(prev || {}),
                   headline: draftObj.headline || prev?.headline || "",
-                  body: draftObj.body || prev?.body || "",
+                  body:     draftObj.body     || prev?.body     || "",
                 }));
+                // Set edit fields directly to avoid timing dependency on result effect
+                if (draftObj.headline) setEditHeadline(draftObj.headline.slice(0, 55));
+                if (draftObj.body)     setEditBody(stripTrailingLearnMore(draftObj.body));
+                if (draftObj.imageOverlayCTA) setEditCTA(draftObj.imageOverlayCTA);
+                if (draftObj.link)     setEditLink(draftObj.link);
               }
               if (draftObj.answers && typeof draftObj.answers === "object") {
                 setAnswers((prev) => ({ ...prev, ...draftObj.answers }));
@@ -1665,6 +1703,10 @@ useEffect(() => {
             ).trim(),
           }));
           if (creativeObj?.answers && typeof creativeObj.answers === "object") setAnswers(creativeObj.answers);
+          if (Array.isArray(creativeObj?.creativeSet) && creativeObj.creativeSet.length > 0) {
+            setCreativeSet(creativeObj.creativeSet);
+            if (creativeObj.creativeTestCount) setCreativeTestCount(creativeObj.creativeTestCount);
+          }
           setHasGenerated(true);
           setAwaitingReady(false);
         } else {
@@ -1834,6 +1876,128 @@ useEffect(() => {
     }, 400);
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
+
+  // ── Keep latestDraftRef current (safe for event handlers that outlive renders) ──
+  useEffect(() => {
+    latestDraftRef.current = {
+      ...latestDraftRef.current,
+      headline: editHeadline,
+      body:     editBody,
+      cta:      editCTA,
+      link:     editLink,
+    };
+  }, [editHeadline, editBody, editCTA, editLink]);
+
+  useEffect(() => {
+    latestDraftRef.current = { ...latestDraftRef.current, images: imageUrls };
+  }, [imageUrls]);
+
+  useEffect(() => {
+    latestDraftRef.current = { ...latestDraftRef.current, answers };
+  }, [answers]);
+
+  useEffect(() => {
+    latestDraftRef.current = {
+      ...latestDraftRef.current,
+      creativeSet, creativeTestCount,
+    };
+  }, [creativeSet, creativeTestCount]);
+
+  // ── Debounced save when copy fields change (admin-client only) ──────────────
+  // Fires 500ms after any edit to headline/body/CTA/link so a quick tab-switch
+  // after editing still persists the copy.
+  useEffect(() => {
+    if (!adminClientId || !imageUrls?.length) return;
+    const t = setTimeout(() => {
+      if (!isDraftDisabled()) {
+        saveAdminClientDraftNow({
+          images:       imageUrls,
+          headline:     editHeadline,
+          body:         editBody,
+          overlay:      editCTA,
+          link:         editLink,
+          draftAnswers: answers,
+          extraFields:  creativeSet?.length > 1 ? { creativeSet, creativeTestCount } : undefined,
+        });
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line
+  }, [editHeadline, editBody, editCTA, editLink, adminClientId]);
+
+  // ── visibilitychange: save immediately when user switches tabs / hides page ──
+  // Uses latestDraftRef (not stale closure) so the saved data is always current.
+  useEffect(() => {
+    if (!adminClientId) return;
+    const onVis = () => {
+      if (document.visibilityState !== "hidden") return;
+      const d = latestDraftRef.current;
+      if (!d.images?.length || isDraftDisabled()) return;
+      try {
+        const _clientNs = `adminClient:${adminClientId}`;
+        const _ctxKey   = getActiveCtx() || "";
+        const _draft = {
+          ctxKey:          _ctxKey,
+          adminClientId,
+          images:          d.images.filter(Boolean).slice(0, 2),
+          headline:        (d.headline || "").slice(0, 55),
+          body:            d.body     || "",
+          imageOverlayCTA: d.cta      || "",
+          link:            d.link     || "",
+          answers:         d.answers  || {},
+          mediaSelection:  "image",
+          savedAt:         Date.now(),
+          expiresAt:       Date.now() + CREATIVE_TTL_MS,
+          ...(Array.isArray(d.creativeSet) && d.creativeSet.length > 1
+            ? { creativeSet: d.creativeSet, creativeTestCount: d.creativeTestCount }
+            : {}),
+        };
+        localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_draft));
+        localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_draft));
+        console.debug("[DRAFT SAVE]", {
+          page: "FormPage", adminClientId, trigger: "visibilitychange",
+          imageCount: _draft.images.length, hasCopy: !!(d.headline || d.body),
+        });
+      } catch {}
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  // eslint-disable-next-line
+  }, [adminClientId]);
+
+  // ── beforeunload: save admin-client draft before tab closes / hard reload ───
+  useEffect(() => {
+    if (!adminClientId) return;
+    const onUnload = () => {
+      const d = latestDraftRef.current;
+      if (!d.images?.length || isDraftDisabled()) return;
+      try {
+        const _clientNs = `adminClient:${adminClientId}`;
+        const _ctxKey   = getActiveCtx() || "";
+        const _draft = {
+          ctxKey:          _ctxKey,
+          adminClientId,
+          images:          d.images.filter(Boolean).slice(0, 2),
+          headline:        (d.headline || "").slice(0, 55),
+          body:            d.body     || "",
+          imageOverlayCTA: d.cta      || "",
+          link:            d.link     || "",
+          answers:         d.answers  || {},
+          mediaSelection:  "image",
+          savedAt:         Date.now(),
+          expiresAt:       Date.now() + CREATIVE_TTL_MS,
+          ...(Array.isArray(d.creativeSet) && d.creativeSet.length > 1
+            ? { creativeSet: d.creativeSet, creativeTestCount: d.creativeTestCount }
+            : {}),
+        };
+        localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_draft));
+        localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_draft));
+      } catch {}
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  // eslint-disable-next-line
+  }, [adminClientId]);
 
   const fallbackCopy = useMemo(() => {
     const ind = (answers?.industry || "").toString().trim().toLowerCase();
@@ -2567,7 +2731,7 @@ useEffect(() => {
 // ── Immediate durable save for admin-client creative drafts ──────────────────
 // Called immediately after any state change (upload, copy, or navigation) so the
 // draft is never lost even if navigation happens before the 300ms autosave fires.
-function saveAdminClientDraftNow({ images, headline, body, overlay, link, draftAnswers }) {
+function saveAdminClientDraftNow({ images, headline, body, overlay, link, draftAnswers, extraFields }) {
   if (!adminClientId || !images?.length) return;
   try {
     const _clientNs = `adminClient:${adminClientId}`;
@@ -2585,6 +2749,7 @@ function saveAdminClientDraftNow({ images, headline, body, overlay, link, draftA
       mediaSelection:  "image",
       savedAt:         Date.now(),
       expiresAt:       Date.now() + CREATIVE_TTL_MS,
+      ...(extraFields || {}),
     };
     localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_draft));
     localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_draft));
@@ -2626,6 +2791,53 @@ function buildCurrentIntakeAnswers() {
   };
 }
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Generates N copy variants (one per angle) using the SAME shared image URL.
+// Called after generatePosterBPair succeeds when creativeTestCount > 1.
+// Each angle calls /api/summarize-ad-copy with a different angle hint.
+async function generateAdCreativeSet(sharedImageUrl) {
+  if (!sharedImageUrl) return;
+  const count  = creativeTestCount;
+  const angles = getAnglesForCount(count);
+  const intakeA = buildCurrentIntakeAnswers();
+  const ctxKey  = getActiveCtx() || "";
+
+  const creatives = [];
+  for (const angle of angles) {
+    try {
+      const copy = await summarizeAdCopy(intakeA, { angle: angle.id });
+      creatives.push({
+        id:          `c-${angle.id}-${Date.now()}`,
+        angle:       angle.id,
+        angleLabel:  angle.label,
+        headline:    (copy?.headline || "").slice(0, 55),
+        body:        copy?.subline || copy?.body || "",
+        cta:         copy?.cta || intakeA.cta || "Learn more",
+        imageUrl:    sharedImageUrl,
+        link:        intakeA.url || "",
+        mediaSelection: "image",
+        status:      "draft",
+      });
+    } catch {}
+  }
+
+  if (creatives.length > 0) {
+    setCreativeSet(creatives);
+    // Persist immediately with full creative set
+    saveAdminClientDraftNow({
+      images:       [sharedImageUrl],
+      headline:     creatives[0]?.headline || "",
+      body:         creatives[0]?.body     || "",
+      overlay:      normalizeOverlayCTA(creatives[0]?.cta || ""),
+      draftAnswers: intakeA,
+      extraFields:  { creativeSet: creatives, creativeTestCount: count },
+    });
+    console.debug("[DRAFT SAVE]", {
+      page: "FormPage", adminClientId, ctxKey, source: "generateAdCreativeSet",
+      imageCount: 1, creativeCount: creatives.length,
+    });
+  }
+}
 
 async function generatePosterBPair(runToken) {
   const tA = `${runToken}-A`;
@@ -2850,8 +3062,16 @@ async function generatePosterBPair(runToken) {
       try { setImageUrls([]); setImageUrl(""); } catch {}
       try {
         await warmBackend();
-        await generatePosterBPair(token);
-        setChatHistory((ch) => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." }]);
+        const _genResult = await generatePosterBPair(token);
+        const _genImageUrl = _genResult?.urls?.[0] || "";
+        // For multi-ad tests, generate different copy angles after the primary image is ready.
+        // Fire-and-forget — doesn't block the UI from showing the primary creative.
+        if (creativeTestCount > 1 && _genImageUrl) {
+          generateAdCreativeSet(_genImageUrl).catch((e) => console.warn("[generateAdCreativeSet]", e?.message));
+        }
+        setChatHistory((ch) => [...ch, { from: "gpt", text: creativeTestCount > 1
+          ? `Done! Generating ${creativeTestCount} ad angles for testing — one image, different copy per angle.`
+          : "Done! Here are your ad previews. You can regenerate the image below." }]);
         setHasGenerated(true);
       } catch (err) {
         console.error("generation failed:", err);
@@ -3671,6 +3891,41 @@ async function generatePosterBPair(runToken) {
         {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
+      {/* ── Ad count selector — how many creative angles to test ── */}
+      {contextStatus === "loaded" && objectiveStep === "chosen" && (
+        <div style={{ width: "100%", marginTop: 12, marginBottom: 4, padding: "10px 14px", background: "rgba(93,89,234,0.05)", borderRadius: 14, border: "1px solid rgba(93,89,234,0.12)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#3a3648", marginBottom: 8 }}>
+            How many ad creatives do you want to test?
+          </div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setCreativeTestCount(n)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 999,
+                  border: n === creativeTestCount ? "2px solid #5d59ea" : "1.5px solid #d8d4ed",
+                  background: n === creativeTestCount ? "#5d59ea" : "rgba(255,255,255,0.8)",
+                  color: n === creativeTestCount ? "#fff" : "#5a5270",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                {n} ad{n > 1 ? "s" : ""}
+                {n === 3 ? " ✓" : ""}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#8b85a8", marginTop: 6, lineHeight: 1.5 }}>
+            Smartemark will launch one campaign and one ad set, then test multiple ads inside it.
+            {creativeTestCount > 2 && " With smaller budgets, 2–3 ads is usually better than 4."}
+          </div>
+        </div>
+      )}
+
          {/* ── Compact creative format picker pills — replaces the large top cards ── */}
       <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, marginBottom: 10 }}>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
@@ -4250,6 +4505,8 @@ async function generatePosterBPair(runToken) {
   mediaSelection: "image",
   savedAt: Date.now(),
   expiresAt: Date.now() + CREATIVE_TTL_MS,
+  // Include the multi-creative set so CampaignSetup can restore all angles
+  ...(creativeSet && creativeSet.length > 1 ? { creativeSet, creativeTestCount } : {}),
 };
 
 
@@ -4337,6 +4594,8 @@ async function generatePosterBPair(runToken) {
                 answers: answersForSetup,
                 mediaSelection: "image",
                 selectedObjective: selectedObjective || aiRecommendedObjective || null,
+                // Pass multi-creative set if generated
+                ...(creativeSet && creativeSet.length > 1 ? { creativeSet, creativeTestCount } : {}),
                 ...(adminClientId ? {
                   adminClientId,
                   adminClientBusinessName: adminClientInfo?.premiumIntake?.businessName || adminClientInfo?.displayName || adminClientInfo?.email || "",

@@ -3560,6 +3560,8 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
     mediaSelection: "image",
+    creativeSet: null,      // [{id, angle, angleLabel, headline, body, cta, imageUrl, link, status}]
+    creativeTestCount: 1,
   });
 
   const state = location.state || {};
@@ -3991,14 +3993,21 @@ useEffect(() => {
       imageUrls: norm,
     });
 
+    // Restore multi-creative set if present in the draft
+    const restoredSet = Array.isArray(draftObj.creativeSet) && draftObj.creativeSet.length > 1
+      ? draftObj.creativeSet
+      : null;
+
     setDraftCreatives({
       images: norm,
-      mediaSelection: "image",
+      mediaSelection: draftObj.mediaSelection || "image",
+      creativeSet: restoredSet,
+      creativeTestCount: restoredSet ? (draftObj.creativeTestCount || restoredSet.length) : 1,
     });
 
     setSelectedCampaignId("__DRAFT__");
     setExpandedId("__DRAFT__");
-setSetupTab("creatives");
+    setSetupTab("creatives");
     return true;
   };
 
@@ -6568,6 +6577,26 @@ const payload = {
   overrideCountPerType: {
     images: isVideoCreative ? 0 : Math.min(2, filteredImages.length),
   },
+
+  // Multi-creative angle test: send per-ad copy so backend creates one ad per angle
+  // with distinct headline/body. Only included when a creativeSet exists.
+  ...(draftCreatives.creativeSet && draftCreatives.creativeSet.length > 1 && !isVideoCreative
+    ? {
+        creativeSet: draftCreatives.creativeSet,
+        adCopySet: draftCreatives.creativeSet.map((c) => ({
+          localCreativeId: c.id,
+          angle:           c.angle,
+          angleLabel:      c.angleLabel,
+          headline:        c.headline || "",
+          body:            c.body     || "",
+          cta:             c.cta      || "",
+          imageUrl:        c.imageUrl || filteredImages[0] || "",
+        })),
+        overrideCountPerType: {
+          images: Math.min(draftCreatives.creativeSet.length, 4),
+        },
+      }
+    : {}),
 };
 
 console.log("[SM][launch payload]", {
@@ -8320,6 +8349,83 @@ ${pendingTest ? `
                         Clear draft creatives
                       </button>
                     )}
+
+                    {/* Multi-creative set cards — shown in draft view when a creativeSet exists */}
+                    {isDraftView && draftCreatives.creativeSet && draftCreatives.creativeSet.length > 1 && (() => {
+                      const [expandedCard, setExpandedCard] = React.useState(null);
+                      return (
+                        <div style={{ width: "100%", marginTop: 16 }}>
+                          <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                            {draftCreatives.creativeSet.length}-Ad Creative Test Plan
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            {draftCreatives.creativeSet.map((c, idx) => (
+                              <div
+                                key={c.id || idx}
+                                onClick={() => setExpandedCard(expandedCard === idx ? null : idx)}
+                                style={{
+                                  flex: "1 1 200px",
+                                  minWidth: 160,
+                                  maxWidth: 260,
+                                  background: "#fff",
+                                  border: expandedCard === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
+                                  borderRadius: 14,
+                                  padding: "10px 12px",
+                                  cursor: "pointer",
+                                  boxShadow: "0 2px 8px rgba(93,89,234,0.08)",
+                                  transition: "border 0.15s",
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                  <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                    {c.angleLabel || c.angle || `Ad ${idx + 1}`}
+                                  </span>
+                                </div>
+                                {c.imageUrl && (
+                                  <img
+                                    src={toAbsoluteMedia(c.imageUrl)}
+                                    alt="creative"
+                                    style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", marginBottom: 6 }}
+                                    onError={(e) => { e.target.style.display = "none"; }}
+                                  />
+                                )}
+                                <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
+                                  {c.headline || "(no headline)"}
+                                </div>
+                                {expandedCard === idx && (
+                                  <>
+                                    <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>
+                                      {c.body || ""}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>
+                                      CTA: {c.cta || "Learn more"}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                                      Status: {c.status || "draft"}
+                                    </div>
+                                  </>
+                                )}
+                                {expandedCard !== idx && (
+                                  <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                                    {(c.body || "").slice(0, 60)}{c.body?.length > 60 ? "…" : ""}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
+                            Launch creates 1 campaign · 1 ad set · {draftCreatives.creativeSet.length} ads — one per angle
+                          </div>
+                          <div style={{
+                            marginTop: 12, padding: "10px 14px",
+                            background: "#f8fafc", border: "1px solid #e2e8f0",
+                            borderRadius: 10, fontSize: 12, color: "#64748b", fontStyle: "italic",
+                          }}>
+                            Ad-level metrics will appear after delivery data is available.
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {!isDraftView && !selectedLiveCampaign?.smArchived && (
                       <button
                         type="button"

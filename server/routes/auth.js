@@ -3277,6 +3277,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       mediaType: reqMediaType = 'image',
       mediaSelection: reqMediaSelection = 'image',
       videoUrl: reqVideoUrl = '',
+      // Multi-creative angle test: per-ad copy (one entry per ad)
+      adCopySet = null,
     } = req.body;
 
     const isVideoLaunch = (String(reqMediaType || reqMediaSelection || '').trim().toLowerCase() === 'video') && !!String(reqVideoUrl || '').trim();
@@ -3823,6 +3825,7 @@ const { data: adsetData } = await axios.post(
     const usedImages = [];
     const usedVideos = [];
     const usedFbVideoIds = [];
+    const creativeResults = [];   // [{localCreativeId, angle, angleLabel, metaCreativeId, metaAdId}]
 
     const creativeMessage = String(form.adCopy || adCopy || '').trim();
     const _adCopyFirstSegment = String(adCopy || '').trim().split('\n\n')[0].split('\n')[0].trim();
@@ -3831,6 +3834,8 @@ const { data: adsetData } = await axios.post(
     const creativeCtaType = isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE';
     const creativeCtaLink = isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl;
     const creativeLinkDataLink = destinationUrl;
+    // Per-ad copy: if adCopySet provided, index into it for each variant
+    const isMultiCreative = Array.isArray(adCopySet) && adCopySet.length > 1;
 
     if (isVideoLaunch) {
       const publicVideoUrl = absolutePublicUrl(String(reqVideoUrl).trim());
@@ -3890,22 +3895,32 @@ const { data: adsetData } = await axios.post(
         const variant = parsedVariants[i];
         const hash = await uploadImage(variant, i);
 
+        // Per-ad copy: use the angle-specific headline/body when adCopySet is provided
+        const perAdCopy  = isMultiCreative ? (adCopySet[i] || adCopySet[0]) : null;
+        const adName     = perAdCopy?.angleLabel
+          ? `${campaignName} — ${perAdCopy.angleLabel}`
+          : `${campaignName} (Image v${i + 1})`;
+        const adMessage  = perAdCopy?.body     || creativeMessage;
+        const adTitle    = perAdCopy?.headline  || creativeTitle;
+
         console.log('[LAUNCH][creative create]', {
           accountId, campaignName, pageIdFinal, destinationUrl, hash,
-          message: form.adCopy || adCopy || '',
+          message: adMessage.slice(0, 80),
+          title: adTitle,
+          angle: perAdCopy?.angle || null,
           ctaType: isNoWebsiteLaunch ? 'CALL_NOW' : 'LEARN_MORE',
           ctaLink: isNoWebsiteLaunch ? `tel:${normalizedPhone}` : destinationUrl,
           isNoWebsiteLaunch, variantIndex: i + 1,
         });
 
         const creativePayload = {
-          name: `${campaignName} (Image v${i + 1})`,
+          name: adName,
           object_story_spec: {
             page_id: pageIdFinal,
             link_data: {
               link: creativeLinkDataLink,
-              message: creativeMessage,
-              name: creativeTitle,
+              message: adMessage,
+              name: adTitle,
               image_hash: hash,
               call_to_action: {
                 type: creativeCtaType,
@@ -3930,7 +3945,7 @@ const { data: adsetData } = await axios.post(
         const ad = await axios.post(
           `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
           {
-            name: `${campaignName} (Image v${i + 1})`,
+            name: adName,
             adset_id: imageAdSetId,
             creative: { creative_id: cr.data.id },
             status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
@@ -3938,8 +3953,17 @@ const { data: adsetData } = await axios.post(
           { params: mkParams() }
         );
 
-        adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
+        const metaAdId = ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`;
+        adIds.push(metaAdId);
         usedImages.push(variant.bytes ? '(inline_base64)' : String(variant.url || ''));
+        creativeResults.push({
+          localCreativeId: perAdCopy?.localCreativeId || null,
+          angle:           perAdCopy?.angle           || null,
+          angleLabel:      perAdCopy?.angleLabel       || null,
+          metaCreativeId:  cr.data?.id               || null,
+          metaAdId,
+          status:          'active',
+        });
       }
     }
 
@@ -4097,6 +4121,7 @@ const optimizerPayload = {
       campaignName,
       adSetIds: [imageAdSetId].filter(Boolean),
       adIds,
+      creativeResults: creativeResults.length > 0 ? creativeResults : undefined,
       variantPlan: plan,
       campaignStatus,
       effective_status: campaignStatus,

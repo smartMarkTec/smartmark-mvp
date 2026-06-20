@@ -647,6 +647,7 @@ const system =
     const secondaryStr = String(a.secondary || a.financingLine || "").trim();
 
     // Rotating copy angle — changes per generation so the headline/body feel fresh each time.
+    // If a named angle is passed in req.body.angle, use the matching fixed directive instead.
     const _COPY_ANGLES = [
       "Lead with the customer's biggest pain point and the immediate relief this service provides.",
       "Lead with the key outcome or transformation — what the customer's situation looks like after.",
@@ -655,7 +656,16 @@ const system =
       "Lead with a before/after contrast — the problem state versus how it gets resolved.",
       "Lead with what's specific and different about this business versus a generic option.",
     ];
-    const _copyAngle = _COPY_ANGLES[Math.floor(Math.random() * _COPY_ANGLES.length)];
+    const _NAMED_ANGLES = {
+      offer:   "Lead with the SPECIFIC offer, promotion, or price deal mentioned in the brief. The headline's first words must name the deal, savings amount, or special pricing. If no explicit offer exists, lead with the strongest benefit as a value statement.",
+      problem: "Lead with the customer's PAIN POINT — what's going wrong right now. Do NOT mention a discount or offer. Focus entirely on the customer's discomfort and how quickly this service resolves it.",
+      trust:   "Lead with LOCAL EXPERTISE and credibility. Highlight community presence, years of experience, a specific credential, or a concrete result. Make the business feel like the obvious trusted choice for a local customer.",
+      urgency: "Lead with IMMEDIATE ACTION. Use time-sensitive language ('today', 'now', 'before it gets worse'). Give the reader a concrete reason why acting now beats waiting. Headline and subline should both push toward booking immediately.",
+    };
+    const _requestedAngle = String(req.body.angle || "").trim().toLowerCase();
+    const _copyAngle = (_requestedAngle && _NAMED_ANGLES[_requestedAngle])
+      ? _NAMED_ANGLES[_requestedAngle]
+      : _COPY_ANGLES[Math.floor(Math.random() * _COPY_ANGLES.length)];
 
     const user = [
       `CREATIVE BRIEF — write ad copy specific to this business:`,
