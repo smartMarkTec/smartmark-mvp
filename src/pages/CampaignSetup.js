@@ -4967,23 +4967,29 @@ useEffect(() => {
             if (!creativesRes.ok || cancelled) return;
 
             const creativeData = await creativesRes.json().catch(() => ({}));
-            const imgs = (Array.isArray(creativeData?.images) ? creativeData.images : [])
-              .map(toAbsoluteMedia)
-              .filter(Boolean)
-              .slice(0, 2);
+            // If server returned launchedCreativeSet, use all N images (no 2-cap).
+            const serverSet = Array.isArray(creativeData?.launchedCreativeSet) && creativeData.launchedCreativeSet.length > 0
+              ? creativeData.launchedCreativeSet
+              : null;
+
+            const imgs = serverSet
+              ? serverSet.map((c) => toAbsoluteMedia(c.imageUrl)).filter(Boolean)
+              : (Array.isArray(creativeData?.images) ? creativeData.images : [])
+                  .map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
 
             const nextMeta = {
-              headline: String(creativeData?.meta?.headline || "").trim(),
-              body: String(creativeData?.meta?.body || "").trim(),
-              link: String(creativeData?.meta?.link || "").trim(),
+              headline: String(serverSet?.[0]?.headline || creativeData?.meta?.headline || "").trim(),
+              body:     String(serverSet?.[0]?.body     || creativeData?.meta?.body     || "").trim(),
+              link:     String(serverSet?.[0]?.link     || creativeData?.meta?.link     || "").trim(),
             };
 
             setCampaignCreativesMap((prev) => ({
               ...prev,
               [campaignId]: {
-                images: imgs,
-                mediaSelection: "image",
-                meta: nextMeta,
+                images:              imgs,
+                launchedCreativeSet: serverSet || prev[campaignId]?.launchedCreativeSet || null,
+                mediaSelection:      "image",
+                meta:                nextMeta,
               },
             }));
 
@@ -4992,14 +4998,13 @@ useEffect(() => {
 
             existingMap[campaignId] = {
               ...prevSaved,
-              images: imgs,
-              mediaSelection: "image",
-              time: Date.now(),
-              expiresAt:
-                prevSaved?.expiresAt ||
-                Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
-              name: prevSaved?.name || c?.name || "Untitled",
-              meta: nextMeta,
+              images:              imgs,
+              launchedCreativeSet: serverSet || prevSaved?.launchedCreativeSet || null,
+              mediaSelection:      "image",
+              time:                Date.now(),
+              expiresAt:           prevSaved?.expiresAt || Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
+              name:                prevSaved?.name || c?.name || "Untitled",
+              meta:                nextMeta,
             };
 
             writeCreativeMap(resolvedUser, acctId, existingMap);
@@ -5559,6 +5564,111 @@ async function adminCampaignControlFetch(adminClientId, campaignId, action, acco
     body: JSON.stringify({ accountId }),
   });
 }
+
+// Edit Creative: edit copy/image for a single launched ad, then create replacement on Meta.
+const [editCreativeIdx, setEditCreativeIdx] = React.useState(null);  // index in launchedCreativeSet
+const [editCreativeForm, setEditCreativeForm] = React.useState({ headline: "", body: "", cta: "", imageUrl: "", imageDataUrl: null });
+const [editCreativeSaving, setEditCreativeSaving] = React.useState(false);
+const editCreativeFileRef = React.useRef(null);
+
+const openEditCreative = (c, idx) => {
+  setEditCreativeIdx(idx);
+  setEditCreativeForm({ headline: c.headline || "", body: c.body || "", cta: c.cta || "", imageUrl: c.imageUrl || "", imageDataUrl: null });
+};
+
+const handleEditCreativeImageFile = (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    setEditCreativeForm((p) => ({ ...p, imageDataUrl: ev.target?.result || null }));
+  };
+  reader.readAsDataURL(file);
+  e.target.value = "";
+};
+
+const submitEditCreative = async () => {
+  if (editCreativeIdx === null) return;
+  const launchedSet = selectedCampaignCreatives?.launchedCreativeSet;
+  if (!launchedSet?.[editCreativeIdx]) return;
+  const c = launchedSet[editCreativeIdx];
+  if (!c.metaAdId) { alert("No Meta Ad ID found for this creative."); return; }
+
+  const acctId = String(selectedAccount || "").trim();
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const link = editCreativeForm.imageUrl || c.link || previewCopy?.link || inferredLink || "";
+  setEditCreativeSaving(true);
+  try {
+    const r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${c.metaAdId}/replace`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+      body: JSON.stringify({
+        headline:      editCreativeForm.headline,
+        body:          editCreativeForm.body,
+        cta:           editCreativeForm.cta || "LEARN_MORE",
+        imageUrl:      editCreativeForm.imageUrl || c.imageUrl,
+        imageDataUrl:  editCreativeForm.imageDataUrl || null,
+        destinationUrl: link,
+        adName:        c.angleLabel || `Ad ${editCreativeIdx + 1}`,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(`Edit creative failed: ${j.error || "unknown error"}`); return; }
+
+    // Update local campaignCreativesMap with new metaAdId + updated copy
+    const newEntry = {
+      ...c,
+      metaAdId:       j.newAdId,
+      metaCreativeId: j.newCreativeId,
+      headline:       editCreativeForm.headline,
+      body:           editCreativeForm.body,
+      cta:            editCreativeForm.cta,
+      imageUrl:       editCreativeForm.imageDataUrl ? c.imageUrl : (editCreativeForm.imageUrl || c.imageUrl),
+      status:         "active",
+      replacedMetaAdId: c.metaAdId,
+    };
+    setCampaignCreativesMap((prev) => {
+      const rec = prev[selectedCampaignId] || {};
+      const updated = (rec.launchedCreativeSet || []).map((cr, i) => i === editCreativeIdx ? newEntry : cr);
+      return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updated } };
+    });
+    setEditCreativeIdx(null);
+  } catch (e) {
+    alert(`Edit creative failed: ${e?.message}`);
+  } finally {
+    setEditCreativeSaving(false);
+  }
+};
+
+// Pause, resume, or delete a SINGLE Meta ad by its adId (not the whole campaign).
+const handlePerAdAction = async (metaAdId, action) => {
+  if (!metaAdId) return;
+  if (action === "delete" && !window.confirm("Delete this ad on Meta? This cannot be undone.")) return;
+  const acctId = String(selectedAccount || "").trim();
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  try {
+    const r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(`Ad ${action} failed: ${j.error || "unknown error"}`); return; }
+    // Update React state so Creatives tab reflects new per-ad status immediately
+    const newStatus = action === "delete" ? "deleted" : action === "pause" ? "paused" : "active";
+    setCampaignCreativesMap((prev) => {
+      const rec = prev[selectedCampaignId] || {};
+      return {
+        ...prev,
+        [selectedCampaignId]: {
+          ...rec,
+          launchedCreativeSet: (rec.launchedCreativeSet || []).map((c) =>
+            c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
+          ),
+        },
+      };
+    });
+  } catch (e) { alert(`Ad ${action} failed: ${e?.message}`); }
+};
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
   if (!campaignId || !selectedAccount || campaignId === "__DRAFT__") return;
@@ -8544,11 +8654,65 @@ ${pendingTest ? `
                                   <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>{c.body || ""}</div>
                                   <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>CTA: {c.cta || "Learn more"}</div>
                                   {c.metaAdId && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>Meta Ad: {c.metaAdId}</div>}
+                                  {c.metaAdId && c.status !== "deleted" && (
+                                    <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+                                      {c.status === "paused"
+                                        ? <button onClick={() => handlePerAdAction(c.metaAdId, "resume")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", cursor: "pointer", fontWeight: 700 }}>Resume Ad</button>
+                                        : <button onClick={() => handlePerAdAction(c.metaAdId, "pause")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 700 }}>Pause Ad</button>
+                                      }
+                                      <button onClick={() => handlePerAdAction(c.metaAdId, "delete")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>Delete Ad</button>
+                                      <button onClick={() => openEditCreative(c, idx)} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4f46e5", cursor: "pointer", fontWeight: 700 }}>Edit Creative</button>
+                                    </div>
+                                  )}
+                                  {/* Inline edit form for this creative */}
+                                  {editCreativeIdx === idx && (
+                                    <div style={{ marginTop: 10, padding: "12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                                      <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 2 }}>Edit Creative</div>
+                                      {[["headline","Headline"],["body","Body Copy"],["cta","CTA (e.g. LEARN_MORE)"]].map(([k, label]) => (
+                                        <div key={k}>
+                                          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 2 }}>{label}</div>
+                                          <textarea value={editCreativeForm[k]} rows={k === "body" ? 3 : 1}
+                                            onChange={(e) => setEditCreativeForm((p) => ({ ...p, [k]: e.target.value }))}
+                                            style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12, resize: "vertical", fontFamily: "inherit" }} />
+                                        </div>
+                                      ))}
+                                      <div>
+                                        <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Image</div>
+                                        {editCreativeForm.imageDataUrl
+                                          ? <div style={{ fontSize: 10, color: "#15803d" }}>New image selected ✓</div>
+                                          : <div style={{ fontSize: 10, color: "#94a3b8" }}>Current: {editCreativeForm.imageUrl ? "using existing" : "none"}</div>
+                                        }
+                                        <button onClick={() => editCreativeFileRef.current?.click()} style={{ marginTop: 4, fontSize: 10, padding: "4px 10px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                                          Upload New Image
+                                        </button>
+                                        <input ref={editCreativeFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleEditCreativeImageFile} />
+                                      </div>
+                                      <div style={{ display: "flex", gap: 6 }}>
+                                        <button onClick={submitEditCreative} disabled={editCreativeSaving}
+                                          style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "#4f46e5", color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
+                                          {editCreativeSaving ? "Saving…" : "Save & Replace Ad"}
+                                        </button>
+                                        <button onClick={() => setEditCreativeIdx(null)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>
+                                          Cancel
+                                        </button>
+                                      </div>
+                                      <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.4 }}>
+                                        This creates a new ad and pauses the old one. The campaign is not interrupted.
+                                      </div>
+                                    </div>
+                                  )}
                                 </>
                               )}
                               {expandedCreativeCardIdx !== idx && (
-                                <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                                  {(c.body || "").slice(0, 60)}{(c.body || "").length > 60 ? "…" : ""}
+                                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                                  <div style={{ fontSize: 11, color: "#94a3b8", flex: 1 }}>
+                                    {(c.body || "").slice(0, 50)}{(c.body || "").length > 50 ? "…" : ""}
+                                  </div>
+                                  {c.status && c.status !== "active" && (
+                                    <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: c.status === "paused" ? "#fef3c7" : "#fee2e2", color: c.status === "paused" ? "#b45309" : "#b91c1c", fontWeight: 700 }}>
+                                      {c.status}
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -10620,6 +10784,7 @@ ${pendingTest ? `
     }}
     onGoToCreatives={() => setSetupTab("creatives")}
     onGoToCampaign={() => setSetupTab("campaign")}
+    onGoToSettings={() => setSetupTab("account")}
     billingInfo={billingInfo}
     onSetBudget={(b) => {
       const num = parseFloat(String(b).replace(/[^0-9.]/g, ""));
@@ -10711,6 +10876,79 @@ ${pendingTest ? `
           {billingInfo?.email || String(loginUser || "").trim() || "No email found"}
         </div>
       </div>
+
+      {/* ── Business Info / Edit Intake ────────────────────────────────────── */}
+      {(() => {
+        const [bizForm, setBizForm] = React.useState({
+          businessName: "", services: "", offer: "", website: "", phone: "", serviceArea: "", idealCustomer: "",
+        });
+        const [bizSaving, setBizSaving] = React.useState(false);
+        const [bizSaved, setBizSaved]   = React.useState(false);
+
+        React.useEffect(() => {
+          // Pre-fill from saved context
+          const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+          fetch("/api/campaign-context", { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} })
+            .then((r) => r.json().catch(() => ({})))
+            .then((j) => {
+              if (j.ok && j.context) {
+                const c = j.context;
+                setBizForm({
+                  businessName:  c.businessName  || "",
+                  services:      c.industry      || "",
+                  offer:         c.offer         || "",
+                  website:       c.websiteUrl    || "",
+                  phone:         c.phoneNumber   || "",
+                  serviceArea:   c.serviceArea   || "",
+                  idealCustomer: c.idealCustomer || "",
+                });
+              }
+            }).catch(() => {});
+        // eslint-disable-next-line
+        }, []);
+
+        const saveBizInfo = async () => {
+          setBizSaving(true); setBizSaved(false);
+          const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+          await fetch("/api/campaign-context/save", {
+            method: "POST", credentials: "include",
+            headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+            body: JSON.stringify({ answers: {
+              businessName: bizForm.businessName, industry: bizForm.services,
+              offer: bizForm.offer, url: bizForm.website, phone: bizForm.phone,
+              serviceArea: bizForm.serviceArea, idealCustomer: bizForm.idealCustomer,
+            }}),
+          }).catch(() => {});
+          setBizSaving(false); setBizSaved(true);
+          setTimeout(() => setBizSaved(false), 2500);
+        };
+
+        const fld = (key, label, placeholder) => (
+          <div key={key}>
+            <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+            <input value={bizForm[key] || ""} onChange={(e) => setBizForm((p) => ({ ...p, [key]: e.target.value }))}
+              placeholder={placeholder} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 14, fontFamily: "inherit" }} />
+          </div>
+        );
+
+        return (
+          <div style={{ border: "1px solid rgba(93,89,234,0.10)", borderRadius: 14, padding: 18, background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)" }}>
+            <div style={{ color: "#5d59ea", fontWeight: 800, fontSize: 14, marginBottom: 14 }}>Business Info</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {fld("businessName",  "Business Name",   "Aspen Air Conditioning")}
+              {fld("services",      "Services",        "AC repair, service and installation")}
+              {fld("offer",         "Current Offer",   "$75 AC tune-up")}
+              {fld("website",       "Website",         "https://yoursite.com")}
+              {fld("phone",         "Phone",           "+1 (713) 555-0100")}
+              {fld("serviceArea",   "Service Area",    "Houston, TX and surrounding areas")}
+              {fld("idealCustomer", "Ideal Customer",  "Houston homeowners with aging AC units")}
+            </div>
+            <button onClick={saveBizInfo} disabled={bizSaving} style={{ marginTop: 14, padding: "10px 22px", borderRadius: 10, border: "none", background: "#5d59ea", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              {bizSaving ? "Saving…" : bizSaved ? "Saved ✓" : "Save Business Info"}
+            </button>
+          </div>
+        );
+      })()}
 
       <div
         style={{

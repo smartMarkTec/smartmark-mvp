@@ -268,6 +268,7 @@ export default function InlineAdAgent({
   onCreativesGenerated,
   onGoToCreatives,
   onGoToCampaign,
+  onGoToSettings,
   onSetBudget,
   onSetCampaignName,
 }) {
@@ -352,15 +353,30 @@ export default function InlineAdAgent({
     } catch {}
 
     const ci  = clientRef.current;
-    const biz = ci?.premiumIntake?.businessName || ctxRecord?.businessName || ci?.displayName || adminClientId?.split("@")[0] || "there";
+    // For regular users: businessName comes from ctxRecord.businessName (saved via campaign-context).
+    // For admin-client mode: it comes from ci.premiumIntake.businessName.
+    const biz = ci?.premiumIntake?.businessName || ctxRecord?.businessName || ci?.displayName || adminClientId?.split("@")[0] || "";
+    const hasIntake = !!(ctxRecord?.businessName || ctxRecord?.industry || ci?.premiumIntake?.businessName);
     const enriched = {
       ...(ctxRecord || {}),
-      _biz:     biz,
-      _offer:   ci?.premiumIntake?.currentSpecialOrOffer || ctxRecord?.offer    || "",
-      _service: ci?.premiumIntake?.mainServices          || ctxRecord?.industry  || "",
+      _biz:       biz,
+      _offer:     ci?.premiumIntake?.currentSpecialOrOffer || ctxRecord?.offer    || "",
+      _service:   ci?.premiumIntake?.mainServices          || ctxRecord?.industry  || "",
+      _hasIntake: hasIntake,
       _restoredCreatives: null,  // filled below after draft restore
     };
     setCtx(enriched);
+
+    // If no intake/business info exists for regular users, prompt them to add it
+    if (!hasIntake && !adminClientId) {
+      setMsgs([{ _k: 1, role: "assistant", type: "chips",
+        content: "To create a campaign, I need your business info first. Add it in **Account → Business Info**.",
+        chips: [{ label: "Go to Settings", action: "go-settings" }],
+      }]);
+      setPhase("done");
+      scroll();
+      return;
+    }
 
     // 2) Restore saved draft SILENTLY — copy/images must persist across refreshes
     let hadDraft = false;
@@ -492,6 +508,7 @@ export default function InlineAdAgent({
   function doAction(action) {
     if (action === "go-creatives")  { onGoToCreatives?.(); return; }
     if (action === "go-campaign")   { onGoToCampaign?.();  return; }
+    if (action === "go-settings")   { onGoToSettings?.();  return; }
     if (action === "confirm")       { if (pendingN) startGeneration(pendingN); return; }
     if (action === "regen")         { askHowMany(); return; }
     if (action === "clear")         { clearDrafts(); return; }
@@ -736,6 +753,7 @@ export default function InlineAdAgent({
     if (it.type === "regen-copy")          { regenCreativeCopy(it.idx); return; }
     if (it.type === "go-creatives")        { push({ role: "assistant", content: "Switching to Creatives!" }); setTimeout(() => onGoToCreatives?.(), 400); return; }
     if (it.type === "go-campaign")         { push({ role: "assistant", content: "Heading to Campaign tab!" }); setTimeout(() => onGoToCampaign?.(), 400); return; }
+    if (/settings|account|business.*info/i.test(txt))  { push({ role: "assistant", content: "Opening Account settings!" }); setTimeout(() => onGoToSettings?.(), 400); return; }
     if (it.type === "metrics") {
       push({ role: "assistant", content: selectedCampaignId && selectedCampaignId !== "__DRAFT__"
         ? "Ask me 'how is my campaign doing?' and I'll check the numbers."

@@ -3999,6 +3999,27 @@ const { data: adsetData } = await axios.post(
     const idx = list.findIndex((c) => c.campaignId === campaignId);
     const nowIso = new Date().toISOString();
 
+    // Build per-creative record from adCopySet + creativeResults so regular users
+    // and admin users both get all N launched ads from the server — no localStorage dependency.
+    const serverLaunchedCreativeSet = isMultiCreativeSet && Array.isArray(adCopySet) && adCopySet.length > 0
+      ? adCopySet.map((c, i) => {
+          const cr = creativeResults[i] || {};
+          return {
+            id:             c.localCreativeId || `launched-${i}`,
+            angle:          c.angle      || cr.angle      || null,
+            angleLabel:     c.angleLabel || cr.angleLabel || `Ad ${i + 1}`,
+            headline:       String(c.headline || '').trim(),
+            body:           String(c.body     || '').trim(),
+            cta:            String(c.cta      || '').trim(),
+            imageUrl:       String(c.imageUrl || '').trim(),
+            link:           String(c.imageUrl ? (form.websiteUrl || form.url || '') : '').trim(),
+            metaAdId:       cr.metaAdId       || null,
+            metaCreativeId: cr.metaCreativeId || null,
+            status:         'active',
+          };
+        })
+      : null;
+
     const record = {
       ownerKey,
       campaignId,
@@ -4011,9 +4032,13 @@ const { data: adsetData } = await axios.post(
       currentStatus: campaignStatus,
       mediaSelection: isVideoLaunch ? 'video' : 'image',
       mediaType: isVideoLaunch ? 'video' : 'image',
-      images: usedImages,
+      images: serverLaunchedCreativeSet
+        ? serverLaunchedCreativeSet.map((c) => c.imageUrl).filter(Boolean)
+        : usedImages,
       videos: usedVideos,
       fbVideoIds: usedFbVideoIds,
+      // All N per-ad creatives — authoritative source for Creatives tab display.
+      launchedCreativeSet: serverLaunchedCreativeSet || null,
       // launchComplete=true is proof that campaign, adset, and all ads were fully created.
       // This write only happens AFTER every Meta object succeeds — it is the success marker.
       launchComplete: true,
@@ -7014,6 +7039,8 @@ if (!finalImages.length) {
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,
+      // Per-ad creative details saved at launch — authoritative for Creatives tab display.
+      launchedCreativeSet: nextRecord.launchedCreativeSet || null,
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
       source: 'facebook_cached_locally',
@@ -7608,6 +7635,216 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
+  }
+});
+
+// ── Per-ad controls — pause / resume / delete a specific Meta ad ─────────────
+// These act on a SINGLE ad (by metaAdId), not the whole campaign.
+// adId must be passed in the request body or query.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _resolveAdToken(req, accountId) {
+  const resolved = await resolveFacebookTokenFromReq(req, { accountId });
+  const ownerKey  = String(resolved?.ownerKey  || ownerKeyFromReq(req) || '').trim();
+  const userToken = String(resolved?.userToken || '').trim();
+  return { ownerKey, userToken };
+}
+
+router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) => {
+  const { accountId, adId } = req.params;
+  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'PAUSED' }, { params: { access_token: userToken } });
+    // Update launchedCreativeSet status in DB
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
+    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'paused' } : c); await db.write(); }
+    return res.json({ ok: true, adId, status: 'paused' });
+  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to pause ad' }); }
+});
+
+router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) => {
+  const { accountId, adId } = req.params;
+  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'ACTIVE' }, { params: { access_token: userToken } });
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
+    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'active' } : c); await db.write(); }
+    return res.json({ ok: true, adId, status: 'active' });
+  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to resume ad' }); }
+});
+
+router.post('/facebook/adaccount/:accountId/ad/:adId/delete', async (req, res) => {
+  const { accountId, adId } = req.params;
+  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    // Archive the ad on Meta (cannot permanently delete — archive is the safe equivalent)
+    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'ARCHIVED' }, { params: { access_token: userToken } });
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
+    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'deleted' } : c); await db.write(); }
+    return res.json({ ok: true, adId, status: 'deleted' });
+  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to delete ad' }); }
+});
+
+// ── Replace a single launched ad (edit creative) ─────────────────────────────
+// Safe Meta flow: create new creative → create new ad → pause old ad → update DB.
+// Never mutates an existing ad creative directly (Meta does not allow it).
+router.post('/facebook/adaccount/:accountId/ad/:adId/replace', async (req, res) => {
+  const { accountId, adId } = req.params;
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+
+  const { ownerKey, userToken } = await _resolveAdToken(req, normalizedAccountId);
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+  const {
+    headline   = '',
+    body       = '',
+    cta        = 'LEARN_MORE',
+    imageUrl   = '',
+    imageDataUrl = '',   // base64 data URL for newly uploaded image
+    destinationUrl = '',
+    adName     = 'Replacement Ad',
+  } = req.body || {};
+
+  try {
+    // 1) Fetch the old ad to get its adset_id and page_id
+    const oldAdRes = await axios.get(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { params: { access_token: userToken, fields: 'id,name,adset_id,creative{id,object_story_spec}' } }
+    );
+    const oldAd = oldAdRes.data || {};
+    const adSetId = String(oldAd.adset_id || '').trim();
+    if (!adSetId) return res.status(400).json({ error: 'Could not read adset_id from old ad.' });
+
+    // Page id from old creative or DB fallback
+    const pageId =
+      oldAd.creative?.object_story_spec?.page_id ||
+      (await (async () => {
+        await db.read();
+        const rec = (db.data.campaign_creatives || []).find(
+          (r) => r.ownerKey === ownerKey && Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+        );
+        return rec?.pageId || null;
+      })());
+    if (!pageId) return res.status(400).json({ error: 'Could not resolve page_id for replacement ad.' });
+
+    // 2) Upload image to Meta
+    let imageHash = null;
+    const rawBase64 = imageDataUrl
+      ? (imageDataUrl.replace(/^data:image\/[^;]+;base64,/, ''))
+      : null;
+
+    if (rawBase64) {
+      const imgRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adimages`,
+        new URLSearchParams({ bytes: rawBase64 }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
+      );
+      const imgData = imgRes.data?.images || {};
+      imageHash = Object.values(imgData)[0]?.hash || null;
+    } else if (imageUrl) {
+      // Fetch existing image URL as base64 and re-upload
+      try {
+        const imgFetch = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
+        const b64 = Buffer.from(imgFetch.data).toString('base64');
+        const imgRes = await axios.post(
+          `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adimages`,
+          new URLSearchParams({ bytes: b64 }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
+        );
+        const imgData = imgRes.data?.images || {};
+        imageHash = Object.values(imgData)[0]?.hash || null;
+      } catch (imgErr) {
+        console.warn('[ad/replace] image upload failed, proceeding without image:', imgErr?.message);
+      }
+    }
+
+    if (!imageHash) return res.status(400).json({ error: 'Image upload failed — provide imageUrl or imageDataUrl.' });
+
+    // 3) Create new ad creative
+    const ctaType = String(cta || 'LEARN_MORE').toUpperCase().replace(/ /g, '_');
+    const creativePayload = {
+      name: `${adName} (replacement)`,
+      object_story_spec: {
+        page_id: String(pageId),
+        link_data: {
+          link: destinationUrl || 'https://smartemark.com',
+          message: String(body || '').trim(),
+          name:    String(headline || '').trim(),
+          image_hash: imageHash,
+          call_to_action: { type: ctaType, value: { link: destinationUrl || 'https://smartemark.com' } },
+        },
+      },
+    };
+    const crRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adcreatives`,
+      creativePayload,
+      { params: { access_token: userToken } }
+    );
+    const newCreativeId = crRes.data?.id;
+    if (!newCreativeId) return res.status(500).json({ error: 'Failed to create replacement creative on Meta.' });
+
+    // 4) Create new ad in same ad set
+    const newAdRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/ads`,
+      {
+        name: `${adName} (replacement)`,
+        adset_id: adSetId,
+        creative: { creative_id: newCreativeId },
+        status: 'ACTIVE',
+      },
+      { params: { access_token: userToken } }
+    );
+    const newAdId = newAdRes.data?.id;
+    if (!newAdId) return res.status(500).json({ error: 'Failed to create replacement ad on Meta.' });
+
+    // 5) Pause the old ad
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: 'PAUSED' },
+      { params: { access_token: userToken } }
+    ).catch((e) => console.warn('[ad/replace] old ad pause failed (non-critical):', e?.message));
+
+    // 6) Update DB — patch launchedCreativeSet entry for this adId
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => r.ownerKey === ownerKey && Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId
+          ? {
+              ...c,
+              metaAdId:           newAdId,
+              metaCreativeId:     newCreativeId,
+              headline:           String(headline || c.headline || '').trim(),
+              body:               String(body     || c.body     || '').trim(),
+              cta:                String(cta      || c.cta      || 'Learn more').trim(),
+              imageUrl:           imageUrl || c.imageUrl,
+              status:             'active',
+              replacedMetaAdId:   adId,
+              replacedAt:         new Date().toISOString(),
+            }
+          : c
+      );
+      await db.write();
+    }
+
+    return res.json({
+      ok: true,
+      oldAdId:        adId,
+      newAdId,
+      newCreativeId,
+      adSetId,
+    });
+  } catch (err) {
+    const msg = err?.response?.data?.error?.message || err.message || 'Replacement failed';
+    console.error('[ad/replace] error:', msg);
+    return res.status(500).json({ error: msg });
   }
 });
 
