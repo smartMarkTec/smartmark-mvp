@@ -6298,7 +6298,16 @@ const websiteUrl = (() => {
   if (!raw) {
     // Last-resort: dedicated persistent key written by FormPage before navigation and refreshed
     // before OAuth redirect. No TTL, not purged post-launch — survives all route-state and TTL failures.
-    try { raw = String(localStorage.getItem("sm_last_website_url_v1") || "").trim(); } catch {}
+    // In admin-client mode prefer the client-namespaced key so one client's URL never bleeds
+    // into another client's launch (root cause of "uses Joe's old URL" bug).
+    try {
+      if (adminClientId) {
+        raw = String(localStorage.getItem(`u:adminClient:${adminClientId}:sm_last_website_url_v1`) || "").trim();
+      }
+      if (!raw) {
+        raw = String(localStorage.getItem("sm_last_website_url_v1") || "").trim();
+      }
+    } catch {}
   }
 
   if (!raw) return "";

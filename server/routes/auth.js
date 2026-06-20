@@ -3598,7 +3598,8 @@ if (!VALIDATE_ONLY) {
     slotOccupyingCampaignIds: activeCampaigns.map((c) => c.id),
   });
 
-  if (activeCount >= launchPlanLimits.maxCampaignsPerMonth) {
+  const DISABLE_DAILY_LIMITS = String(process.env.DISABLE_DAILY_LIMITS || '').trim() === 'true';
+  if (!DISABLE_DAILY_LIMITS && activeCount >= launchPlanLimits.maxCampaignsPerMonth) {
     console.log('[LAUNCH][limit-campaign]', {
       ownerKey,
       planKey: launchPlanLimits.planKey,

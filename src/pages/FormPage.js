@@ -3987,8 +3987,15 @@ async function generatePosterBPair(runToken) {
 
             // Persist the website URL to a dedicated, TTL-free, non-purged key so CampaignSetup
             // can always find it — even after OAuth redirect, page reload, or post-launch draft purge.
-            // Always writes (empty string for no-website users) to overwrite any stale prior URL.
-            try { localStorage.setItem("sm_last_website_url_v1", String(answers?.url || "").trim()); } catch {}
+            // Always writes (overwriting stale prior URL). In admin-client mode also writes to the
+            // client-namespaced key so switching clients never bleeds one client's URL into another.
+            try {
+              const _urlToSave = String(answers?.url || "").trim();
+              localStorage.setItem("sm_last_website_url_v1", _urlToSave);
+              if (adminClientId) {
+                localStorage.setItem(`u:adminClient:${adminClientId}:sm_last_website_url_v1`, _urlToSave);
+              }
+            } catch {}
 
             try {
               localStorage.setItem("smartmark_media_selection", "image");
