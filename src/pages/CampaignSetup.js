@@ -8472,7 +8472,11 @@ ${pendingTest ? `
                   </div>
                 </div>
 
-                {creativeIsVideo && creativeVideoUrl ? (
+                {/* When AI Agent generated a multi-creative set in draft view,
+                    hide the old single-image preview to avoid showing duplicate content.
+                    The multi-card section above already shows all creatives clearly. */}
+                {isDraftView && draftCreatives.creativeSet && draftCreatives.creativeSet.length > 1 ? null :
+                creativeIsVideo && creativeVideoUrl ? (
                   <div
                     style={{
                       border: "1px solid rgba(93,89,234,0.12)",
@@ -8624,7 +8628,7 @@ ${pendingTest ? `
                   >
                     No creatives available yet.
                   </div>
-                )}
+                ) /* closes the isDraftView multi-creative guard */}
 
                 {copyEditMode && !isDraftView && (
                   <div
