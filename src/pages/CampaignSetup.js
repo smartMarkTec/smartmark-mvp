@@ -8358,6 +8358,12 @@ ${pendingTest ? `
 
             // Do NOT cap to 2 — AI Agent may generate 3+ creatives, all must display.
             const images = (selectedCampaignCreatives?.images || []);
+            const _launchedCount = selectedCampaignCreatives?.launchedCreativeSet?.length ?? 0;
+            const _draftSetCount = (isDraftView && draftCreatives?.creativeSet?.length) || 0;
+            console.debug("[CREATIVES_RENDER_MODE]", {
+              mode: _launchedCount > 0 ? "launchedCreativeSet" : _draftSetCount > 1 ? "draftCreativeSet" : "legacy",
+              count: _launchedCount || _draftSetCount || images.length,
+            });
             console.debug("[CREATIVES_TAB_DRAFT]", isDraftView ? {
               creativeSetLength: draftCreatives?.creativeSet?.length || 0,
               imagesLength: images.length,
@@ -8797,10 +8803,12 @@ ${pendingTest ? `
                   </div>
                 </div>
 
-                {/* When AI Agent generated a multi-creative set in draft view,
-                    hide the old single-image preview to avoid showing duplicate content.
-                    The multi-card section above already shows all creatives clearly. */}
-                {isDraftView && draftCreatives.creativeSet && draftCreatives.creativeSet.length > 1 ? null :
+                {/* Hide old single-image grid when the campaign already has a launchedCreativeSet
+                    (new per-ad cards rendered above) or is a draft with a multi-creative set.
+                    The legacy grid only shows for campaigns with no launchedCreativeSet at all.
+                    [CREATIVES_RENDER_MODE] is logged in the debug block above. */}
+                {(isDraftView && draftCreatives.creativeSet && draftCreatives.creativeSet.length > 1) ||
+                 (selectedCampaignCreatives?.launchedCreativeSet?.length > 0) ? null :
                 creativeIsVideo && creativeVideoUrl ? (
                   <div
                     style={{

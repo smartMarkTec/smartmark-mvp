@@ -330,7 +330,10 @@ export default function InlineAdAgent({
   /* ─── Initial load ───────────────────────────────────────────────────── */
   useEffect(() => {
     if (loaded.current) return;
-    if (!adminClientId && !adminClientInfo) return;
+    // Admin-client mode: wait until adminClientInfo has loaded before proceeding
+    // (it's fetched async from /api/admin/clients/:id in CampaignSetup).
+    // Regular user (no adminClientId): adminClientInfo is always null — do NOT gate on it.
+    if (adminClientId && !adminClientInfo) return;
     loaded.current = true;
     initialLoad();
   // eslint-disable-next-line
@@ -340,118 +343,122 @@ export default function InlineAdAgent({
     setPhase("loading");
     const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
     const hdr = sid ? { "x-sm-sid": sid } : {};
+    let resolvedPhase = "welcome"; // always set a phase in finally
 
-    // 1) Load intake context
-    let ctxRecord = null;
     try {
-      const url = adminClientId
-        ? `/api/campaign-context?adminClientId=${encodeURIComponent(adminClientId)}`
-        : "/api/campaign-context";
-      const r = await fetch(url, { credentials: "include", headers: hdr });
-      const j = await r.json().catch(() => ({}));
-      if (j.ok) ctxRecord = j.context;
-    } catch {}
+      // 1) Load intake context
+      let ctxRecord = null;
+      try {
+        const url = adminClientId
+          ? `/api/campaign-context?adminClientId=${encodeURIComponent(adminClientId)}`
+          : "/api/campaign-context";
+        const r = await fetch(url, { credentials: "include", headers: hdr });
+        const j = await r.json().catch(() => ({}));
+        if (j.ok) ctxRecord = j.context;
+      } catch {}
 
-    const ci  = clientRef.current;
-    // For regular users: businessName comes from ctxRecord.businessName (saved via campaign-context).
-    // For admin-client mode: it comes from ci.premiumIntake.businessName.
-    const biz = ci?.premiumIntake?.businessName || ctxRecord?.businessName || ci?.displayName || adminClientId?.split("@")[0] || "";
-    const hasIntake = !!(ctxRecord?.businessName || ctxRecord?.industry || ci?.premiumIntake?.businessName);
-    const enriched = {
-      ...(ctxRecord || {}),
-      _biz:       biz,
-      _offer:     ci?.premiumIntake?.currentSpecialOrOffer || ctxRecord?.offer    || "",
-      _service:   ci?.premiumIntake?.mainServices          || ctxRecord?.industry  || "",
-      _hasIntake: hasIntake,
-      _restoredCreatives: null,  // filled below after draft restore
-    };
-    setCtx(enriched);
+      const ci  = clientRef.current;
+      const biz = ci?.premiumIntake?.businessName || ctxRecord?.businessName || ci?.displayName || adminClientId?.split("@")[0] || "";
+      const hasIntake = !!(ctxRecord?.businessName || ctxRecord?.industry || ci?.premiumIntake?.businessName);
 
-    // If no intake/business info exists for regular users, prompt them to add it
-    if (!hasIntake && !adminClientId) {
-      setMsgs([{ _k: 1, role: "assistant", type: "chips",
-        content: "To create a campaign, I need your business info first. Add it in **Account → Business Info**.",
-        chips: [{ label: "Go to Settings", action: "go-settings" }],
-      }]);
-      setPhase("done");
-      scroll();
-      return;
-    }
+      console.debug("[AI_AGENT_CONTEXT_LOADED]", {
+        hasContext: !!ctxRecord, hasIntake, isAdminMode: !!adminClientId, biz,
+        loadingFalse: "will be set in finally",
+      });
 
-    // 2) Restore saved draft SILENTLY — copy/images must persist across refreshes
-    let hadDraft = false;
-    try {
-      const url = adminClientId
-        ? `/api/campaign-context/creative-draft?adminClientId=${encodeURIComponent(adminClientId)}`
-        : "/api/campaign-context/creative-draft";
-      const r = await fetch(url, { credentials: "include", headers: hdr });
-      const j = await r.json().catch(() => ({}));
-      // Only restore if creativeSet has real content (headline or imageUrl on at least one creative)
-      const savedSet = j.creativeDraft?.creativeSet;
-      const hasRealContent = Array.isArray(savedSet) && savedSet.length > 0 &&
-        savedSet.some((c) => String(c?.headline || "").trim() || String(c?.imageUrl || "").trim());
-      if (j.ok && hasRealContent) {
-        const saved = j.creativeDraft;
-        setCreatives(saved.creativeSet);
-        onCreativesGenerated?.({ images: saved.images || [], creativeSet: saved.creativeSet, creativeTestCount: saved.creativeSet.length });
-        if (saved.campaignName) onSetCampaignName?.(saved.campaignName);
-        if (saved.budget)       onSetBudget?.(saved.budget);
-        enriched._restoredCreatives = saved.creativeSet;  // for re-injecting into chat
-        hadDraft = true;
+      const enriched = {
+        ...(ctxRecord || {}),
+        _biz:       biz,
+        _offer:     ci?.premiumIntake?.currentSpecialOrOffer || ctxRecord?.offer    || "",
+        _service:   ci?.premiumIntake?.mainServices          || ctxRecord?.industry  || "",
+        _hasIntake: hasIntake,
+        _restoredCreatives: null,
+      };
+      setCtx(enriched);
+
+      // No intake for regular users — prompt to add business info
+      if (!hasIntake && !adminClientId) {
+        setMsgs([{ _k: 1, role: "assistant", type: "chips",
+          content: "To create a campaign, I need your business info first. Add it in **Account → Business Info**.",
+          chips: [{ label: "Go to Settings", action: "go-settings" }],
+        }]);
+        resolvedPhase = "done";
+        scroll();
+        return;
       }
-    } catch {}
 
-    // 3) Restore chat history
-    let hadHistory = false;
-    try {
-      const histUrl = adminClientId
-        ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(adminClientId)}`
-        : "/api/ad-agent/history";
-      const r = await fetch(histUrl, { credentials: "include", headers: hdr });
-      const j = await r.json().catch(() => ({}));
-      if (j.ok && Array.isArray(j.history) && j.history.length > 0) {
-        setMsgs(j.history.map((m) => ({ ...m, _k: Math.random() })));
-        hadHistory = true;
-      }
-    } catch {}
+      // 2) Restore saved draft SILENTLY
+      let hadDraft = false;
+      try {
+        const url = adminClientId
+          ? `/api/campaign-context/creative-draft?adminClientId=${encodeURIComponent(adminClientId)}`
+          : "/api/campaign-context/creative-draft";
+        const r = await fetch(url, { credentials: "include", headers: hdr });
+        const j = await r.json().catch(() => ({}));
+        const savedSet = j.creativeDraft?.creativeSet;
+        const hasRealContent = Array.isArray(savedSet) && savedSet.length > 0 &&
+          savedSet.some((c) => String(c?.headline || "").trim() || String(c?.imageUrl || "").trim());
+        if (j.ok && hasRealContent) {
+          const saved = j.creativeDraft;
+          setCreatives(saved.creativeSet);
+          onCreativesGenerated?.({ images: saved.images || [], creativeSet: saved.creativeSet, creativeTestCount: saved.creativeSet.length });
+          if (saved.campaignName) onSetCampaignName?.(saved.campaignName);
+          if (saved.budget)       onSetBudget?.(saved.budget);
+          enriched._restoredCreatives = saved.creativeSet;
+          hadDraft = true;
+        }
+      } catch {}
 
-    if (!hadHistory && !hadDraft) {
-      setPhase("welcome");
-    } else if (!hadHistory && hadDraft) {
-      // Draft exists but no chat history — show creatives silently + action chips
-      // The creative cards re-appear so copy/images are visible immediately
-      const restoredSet = enriched._restoredCreatives;
-      if (restoredSet?.length) {
-        push({ role: "assistant", type: "creatives",
-          content: `Your **${restoredSet.length} saved creatives** are ready:`,
-          creatives: restoredSet });
-      }
-      push({ role: "assistant", type: "chips",
-        content: "What would you like to do?",
-        chips: [
+      // 3) Restore chat history
+      let hadHistory = false;
+      try {
+        const histUrl = adminClientId
+          ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(adminClientId)}`
+          : "/api/ad-agent/history";
+        const r = await fetch(histUrl, { credentials: "include", headers: hdr });
+        const j = await r.json().catch(() => ({}));
+        if (j.ok && Array.isArray(j.history) && j.history.length > 0) {
+          setMsgs(j.history.map((m) => ({ ...m, _k: Math.random() })));
+          hadHistory = true;
+        }
+      } catch {}
+
+      if (!hadHistory && !hadDraft) {
+        resolvedPhase = "welcome";
+      } else if (!hadHistory && hadDraft) {
+        const restoredSet = enriched._restoredCreatives;
+        if (restoredSet?.length) {
+          push({ role: "assistant", type: "creatives",
+            content: `Your **${restoredSet.length} saved creatives** are ready:`, creatives: restoredSet });
+        }
+        push({ role: "assistant", type: "chips", content: "What would you like to do?", chips: [
           { label: "View Creatives", action: "go-creatives" },
           { label: "Campaign & Launch →", action: "go-campaign", primary: true },
           { label: "Generate new set", action: "regen" },
-        ],
-      });
-      setPhase("done");
-    } else if (hadHistory && hadDraft) {
-      // Both history and draft — append creative cards after history if not already there
-      const restoredSet = enriched._restoredCreatives;
-      if (restoredSet?.length) {
-        push({ role: "assistant", type: "creatives",
-          content: `Your **${restoredSet.length} saved creatives** (restored):`,
-          creatives: restoredSet });
-        push({ role: "assistant", type: "chips", content: null, chips: [
-          { label: "View Creatives", action: "go-creatives" },
-          { label: "Campaign & Launch →", action: "go-campaign", primary: true },
         ]});
+        resolvedPhase = "done";
+      } else if (hadHistory && hadDraft) {
+        const restoredSet = enriched._restoredCreatives;
+        if (restoredSet?.length) {
+          push({ role: "assistant", type: "creatives",
+            content: `Your **${restoredSet.length} saved creatives** (restored):`, creatives: restoredSet });
+          push({ role: "assistant", type: "chips", content: null, chips: [
+            { label: "View Creatives", action: "go-creatives" },
+            { label: "Campaign & Launch →", action: "go-campaign", primary: true },
+          ]});
+        }
+        resolvedPhase = "done";
+      } else {
+        resolvedPhase = "done";
       }
-      setPhase("done");
-    } else {
-      setPhase("done");
+    } catch (err) {
+      console.warn("[AI_AGENT_CONTEXT_LOADED] initialLoad error:", err?.message);
+      resolvedPhase = "welcome"; // fallback — never stay stuck on loading
+    } finally {
+      console.debug("[AI_AGENT_CONTEXT_LOADED]", { loadingFalse: true, resolvedPhase });
+      setPhase(resolvedPhase);
+      scroll();
     }
-    scroll();
   }
 
   /* ─── Status rotation ────────────────────────────────────────────────── */
