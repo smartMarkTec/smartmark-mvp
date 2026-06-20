@@ -185,6 +185,22 @@ router.post('/campaign-context/save', async (req, res) => {
 
     const now = new Date().toISOString();
 
+    // Detect whether the website URL has changed so we can issue a new intakeVersion
+    const existingRecord = db.data.campaign_contexts.find(
+      (c) =>
+        String(c.ownerKey || '') === ownerKey &&
+        (ctxKey ? String(c.ctxKey || '') === String(ctxKey || '').trim() : true)
+    );
+    const prevWebsiteUrl = String(existingRecord?.websiteUrl || '').trim().toLowerCase();
+    const newWebsiteUrl  = String(answers.url || '').trim().toLowerCase();
+    const urlChanged = !!newWebsiteUrl && prevWebsiteUrl !== newWebsiteUrl;
+
+    // intakeVersion bumps whenever the URL (or any core intake field) is updated.
+    // Downstream generation calls can use this to detect stale creative caches.
+    const intakeVersion = (urlChanged || !existingRecord)
+      ? nanoid(8)
+      : (existingRecord?.intakeVersion || nanoid(8));
+
     // Build the structured context record
     const patch = {
       ownerKey,
@@ -192,6 +208,9 @@ router.post('/campaign-context/save', async (req, res) => {
       campaignId:       String(campaignId || '').trim() || null,
       businessName:     String(answers.businessName || '').trim(),
       websiteUrl:       String(answers.url || '').trim(),
+      intakeVersion,
+      intakeUpdatedAt:  now,
+      intakeChanged:    urlChanged,
       phoneNumber:      String(answers.phone || '').trim(),
       industry:         String(answers.industry || '').trim(),
       city:             String(answers.city || '').trim(),

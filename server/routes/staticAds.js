@@ -1027,7 +1027,16 @@ router.post("/generate-static-ad", async (req, res) => {
       craftedHeadlinePreview: String((body.copy || {}).headline || "").trim().slice(0, 60) || "(empty)",
     });
 
-    const website = clean(a.website || a.url || "");
+    // Explicit request body URL must ALWAYS win — never fall back to DB/premiumIntake.
+    // body.answers.url (or body.answers.website) is the single source of truth.
+    const website = clean(a.url || a.website || "");
+    console.log("[STATIC AD URL DEBUG]", {
+      bodyAnswersUrl: body.answers?.url,
+      bodyAnswersWebsite: body.answers?.website,
+      bodyUrl: body.url,
+      bodyWebsite: body.website,
+      computedWebsite: website || "(none)",
+    });
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");
 
     // Detect a user-uploaded photo — if present, use the image-edit path instead of text-to-image.

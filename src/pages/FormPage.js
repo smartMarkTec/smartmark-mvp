@@ -1037,6 +1037,9 @@ export default function FormPage() {
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
   const [editLink, setEditLink] = useState("");
+  // Stable ref that always holds the latest intake URL, readable from any stale closure.
+  // React state closures inside setTimeout / chat handlers can be stale — this ref is not.
+  const intakeUrlRef = useRef("");
 
   // Objective recommendation step
   // "none"       = not started
@@ -1669,6 +1672,7 @@ useEffect(() => {
         setActiveCtx(ctxKey);
 
         setAnswers(hydratedAnswers);
+        intakeUrlRef.current = String(hydratedAnswers.url || "").trim(); // seed ref from context
         setStep(CONVO_QUESTIONS.length); // jump past all intake questions
         setAwaitingReady(false);
         setObjectiveStep(savedObj ? "chosen" : "choosing");
@@ -1709,6 +1713,7 @@ useEffect(() => {
 
   const u = (answers?.url || urlFromBody || "").toString().trim();
   setEditLink(u);
+  intakeUrlRef.current = u; // keep ref in sync whenever effect fires
 }, [currentImageId, result, answers]);
 
 
@@ -2453,10 +2458,9 @@ async function generatePosterBPair(runToken) {
 
   // Get AI-written copy first so it informs both the image prompt and the preview.
   // Use editLink as authoritative URL — prevents premiumIntake stale URL from leaking.
-  const _pairUrl = (editLink || answers?.url || "").trim();
-  const answersForPair = _pairUrl !== (answers?.url || "").trim()
-    ? { ...answers, url: _pairUrl }
-    : (answers || {});
+  // Use intakeUrlRef — stable across stale closures (chat handler, setTimeout chain)
+  const _pairUrl = (intakeUrlRef.current || editLink || answers?.url || "").trim();
+  const answersForPair = { ...(answers || {}), url: _pairUrl };
   const smartCopy = await summarizeAdCopy(answersForPair);
   const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
   const aiBody = smartCopy?.subline || smartCopy?.body || "";
@@ -2788,16 +2792,17 @@ async function generatePosterBPair(runToken) {
     assetsData = null,
     { regenerateToken = "", silent = false } = {}
   ) {
-    // editLink is the user-visible URL field — it MUST override answers.url from stale context.
-    // This is the source of "website=Aspen93.godaddysites.com" in backend logs when
-    // premiumIntake had the old URL and the user edited editLink to the new URL.
-    const _genUrl = (editLink || answers?.url || "").trim();
+    // intakeUrlRef.current breaks the stale-closure problem: even if this function
+    // was captured in a stale React render (e.g. chat onSubmit → setTimeout), the ref
+    // always holds the value the USER last typed, not the old premiumIntake URL.
+    const _genUrl = (intakeUrlRef.current || editLink || answers?.url || "").trim();
     const a = { ...(answers || {}), url: _genUrl };
     console.debug("[FORM GENERATE URL DEBUG]", {
       adminClientId,
       ctxKey: (typeof getActiveCtx === "function" ? getActiveCtx() : ""),
       answersUrl: answers?.url,
       editLink,
+      intakeUrlRefCurrent: intakeUrlRef.current,
       finalUrlSentToGenerateStaticAd: _genUrl,
     });
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
@@ -3839,11 +3844,13 @@ async function generatePosterBPair(runToken) {
     onChange={(e) => {
       const v = e.target.value;
       setEditLink(v);
+      intakeUrlRef.current = v; // update ref immediately so stale closures get the new URL
       setAnswers((prev) => ({ ...(prev || {}), url: v })); // ✅ keeps launch link correct
     }}
     onBlur={() => {
       const v = (editLink || "").trim();
       setEditLink(v);
+      intakeUrlRef.current = v;
       setAnswers((prev) => ({ ...(prev || {}), url: v }));
     }}
     placeholder="https://yourbusiness.com"
