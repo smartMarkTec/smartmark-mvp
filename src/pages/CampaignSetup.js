@@ -8160,6 +8160,9 @@ ${pendingTest ? `
             const aiCurrentHeadline =
               selectedOptimizerState?.currentHeadline ||
               null;
+            // isDraftView must be declared before any reference to it (const TDZ).
+            const isDraftView = selectedCampaignId === "__DRAFT__";
+
             // Do NOT cap to 2 — AI Agent may generate 3+ creatives, all must display.
             const images = (selectedCampaignCreatives?.images || []);
             console.debug("[CREATIVES_TAB_DRAFT]", isDraftView ? {
@@ -8181,8 +8184,6 @@ ${pendingTest ? `
               pendingStatus === "live" ||
               pendingStatus === "ready" ||
               pendingStatus === "staged";
-
-            const isDraftView = selectedCampaignId === "__DRAFT__";
 
             return (
               <>
