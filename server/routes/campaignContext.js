@@ -804,4 +804,41 @@ router.get('/campaign-context/creative-draft', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/campaign-context/creative-draft?adminClientId=...
+// Removes the stored creative draft for the given client so Clear Drafts works.
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete('/campaign-context/creative-draft', async (req, res) => {
+  try {
+    await ensureData();
+    const callerOwnerKey = ownerKeyFromReq(req);
+    if (!callerOwnerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const adminClientId = String(req.query.adminClientId || '').trim();
+    let ownerKey = callerOwnerKey;
+
+    if (adminClientId) {
+      if (!isAdminOwnerKey(callerOwnerKey)) {
+        return res.status(403).json({ ok: false, error: 'Admin access required.' });
+      }
+      const clientUser = resolveClientUser(adminClientId);
+      if (clientUser) ownerKey = `user:${String(clientUser.username || '').trim()}`;
+    }
+
+    const before = db.data.creative_drafts.length;
+    db.data.creative_drafts = (db.data.creative_drafts || []).filter(
+      (d) =>
+        !(String(d.ownerKey || '') === ownerKey &&
+          String(d.adminClientId || '') === String(adminClientId || ''))
+    );
+    const removed = before - db.data.creative_drafts.length;
+
+    await db.write();
+    return res.json({ ok: true, removed });
+  } catch (err) {
+    console.error('[delete-creative-draft]', err?.message);
+    return res.status(500).json({ ok: false, error: 'Failed to delete creative draft.' });
+  }
+});
+
 module.exports = router;

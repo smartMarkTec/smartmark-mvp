@@ -950,6 +950,13 @@ async function _resolveIdentityAndPlan(req) {
     const user = users.find(
       (u) => String(u?.username || "").trim() === username
     );
+
+    // Admin/TheBoss always gets operator-tier limits so they can generate
+    // full creative sets (3–4 images per session) without hitting the visitor cap.
+    const ADMIN_UN = process.env.ADMIN_BYPASS_USERNAME || "TheBoss";
+    const isAdmin  = username === ADMIN_UN || user?.role === "admin";
+    if (isAdmin) return { identity: `user:${username}`, planKey: "operator" };
+
     // Only grant a paying-plan limit if an explicit plan key is recorded.
     // A logged-in user with no billing plan set is non-paying → "visitor" (1/day).
     const rawPlanKey =
