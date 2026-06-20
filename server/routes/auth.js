@@ -6961,6 +6961,27 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   };
 });
 
+// Build set of IDs that have been replaced (their "replacedMetaAdId" field points to them)
+const replacedMetaAdIds = new Set(
+  rebuiltLaunchedCreativeSet.map((c) => c.replacedMetaAdId).filter(Boolean)
+);
+
+// Visible set: exclude deleted, archived, and replaced originals
+const visibleLaunchedCreativeSet = rebuiltLaunchedCreativeSet.filter((c) =>
+  c.status !== 'deleted' &&
+  c.status !== 'archived' &&
+  c.status !== 'DELETED' &&
+  c.status !== 'ARCHIVED' &&
+  !replacedMetaAdIds.has(c.metaAdId)
+);
+
+const hiddenArchivedCount = rebuiltLaunchedCreativeSet.filter((c) =>
+  c.status === 'deleted' || c.status === 'archived' || c.status === 'DELETED' || c.status === 'ARCHIVED'
+).length;
+const hiddenReplacedCount = rebuiltLaunchedCreativeSet.filter((c) =>
+  replacedMetaAdIds.has(c.metaAdId)
+).length;
+
 console.log('[CREATIVES_REBUILD_FROM_META]', {
   campaignId: normalizedCampaignId,
   adCount,
@@ -6969,6 +6990,14 @@ console.log('[CREATIVES_REBUILD_FROM_META]', {
   existingUsableLocalImagesLength: existingUsableLocalImages.length,
   rebuiltFromMeta: needsRebuild,
   finalImagesLength: finalImages.length,
+});
+
+console.log('[CREATIVES_VISIBLE_SET]', {
+  campaignId: normalizedCampaignId,
+  metaAdCount: adCount,
+  visibleCount: visibleLaunchedCreativeSet.length,
+  hiddenReplacedCount,
+  hiddenArchivedCount,
 });
 
 console.log('[creatives] final images selected', {
@@ -7028,6 +7057,7 @@ if (!finalImages.length) {
     // Always persist the rebuilt launchedCreativeSet so future loads have all N creatives.
     const updatedRecord = {
       ...nextRecord,
+      // Store full set (including replaced/archived) for audit trail
       launchedCreativeSet: rebuiltLaunchedCreativeSet.length > 0 ? rebuiltLaunchedCreativeSet : (rec?.launchedCreativeSet || null),
     };
 
@@ -7074,8 +7104,9 @@ if (!finalImages.length) {
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,
-      // Per-ad creative details — rebuilt from live Meta ads or saved at launch.
-      launchedCreativeSet: updatedRecord.launchedCreativeSet || null,
+      // Return only the visible (non-deleted, non-replaced) creatives to the frontend.
+      // The full set (including replaced/archived) is stored in DB for audit purposes.
+      launchedCreativeSet: visibleLaunchedCreativeSet.length > 0 ? visibleLaunchedCreativeSet : (updatedRecord.launchedCreativeSet || null),
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
       source: 'facebook_cached_locally',

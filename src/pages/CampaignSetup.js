@@ -5675,7 +5675,7 @@ const saveBizInfo = async () => {
 // Pause, resume, or delete a SINGLE Meta ad by its adId (not the whole campaign).
 const handlePerAdAction = async (metaAdId, action) => {
   if (!metaAdId) return;
-  if (action === "delete" && !window.confirm("Delete this ad on Meta? This cannot be undone.")) return;
+  if (action === "delete" && !window.confirm("Archive this ad on Meta? It will stop running.")) return;
   const acctId = String(selectedAccount || "").trim();
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
   try {
@@ -5685,20 +5685,33 @@ const handlePerAdAction = async (metaAdId, action) => {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { alert(`Ad ${action} failed: ${j.error || "unknown error"}`); return; }
-    // Update React state so Creatives tab reflects new per-ad status immediately
+
     const newStatus = action === "delete" ? "deleted" : action === "pause" ? "paused" : "active";
+
+    // 1. Update React state immediately (Creatives tab reflects change without reload)
+    let updatedSet = null;
     setCampaignCreativesMap((prev) => {
       const rec = prev[selectedCampaignId] || {};
+      updatedSet = (rec.launchedCreativeSet || []).map((c) =>
+        c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
+      );
       return {
         ...prev,
-        [selectedCampaignId]: {
-          ...rec,
-          launchedCreativeSet: (rec.launchedCreativeSet || []).map((c) =>
-            c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
-          ),
-        },
+        [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet },
       };
     });
+
+    // 2. Update localStorage creative map so status persists on refresh
+    try {
+      const acctKey = acctId.replace(/^act_/, "");
+      const localMap = readCreativeMap(resolvedUser, acctKey);
+      if (localMap[selectedCampaignId]?.launchedCreativeSet) {
+        localMap[selectedCampaignId].launchedCreativeSet = localMap[selectedCampaignId].launchedCreativeSet.map((c) =>
+          c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
+        );
+        writeCreativeMap(resolvedUser, acctKey, localMap);
+      }
+    } catch {}
   } catch (e) { alert(`Ad ${action} failed: ${e?.message}`); }
 };
 
@@ -8654,116 +8667,99 @@ ${pendingTest ? `
                         </div>
                       </div>
                     )}
-                    {/* Launched campaign multi-creative cards — reads from launchedCreativeSet,
-                        NOT from draftCreatives, so Clear Drafts never affects this. */}
-                    {!isDraftView && selectedCampaignCreatives?.launchedCreativeSet?.length > 1 && (
-                      <div style={{ width: "100%", marginTop: 16 }}>
-                        <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
-                          {selectedCampaignCreatives.launchedCreativeSet.length}-Ad Creative Test — Launched
-                        </div>
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          {selectedCampaignCreatives.launchedCreativeSet.map((c, idx) => (
-                            <div
-                              key={c.id || idx}
-                              onClick={() => setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx)}
-                              style={{
-                                flex: "1 1 200px", minWidth: 160, maxWidth: 260,
-                                background: "#fff",
-                                border: expandedCreativeCardIdx === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
-                                borderRadius: 14, padding: "10px 12px", cursor: "pointer",
-                                boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
-                              }}
-                            >
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                                <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
-                                  {c.angleLabel || `Ad ${idx + 1}`}
-                                </span>
-                              </div>
-                              {c.imageUrl && (
-                                <img src={toAbsoluteMedia(c.imageUrl)} alt="creative"
-                                  style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", marginBottom: 6 }}
-                                  onError={(e) => { e.target.style.display = "none"; }} />
-                              )}
-                              <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
-                                {c.headline || "(no headline)"}
-                              </div>
-                              {expandedCreativeCardIdx === idx && (
-                                <>
-                                  <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>{c.body || ""}</div>
-                                  <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>CTA: {c.cta || "Learn more"}</div>
-                                  {c.metaAdId && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>Meta Ad: {c.metaAdId}</div>}
-                                  {c.metaAdId && c.status !== "deleted" && (
-                                    <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
-                                      {c.status === "paused"
-                                        ? <button onClick={() => handlePerAdAction(c.metaAdId, "resume")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", cursor: "pointer", fontWeight: 700 }}>Resume Ad</button>
-                                        : <button onClick={() => handlePerAdAction(c.metaAdId, "pause")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 700 }}>Pause Ad</button>
-                                      }
-                                      <button onClick={() => handlePerAdAction(c.metaAdId, "delete")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>Delete Ad</button>
-                                      <button onClick={() => openEditCreative(c, idx)} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4f46e5", cursor: "pointer", fontWeight: 700 }}>Edit Creative</button>
-                                    </div>
-                                  )}
-                                  {/* Inline edit form for this creative */}
-                                  {editCreativeIdx === idx && (
-                                    <div style={{ marginTop: 10, padding: "12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                                      <div style={{ fontSize: 12, fontWeight: 800, color: "#0f172a", marginBottom: 2 }}>Edit Creative</div>
-                                      {[["headline","Headline"],["body","Body Copy"],["cta","CTA (e.g. LEARN_MORE)"]].map(([k, label]) => (
-                                        <div key={k}>
-                                          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 2 }}>{label}</div>
-                                          <textarea value={editCreativeForm[k]} rows={k === "body" ? 3 : 1}
-                                            onChange={(e) => setEditCreativeForm((p) => ({ ...p, [k]: e.target.value }))}
-                                            style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12, resize: "vertical", fontFamily: "inherit" }} />
-                                        </div>
-                                      ))}
-                                      <div>
-                                        <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Image</div>
-                                        {editCreativeForm.imageDataUrl
-                                          ? <div style={{ fontSize: 10, color: "#15803d" }}>New image selected ✓</div>
-                                          : <div style={{ fontSize: 10, color: "#94a3b8" }}>Current: {editCreativeForm.imageUrl ? "using existing" : "none"}</div>
-                                        }
-                                        <button onClick={() => editCreativeFileRef.current?.click()} style={{ marginTop: 4, fontSize: 10, padding: "4px 10px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontWeight: 600 }}>
-                                          Upload New Image
-                                        </button>
-                                        <input ref={editCreativeFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleEditCreativeImageFile} />
-                                      </div>
-                                      <div style={{ display: "flex", gap: 6 }}>
-                                        <button onClick={submitEditCreative} disabled={editCreativeSaving}
-                                          style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "#4f46e5", color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
-                                          {editCreativeSaving ? "Saving…" : "Save & Replace Ad"}
-                                        </button>
-                                        <button onClick={() => setEditCreativeIdx(null)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>
-                                          Cancel
-                                        </button>
-                                      </div>
-                                      <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.4 }}>
-                                        This creates a new ad and pauses the old one. The campaign is not interrupted.
-                                      </div>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                              {expandedCreativeCardIdx !== idx && (
-                                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                                  <div style={{ fontSize: 11, color: "#94a3b8", flex: 1 }}>
-                                    {(c.body || "").slice(0, 50)}{(c.body || "").length > 50 ? "…" : ""}
-                                  </div>
-                                  {c.status && c.status !== "active" && (
-                                    <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: c.status === "paused" ? "#fef3c7" : "#fee2e2", color: c.status === "paused" ? "#b45309" : "#b91c1c", fontWeight: 700 }}>
-                                      {c.status}
+                    {/* Launched campaign multi-creative cards.
+                        Filters out deleted/archived and replaced ads (only show current visible ads). */}
+                    {!isDraftView && selectedCampaignCreatives?.launchedCreativeSet?.length > 0 && (() => {
+                      // Build set of IDs that have been replaced (are "old" versions)
+                      const replacedIds = new Set(
+                        (selectedCampaignCreatives.launchedCreativeSet || [])
+                          .map((c) => c.replacedMetaAdId)
+                          .filter(Boolean)
+                      );
+                      // Only show: not deleted, not archived, not a replaced-original
+                      const visibleSet = selectedCampaignCreatives.launchedCreativeSet.filter((c) =>
+                        c.status !== "deleted" && c.status !== "archived" && !replacedIds.has(c.metaAdId)
+                      );
+                      if (visibleSet.length === 0) return null;
+                      return (
+                        <div style={{ width: "100%", marginTop: 16 }}>
+                          <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                            {visibleSet.length}-Ad Creative Test — Launched
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            {visibleSet.map((c, idx) => {
+                              const isPaused  = c.status === "paused";
+                              const isDeleted = c.status === "deleted";
+                              const statusColor = isPaused ? "#b45309" : "#15803d";
+                              const statusBg    = isPaused ? "#fef3c7" : "#dcfce7";
+                              const statusLabel = isPaused ? "Paused" : "Active";
+                              return (
+                                <div
+                                  key={c.id || c.metaAdId || idx}
+                                  onClick={() => setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx)}
+                                  style={{
+                                    flex: "1 1 200px", minWidth: 160, maxWidth: 260,
+                                    background: "#fff", cursor: "pointer",
+                                    border: expandedCreativeCardIdx === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
+                                    borderRadius: 14, padding: "10px 12px",
+                                    boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
+                                    opacity: isDeleted ? 0.5 : 1,
+                                  }}
+                                >
+                                  {/* Header row: angle + status badge */}
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                                    <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                      {c.angleLabel || `Ad ${idx + 1}`}
                                     </span>
+                                    <span style={{ background: statusBg, color: statusColor, borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
+                                      {statusLabel}
+                                    </span>
+                                  </div>
+                                  {c.imageUrl && (
+                                    <img src={toAbsoluteMedia(c.imageUrl)} alt="creative"
+                                      style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", marginBottom: 6 }}
+                                      onError={(e) => { e.target.style.display = "none"; }} />
+                                  )}
+                                  <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
+                                    {c.headline || "(no headline)"}
+                                  </div>
+                                  {/* Body preview — always visible */}
+                                  <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                                    {(c.body || "").slice(0, 70)}{(c.body || "").length > 70 ? "…" : ""}
+                                  </div>
+                                  {/* Expanded: full body + CTA + per-ad controls */}
+                                  {expandedCreativeCardIdx === idx && (
+                                    <>
+                                      {(c.body || "").length > 70 && (
+                                        <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>{c.body}</div>
+                                      )}
+                                      <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700, marginBottom: 6 }}>CTA: {c.cta || "Learn more"}</div>
+                                      {/* Per-ad actions: Pause / Resume / Delete only */}
+                                      {c.metaAdId && (
+                                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                                          {isPaused
+                                            ? <button onClick={() => handlePerAdAction(c.metaAdId, "resume")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", cursor: "pointer", fontWeight: 700 }}>▶ Resume</button>
+                                            : <button onClick={() => handlePerAdAction(c.metaAdId, "pause")}  style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 700 }}>⏸ Pause</button>
+                                          }
+                                          <button onClick={() => handlePerAdAction(c.metaAdId, "delete")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>✕ Delete</button>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
+                            1 campaign · 1 ad set · {visibleSet.length} active ads
+                          </div>
+                          <div style={{ marginTop: 10, padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 12, color: "#64748b", fontStyle: "italic" }}>
+                            Ad-level metrics will appear after delivery data is available.
+                          </div>
                         </div>
-                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
-                          1 campaign · 1 ad set · {selectedCampaignCreatives.launchedCreativeSet.length} launched ads
-                        </div>
-                        <div style={{ marginTop: 12, padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 12, color: "#64748b", fontStyle: "italic" }}>
-                          Ad-level metrics will appear after delivery data is available.
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
+                    {/* old map/closing tags removed — new IIFE block above handles all rendering */}
 
                     {!isDraftView && !selectedLiveCampaign?.smArchived && (
                       <button
