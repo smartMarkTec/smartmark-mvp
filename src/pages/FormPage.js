@@ -1773,8 +1773,13 @@ useEffect(() => {
 const rawBody = (editBody || result?.body || fallbackCopy.body || "").toString().trim();
 const displayBody = stripTrailingLearnMore(rawBody);
 
+// editLink is the user-visible/editable field — it must ALWAYS win for display.
+// answers.url is the fallback when editLink is empty (e.g. page just loaded).
+// extractTrailingLearnMoreUrl is last-resort from generated body text.
 const displayLink = normalizeUrlForCopy(
-  (answers?.url || "").toString().trim() || extractTrailingLearnMoreUrl(rawBody)
+  editLink ||
+  (answers?.url || "").toString().trim() ||
+  extractTrailingLearnMoreUrl(rawBody)
 );
 
 
@@ -3886,6 +3891,24 @@ async function generatePosterBPair(runToken) {
               activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
             );
 
+            // Ensure the URL the user SEES in editLink is the one that goes to setup.
+            // editLink is authoritative — it's the user-visible edit field.
+            // This prevents stale premiumIntake URLs from leaking into the launch.
+            const _finalUrl = (editLink || answers?.url || "").trim();
+            const answersForSetup = _finalUrl !== (answers?.url || "").trim()
+              ? { ...answers, url: _finalUrl }
+              : answers;
+
+            console.debug("[FORM URL DEBUG]", {
+              adminClientId,
+              ctxKey: getActiveCtx?.(),
+              answersUrl: answers?.url,
+              editLink,
+              resultLink: result?.link,
+              finalPreviewLink: _finalUrl,
+              setupPath: withAdminClientQuery("/setup", adminClientId),
+            });
+
             const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
             let imgA = (cached.length ? cached : imageUrls.map(abs)).slice(0, 1);
 
@@ -3915,7 +3938,11 @@ async function generatePosterBPair(runToken) {
 
             if (isVideoMode) {
               // ── Video creative path ─────────────────────────────────────────
-              try { localStorage.setItem("sm_last_website_url_v1", String(answers?.url || "").trim()); } catch {}
+              try {
+                const _vUrl = String(_finalUrl || answers?.url || "").trim();
+                localStorage.setItem("sm_last_website_url_v1", _vUrl);
+                if (adminClientId) localStorage.setItem(`u:adminClient:${adminClientId}:sm_last_website_url_v1`, _vUrl);
+              } catch {}
               try {
                 localStorage.setItem("smartmark_media_selection", "video");
                 localStorage.setItem("smartmark_last_video_url", uploadedVideoUrl);
@@ -3950,7 +3977,7 @@ async function generatePosterBPair(runToken) {
                   headline: mergedHeadline,
                   body: mergedBody,
                   imageOverlayCTA: mergedCTA,
-                  answers,
+                  answers: answersForSetup,
                   selectedObjective: selectedObjective || aiRecommendedObjective || null,
                   ...(adminClientId ? {
                     adminClientId,
@@ -4039,7 +4066,7 @@ async function generatePosterBPair(runToken) {
                 credentials: "include",
                 body: JSON.stringify({
                   ctxKey,
-                  answers,
+                  answers: answersForSetup,
                   selectedObjective: selectedObjective || aiRecommendedObjective || null,
                   creativePreference: "ai_image",
                   ...(adminClientId ? { adminClientId } : {}),
@@ -4047,7 +4074,7 @@ async function generatePosterBPair(runToken) {
               }).catch(() => {});
             } catch {}
 
-            console.debug("[Creative Draft Saved]", { ctxKey, adminClientId: adminClientId || null, mediaSelection: "image", imageUrls: imgA });
+            console.debug("[Creative Draft Saved]", { ctxKey, adminClientId: adminClientId || null, mediaSelection: "image", imageUrls: imgA, finalUrl: _finalUrl });
 
             navigate(withAdminClientQuery("/setup", adminClientId), {
               state: {
@@ -4056,7 +4083,7 @@ async function generatePosterBPair(runToken) {
                 headline: mergedHeadline,
                 body: mergedBody,
                 imageOverlayCTA: mergedCTA,
-                answers,
+                answers: answersForSetup,
                 mediaSelection: "image",
                 selectedObjective: selectedObjective || aiRecommendedObjective || null,
                 ...(adminClientId ? {

@@ -3074,6 +3074,13 @@ useEffect(() => {
     window.addEventListener("unhandledrejection", onRej);
 
     smLog("setup.mount", { href: window.location.href, state: location.state || null });
+    console.debug("[SETUP ADMIN DEBUG]", {
+      search: location.search,
+      adminClientId: new URLSearchParams(location.search || "").get("adminClientId") || "",
+      stateAdminClientId: location.state?.adminClientId || "",
+      ctxKey: location.state?.ctxKey || "",
+      answersUrl: location.state?.answers?.url || "",
+    });
     smLog(
       "setup.mount.snapshot",
       smDumpDraftSnapshot({
