@@ -1876,10 +1876,31 @@ const displayLink = normalizeUrlForCopy(
 /* Autosave */
 useEffect(() => {
   const t = setTimeout(() => {
-    // In admin-client mode, never write drafts to localStorage.
-    // Draft keys are scoped to the admin user, not the client, so saving here
-    // would cause cross-client leaks when the admin switches between clients.
-    if (adminClientId) return;
+    // In admin-client mode: save the creative draft to the CLIENT namespace so
+    // navigating back from CampaignSetup restores it. Never touch global/TheBoss keys.
+    if (adminClientId) {
+      if (imageUrls?.length && !isDraftDisabled()) {
+        try {
+          const _clientNs = `adminClient:${adminClientId}`;
+          const _ctxKey = (typeof getActiveCtx === "function" ? getActiveCtx() : "") || "";
+          const _adminDraft = {
+            ctxKey: _ctxKey,
+            adminClientId,
+            images: imageUrls.filter(Boolean).slice(0, 2),
+            headline: (editHeadline || result?.headline || "").slice(0, 55),
+            body: editBody || result?.body || "",
+            imageOverlayCTA: editCTA || "",
+            answers: { ...(answers || {}), url: (editLink || answers?.url || "").trim() },
+            mediaSelection: "image",
+            savedAt: Date.now(),
+            expiresAt: Date.now() + CREATIVE_TTL_MS,
+          };
+          localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_adminDraft));
+          localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_adminDraft));
+        } catch {}
+      }
+      return; // Never write to TheBoss/global keys
+    }
 
     // ✅ If campaign was launched, FormPage must NOT keep writing drafts (this causes ghost previews)
     if (isDraftDisabled()) {
@@ -2431,8 +2452,12 @@ async function generatePosterBPair(runToken) {
   const tA = `${runToken}-A`;
 
   // Get AI-written copy first so it informs both the image prompt and the preview.
-  // Falls back to empty strings on error — handleGenerateStaticAd has its own derive logic.
-  const smartCopy = await summarizeAdCopy(answers || {});
+  // Use editLink as authoritative URL — prevents premiumIntake stale URL from leaking.
+  const _pairUrl = (editLink || answers?.url || "").trim();
+  const answersForPair = _pairUrl !== (answers?.url || "").trim()
+    ? { ...answers, url: _pairUrl }
+    : (answers || {});
+  const smartCopy = await summarizeAdCopy(answersForPair);
   const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
   const aiBody = smartCopy?.subline || smartCopy?.body || "";
   const aiCTA = smartCopy?.cta || answers?.cta || "";
@@ -2763,7 +2788,18 @@ async function generatePosterBPair(runToken) {
     assetsData = null,
     { regenerateToken = "", silent = false } = {}
   ) {
-    const a = answers || {};
+    // editLink is the user-visible URL field — it MUST override answers.url from stale context.
+    // This is the source of "website=Aspen93.godaddysites.com" in backend logs when
+    // premiumIntake had the old URL and the user edited editLink to the new URL.
+    const _genUrl = (editLink || answers?.url || "").trim();
+    const a = { ...(answers || {}), url: _genUrl };
+    console.debug("[FORM GENERATE URL DEBUG]", {
+      adminClientId,
+      ctxKey: (typeof getActiveCtx === "function" ? getActiveCtx() : ""),
+      answersUrl: answers?.url,
+      editLink,
+      finalUrlSentToGenerateStaticAd: _genUrl,
+    });
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
     const fromResult = result || {};
 

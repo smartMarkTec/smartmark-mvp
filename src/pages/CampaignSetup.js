@@ -4793,8 +4793,20 @@ useEffect(() => {
 
       const firstLiveId = String(list?.[0]?.id || "").trim();
 
-      // always prefer a real live campaign after reconnect / relaunch
-      if (firstLiveId) {
+      // If we just came from FormPage with generated images, always show draft first.
+      // location.state.imageUrls signals "fresh from FormPage with creative ready".
+      const _incomingImages = Array.isArray(location.state?.imageUrls) &&
+        location.state.imageUrls.filter(Boolean).length > 0;
+
+      // hasDraftOrIncoming: treat incoming route images the same as restored draft
+      const hasDraftOrIncoming = hasDraft || _incomingImages;
+
+      if (_incomingImages) {
+        // Fresh navigation from FormPage with creative — force draft view immediately.
+        // Do NOT let the first live campaign override the draft the user just created.
+        setSelectedCampaignId("__DRAFT__");
+        setExpandedId("__DRAFT__");
+      } else if (firstLiveId) {
         const currentSelected = String(selectedCampaignId || "").trim();
         const currentExpanded = String(expandedId || "").trim();
 
@@ -4806,7 +4818,7 @@ useEffect(() => {
         );
 
         if (
-          !hasDraft &&
+          !hasDraftOrIncoming &&
           (!currentSelected ||
             currentSelected === "__DRAFT__" ||
             !selectedStillExists)
@@ -4815,7 +4827,7 @@ useEffect(() => {
         }
 
         if (
-          !hasDraft &&
+          !hasDraftOrIncoming &&
           (!currentExpanded ||
             currentExpanded === "__DRAFT__" ||
             !expandedStillExists)
