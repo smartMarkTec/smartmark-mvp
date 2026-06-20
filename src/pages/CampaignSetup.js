@@ -3939,15 +3939,20 @@ useEffect(() => {
       return false;
     }
 
-    if (!isDraftForActiveCtx(draftObj, resolvedUser)) return false;
+    // In admin-client mode, the namespace key (u:adminClient:${adminClientId}:...) already
+    // provides isolation — skip the ctxKey check to avoid timing races between the
+    // ctxKey setup effect and this draft restore effect on CampaignSetup mount.
+    if (!adminClientId && !isDraftForActiveCtx(draftObj, resolvedUser)) return false;
 
     const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
     const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
     if (!norm.length) return false;
 
-    console.debug("[Creative Draft Restored]", {
+    console.debug("[CREATIVE PERSIST RESTORE]", {
+      page: "CampaignSetup",
+      adminClientId: adminClientId || null,
+      draftAdminClientId: draftObj.adminClientId || null,
       ctxKey: draftObj.ctxKey || null,
-      adminClientId: draftObj.adminClientId || null,
       mediaSelection: draftObj.mediaSelection || "image",
       imageUrls: norm,
     });

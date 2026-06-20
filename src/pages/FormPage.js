@@ -1416,12 +1416,65 @@ useEffect(() => {
 
   /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
   useEffect(() => {
-    // In admin-client mode, never restore localStorage/sessionStorage drafts.
-    // Admin context is always loaded fresh from the server for the selected client.
-    // Draft keys are scoped to the admin user (not the client), so Joe's draft
-    // would otherwise bleed into Max's session and vice versa.
+    // In admin-client mode: restore the CLIENT-scoped creative draft, then return.
+    // Never touch TheBoss's keys. Route state (imageUrls from CampaignSetup back-nav) is
+    // checked FIRST so the user never loses the creative they just generated.
     if (adminClientId) {
       draftRestoredRef.current = false;
+      try {
+        // 1. Route state: CampaignSetup sends imageUrls when navigating back
+        const stateImgs = (location.state?.imageUrls || []).filter(Boolean);
+        if (stateImgs.length && !isDraftDisabled()) {
+          setImageUrls(stateImgs.slice(0, 2));
+          setActiveImage(0);
+          setImageUrl(stateImgs[0] || "");
+          setHasGenerated(true);
+          setAwaitingReady(false);
+          draftRestoredRef.current = true;
+          console.debug("[CREATIVE PERSIST RESTORE]", {
+            page: "FormPage", adminClientId, source: "routeState", imageCount: stateImgs.length,
+          });
+          return;
+        }
+        // 2. Admin-client namespaced localStorage draft
+        const clientNs = `adminClient:${adminClientId}`;
+        const rawDraft =
+          localStorage.getItem(`u:${clientNs}:${CREATIVE_DRAFT_KEY}`) ||
+          localStorage.getItem(`u:${clientNs}:sm_setup_creatives_backup_v1`);
+        if (rawDraft) {
+          const draftObj = JSON.parse(rawDraft);
+          const now = Date.now();
+          const expiresAt = Number(draftObj.expiresAt);
+          const ageOk =
+            (Number.isFinite(expiresAt) && now <= expiresAt) ||
+            (!draftObj.savedAt || now - draftObj.savedAt <= CREATIVE_TTL_MS);
+          if (ageOk) {
+            const imgs = Array.isArray(draftObj.images) ? draftObj.images.filter(Boolean) : [];
+            if (imgs.length) {
+              setImageUrls(imgs.slice(0, 2));
+              setActiveImage(0);
+              setImageUrl(imgs[0] || "");
+              setHasGenerated(true);
+              setAwaitingReady(false);
+              if (draftObj.headline || draftObj.body) {
+                setResult((prev) => ({
+                  ...(prev || {}),
+                  headline: draftObj.headline || prev?.headline || "",
+                  body: draftObj.body || prev?.body || "",
+                }));
+              }
+              if (draftObj.answers && typeof draftObj.answers === "object") {
+                setAnswers((prev) => ({ ...prev, ...draftObj.answers }));
+              }
+              draftRestoredRef.current = true;
+              console.debug("[CREATIVE PERSIST RESTORE]", {
+                page: "FormPage", adminClientId, ctxKey: draftObj.ctxKey,
+                source: "namespacedLocalStorage", imageCount: imgs.length,
+              });
+            }
+          }
+        }
+      } catch {}
       return;
     }
     try {
@@ -2523,6 +2576,33 @@ async function generatePosterBPair(runToken) {
   // Cache images as DataURLs so previews survive Render restarts (ephemeral filesystem)
   if (urls.length) {
     cacheImagesFor24h(getActiveCtx(), urls).catch(() => {});
+  }
+
+  // Persist immediately to admin-client namespace — do NOT wait for the 300ms autosave.
+  // This guarantees the creative survives navigation before autosave fires.
+  if (urls.length && adminClientId) {
+    try {
+      const _clientNs = `adminClient:${adminClientId}`;
+      const _ctxKey = getActiveCtx() || "";
+      const _intakeAnswers = buildCurrentIntakeAnswers();
+      const _immediDraft = {
+        ctxKey: _ctxKey,
+        adminClientId,
+        images: urls.filter(Boolean).slice(0, 2),
+        headline: aiHeadline,
+        body: aiBody,
+        imageOverlayCTA: normalizeOverlayCTA(aiCTA),
+        answers: _intakeAnswers,
+        mediaSelection: "image",
+        savedAt: Date.now(),
+        expiresAt: Date.now() + CREATIVE_TTL_MS,
+      };
+      localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_immediDraft));
+      localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_immediDraft));
+      console.debug("[CREATIVE PERSIST SAVE]", {
+        adminClientId, ctxKey: _ctxKey, imageCount: urls.length, selectedImageUrl: urls[0] || null,
+      });
+    } catch {}
   }
 
   // Surface AI copy immediately so displayHeadline / displayBody show it.
