@@ -987,6 +987,23 @@ export default function FormPage() {
       .catch(() => {});
   }, [adminClientId]);
 
+  // When adminClientInfo loads (or changes), seed intakeUrlRef and editLink from
+  // premiumIntake.websiteUrl — this is the authoritative URL for all generation.
+  // Without this, answers.url from the stale campaign_contexts record would win.
+  useEffect(() => {
+    const piUrl = String(adminClientInfo?.premiumIntake?.websiteUrl || "").trim();
+    if (!piUrl) return;
+    intakeUrlRef.current = piUrl;
+    // Only override editLink if it still holds the OLD URL (or is empty)
+    // so we don't clobber a URL the user manually typed.
+    const currentEdit = (editLink || "").trim().toLowerCase();
+    const oldChatUrl = String(answers?.url || "").trim().toLowerCase();
+    if (!currentEdit || currentEdit === oldChatUrl) {
+      setEditLink(piUrl);
+    }
+  // eslint-disable-next-line
+  }, [adminClientInfo?.premiumIntake?.websiteUrl]);
+
   /* In admin mode: when adminClientId changes from one client to another, reset all
      form state immediately so stale context from the previous client never bleeds through.
      Skips the first mount (prev is "") — only fires on a real client switch. */
@@ -2453,14 +2470,32 @@ useEffect(() => {
     }
   }
 
+// ── Single source-of-truth for the current intake URL and business context ──
+// In admin-client mode, premiumIntake is authoritative — old chat conversation
+// answers (answers.url = "Aspen93.godaddysites.com") must never override it.
+// In normal mode, falls back through intakeUrlRef → editLink → answers.url.
+function buildCurrentIntakeAnswers() {
+  const piUrl = String(adminClientInfo?.premiumIntake?.websiteUrl || "").trim();
+  const currentUrl = piUrl || intakeUrlRef.current || editLink || String(answers?.url || "").trim();
+  return {
+    ...(answers || {}),
+    url:         currentUrl,
+    websiteUrl:  currentUrl,
+    businessName: String(adminClientInfo?.premiumIntake?.businessName || answers?.businessName || "").trim(),
+    phone:        String(adminClientInfo?.premiumIntake?.mainPhone || adminClientInfo?.premiumIntake?.bestContactPhone || answers?.phone || "").trim(),
+    industry:     String(adminClientInfo?.premiumIntake?.mainServices || answers?.industry || "").trim(),
+    offer:        String(adminClientInfo?.premiumIntake?.currentSpecialOrOffer || answers?.offer || "").trim(),
+    serviceArea:  String(adminClientInfo?.premiumIntake?.serviceArea || [answers?.city, answers?.state].filter(Boolean).join(", ") || "").trim(),
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function generatePosterBPair(runToken) {
   const tA = `${runToken}-A`;
 
-  // Get AI-written copy first so it informs both the image prompt and the preview.
-  // Use editLink as authoritative URL — prevents premiumIntake stale URL from leaking.
-  // Use intakeUrlRef — stable across stale closures (chat handler, setTimeout chain)
-  const _pairUrl = (intakeUrlRef.current || editLink || answers?.url || "").trim();
-  const answersForPair = { ...(answers || {}), url: _pairUrl };
+  // buildCurrentIntakeAnswers() always uses premiumIntake.websiteUrl in admin-client mode.
+  // intakeUrlRef.current breaks stale-closure problem (setTimeout / chat onSubmit).
+  const answersForPair = buildCurrentIntakeAnswers();
   const smartCopy = await summarizeAdCopy(answersForPair);
   const aiHeadline = (smartCopy?.headline || "").slice(0, 55);
   const aiBody = smartCopy?.subline || smartCopy?.body || "";
@@ -2792,17 +2827,18 @@ async function generatePosterBPair(runToken) {
     assetsData = null,
     { regenerateToken = "", silent = false } = {}
   ) {
-    // intakeUrlRef.current breaks the stale-closure problem: even if this function
-    // was captured in a stale React render (e.g. chat onSubmit → setTimeout), the ref
-    // always holds the value the USER last typed, not the old premiumIntake URL.
-    const _genUrl = (intakeUrlRef.current || editLink || answers?.url || "").trim();
-    const a = { ...(answers || {}), url: _genUrl };
+    // buildCurrentIntakeAnswers() is the single source of truth:
+    //   - Admin-client: premiumIntake.websiteUrl always wins over stale answers.url
+    //   - Normal mode: intakeUrlRef.current (breaks stale-closure) → editLink → answers.url
+    const a = buildCurrentIntakeAnswers();
+    const _genUrl = a.url;
     console.debug("[FORM GENERATE URL DEBUG]", {
       adminClientId,
       ctxKey: (typeof getActiveCtx === "function" ? getActiveCtx() : ""),
       answersUrl: answers?.url,
       editLink,
       intakeUrlRefCurrent: intakeUrlRef.current,
+      premiumIntakeUrl: adminClientInfo?.premiumIntake?.websiteUrl || "(none)",
       finalUrlSentToGenerateStaticAd: _genUrl,
     });
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
@@ -2857,12 +2893,18 @@ async function generatePosterBPair(runToken) {
         disclaimers: craftedCopy.disclaimers,
         cta: craftedCopy.cta,
       },
+      // Explicit top-level url/website so backend defensive fix can read them
+      // without digging into nested answers — avoids any stale nested value winning.
+      url:     _genUrl,
+      website: _genUrl,
       answers: {
         ...a,
         industry: safeIndustry,
         businessName: safeBiz,
         location: safeLocation,
         offer: a.offer || a.saveAmount || craftedCopy.offer || "",
+        url:     _genUrl,
+        websiteUrl: _genUrl,
         // User-uploaded photo — passed only when present; never persisted to draft
         ...(userUploadedImage ? { userImage: userUploadedImage } : {}),
       },

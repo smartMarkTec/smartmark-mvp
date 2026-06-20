@@ -1027,14 +1027,24 @@ router.post("/generate-static-ad", async (req, res) => {
       craftedHeadlinePreview: String((body.copy || {}).headline || "").trim().slice(0, 60) || "(empty)",
     });
 
-    // Explicit request body URL must ALWAYS win — never fall back to DB/premiumIntake.
-    // body.answers.url (or body.answers.website) is the single source of truth.
+    // Top-level body.url / body.website (set by frontend explicitly) beat nested
+    // body.answers.url so a stale answers.url can never override the current form URL.
+    const explicitWebsite =
+      clean(body.url) ||
+      clean(body.website) ||
+      clean(body.answers?.websiteUrl) ||
+      clean(body.answers?.url) ||
+      "";
+    if (explicitWebsite) {
+      a.url     = explicitWebsite;
+      a.website = explicitWebsite;
+    }
     const website = clean(a.url || a.website || "");
     console.log("[STATIC AD URL DEBUG]", {
-      bodyAnswersUrl: body.answers?.url,
-      bodyAnswersWebsite: body.answers?.website,
       bodyUrl: body.url,
       bodyWebsite: body.website,
+      bodyAnswersWebsiteUrl: body.answers?.websiteUrl,
+      bodyAnswersUrl: body.answers?.url,
       computedWebsite: website || "(none)",
     });
     const businessName = safeFilenamePart(a.businessName || a.brand || "ad");

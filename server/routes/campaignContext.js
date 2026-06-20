@@ -315,9 +315,16 @@ router.get('/campaign-context', async (req, res) => {
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
       if (clientRecords[0]) {
+        // Always override websiteUrl with premiumIntake.websiteUrl when available.
+        // The campaign_contexts record may have a stale chat-conversation answer
+        // (e.g. "Aspen93.godaddysites.com") that predates the current intake.
+        const piUrl = String(clientUser.premiumIntake?.websiteUrl || '').trim();
+        const context = piUrl
+          ? { ...clientRecords[0], websiteUrl: piUrl }
+          : clientRecords[0];
         return res.json({
           ok: true,
-          context: clientRecords[0],
+          context,
           source: 'campaign_context',
           hasUsableContext: true,
           resolvedAdminClientId: adminClientId,
