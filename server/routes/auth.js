@@ -6845,37 +6845,15 @@ let recoveredHeadline = '';
 let recoveredBody = '';
 let recoveredLink = '';
 
-const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
-const storedLocalImages = [];
+const adCount = ads.length;
 
-for (let i = 0; i < storedImagesRaw.length; i += 1) {
-  const img = normalizeCreativeUrl(storedImagesRaw[i]);
-  if (!img) continue;
+// If DB already has a complete launchedCreativeSet with as many entries as Meta ads,
+// use it directly — it has per-ad headlines/bodies/CTAs from launch time.
+const dbLaunchedSet = Array.isArray(rec?.launchedCreativeSet) ? rec.launchedCreativeSet : [];
 
-  if (/\/api\/media\//i.test(img) && !storedLocalImages.includes(img)) {
-    storedLocalImages.push(img);
-  }
-}
-
-// Only trust stored /api/media/ URLs if the files actually exist on disk.
-// Render wipes /tmp/generated on every restart/redeploy — stored URLs become dead without this check.
-const existingUsableLocalImages = dedupeKeepOrder(
-  storedLocalImages.filter((img) => {
-    if (!/\/api\/media\//i.test(String(img || ''))) return false;
-    try {
-      const fileName = String(img).split('/api/media/').pop().split(/[?#]/)[0];
-      return !!(fileName && fs.existsSync(path.join(generatedDir, fileName)));
-    } catch {
-      return false;
-    }
-  }),
-  2
-);
-
-const perAdLocalImages = [];
-const shouldRecacheFromMeta = existingUsableLocalImages.length === 0;
-
-for (let i = 0; i < ads.length; i += 1) {
+// Always collect per-ad data from Meta (copy + image) for all N ads, no cap.
+const metaAdRecords = [];
+for (let i = 0; i < adCount; i += 1) {
   const ad = ads[i] || {};
   const creative = ad?.creative || {};
   const oss = creative?.object_story_spec || {};
@@ -6883,70 +6861,124 @@ for (let i = 0; i < ads.length; i += 1) {
   const photoData = oss?.photo_data || {};
   const videoData = oss?.video_data || {};
 
-  // Prefer the control (non-AI-challenger) ad's copy; skip if we already have it.
-  const isAiChallenger = String(ad?.name || '').toLowerCase().includes('ai challenger');
+  const adId       = String(ad?.id           || '').trim();
+  const adName     = String(ad?.name         || '').trim();
+  const headline   = firstNonEmpty(linkData?.name, photoData?.title, videoData?.title, linkData?.caption);
+  const body       = firstNonEmpty(linkData?.message, photoData?.message, videoData?.message);
+  const link       = firstNonEmpty(linkData?.link, photoData?.link, videoData?.call_to_action?.value?.link);
+  const ctaType    = linkData?.call_to_action?.type || 'LEARN_MORE';
+  const creativeId = String(creative?.id || '').trim();
+  const adStatus   = String(ad?.effective_status || ad?.status || 'ACTIVE').toUpperCase();
 
-  if (!isAiChallenger) {
-    // Always overwrite with the live Meta creative copy so the latest Facebook text
-    // is shown, regardless of what the DB cache says.
-    const liveHeadline = firstNonEmpty(linkData?.name, photoData?.title, videoData?.title, linkData?.caption);
-    const liveBody = firstNonEmpty(linkData?.message, photoData?.message, videoData?.message);
-    const liveLink = firstNonEmpty(linkData?.link, photoData?.link, videoData?.call_to_action?.value?.link);
+  // Pull from DB launchedCreativeSet if we have a match for this adId
+  const dbEntry = dbLaunchedSet.find((c) => c.metaAdId === adId) || null;
 
-    if (liveHeadline) recoveredHeadline = liveHeadline;
-    if (liveBody) recoveredBody = liveBody;
-    if (liveLink) recoveredLink = liveLink;
-  }
-
-  if (!shouldRecacheFromMeta) {
-    continue;
-  }
-
-  const adCandidates = dedupeKeepOrder([
-    linkData?.image_url,
-    photoData?.image_url,
-    videoData?.image_url,
-    creative?.image_url,
-    creative?.thumbnail_url,
+  const imgCandidates = dedupeKeepOrder([
+    linkData?.image_url, photoData?.image_url, videoData?.image_url,
+    creative?.image_url, creative?.thumbnail_url,
   ], 8);
 
-  console.log('[creatives] ad candidates', {
-    campaignId: normalizedCampaignId,
-    adId: String(ad?.id || ''),
-    adName: String(ad?.name || ''),
-    candidates: adCandidates,
-  });
-
   let localHit = '';
-  for (let j = 0; j < adCandidates.length; j += 1) {
-    localHit = await cacheRemoteImageToLocal(adCandidates[j], `ad${i + 1}-cand${j + 1}`);
+  for (let j = 0; j < imgCandidates.length; j += 1) {
+    localHit = await cacheRemoteImageToLocal(imgCandidates[j], `ad${i + 1}-cand${j + 1}`);
     if (localHit) break;
   }
+  // Use DB imageUrl as fallback if Meta didn't provide one that could be cached
+  const imageUrl = localHit || dbEntry?.imageUrl || '';
 
   if (localHit) {
-    perAdLocalImages.push(localHit);
-    perAdImages.push({
-      adId: String(ad?.id || '').trim(),
-      adName: String(ad?.name || '').trim(),
-      imageUrl: String(localHit || '').trim(),
-    });
+    perAdImages.push({ adId, adName, imageUrl: localHit });
   }
 
-  if (perAdLocalImages.length >= 2) break;
+  if (!isAiChallengerName(adName) && (headline || body || link)) {
+    recoveredHeadline = recoveredHeadline || headline;
+    recoveredBody     = recoveredBody     || body;
+    recoveredLink     = recoveredLink     || link;
+  }
+
+  metaAdRecords.push({
+    adId, adName, creativeId, adStatus,
+    headline: headline || dbEntry?.headline || '',
+    body:     body     || dbEntry?.body     || '',
+    cta:      ctaType  || dbEntry?.cta      || 'LEARN_MORE',
+    link:     link     || dbEntry?.link     || '',
+    imageUrl,
+  });
 }
 
-const finalImages =
-  existingUsableLocalImages.length > 0
-    ? existingUsableLocalImages
-    : dedupeKeepOrder([...perAdLocalImages, ...storedLocalImages], 2);
+function isAiChallengerName(name) {
+  return String(name || '').toLowerCase().includes('ai challenger');
+}
+
+// Stored local images from DB (no cap — allow as many as we have)
+const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 8);
+const storedLocalImages = [];
+for (let i = 0; i < storedImagesRaw.length; i += 1) {
+  const img = normalizeCreativeUrl(storedImagesRaw[i]);
+  if (img && /\/api\/media\//i.test(img) && !storedLocalImages.includes(img)) {
+    storedLocalImages.push(img);
+  }
+}
+
+// Only count stored local images as "usable" if the files still exist on disk.
+// Do NOT cap these at 2 — we may have 3+ from a multi-creative launch.
+const existingUsableLocalImages = storedLocalImages.filter((img) => {
+  try {
+    const fileName = String(img).split('/api/media/').pop().split(/[?#]/)[0];
+    return !!(fileName && fs.existsSync(path.join(generatedDir, fileName)));
+  } catch { return false; }
+});
+
+const perAdLocalImages = metaAdRecords.map((r) => r.imageUrl).filter(Boolean);
+
+// finalImages: prefer per-ad images from Meta (all N), fall back to usable stored.
+// Never cap at 2 when we have more ads.
+const finalImages = perAdLocalImages.length >= adCount
+  ? dedupeKeepOrder(perAdLocalImages, adCount)
+  : existingUsableLocalImages.length >= adCount
+  ? existingUsableLocalImages.slice(0, adCount)
+  : dedupeKeepOrder([...perAdLocalImages, ...existingUsableLocalImages, ...storedLocalImages], Math.max(adCount, 2));
+
+// Build / rebuild launchedCreativeSet from Meta ads when:
+//  a) DB has no launchedCreativeSet, or
+//  b) DB launchedCreativeSet has fewer items than Meta ad count
+const needsRebuild = dbLaunchedSet.length < adCount;
+const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
+  const db = dbLaunchedSet.find((c) => c.metaAdId === r.adId) || dbLaunchedSet[i] || {};
+  return {
+    id:             db.id            || `meta-${r.adId}`,
+    angle:          db.angle         || null,
+    angleLabel:     db.angleLabel    || r.adName || `Ad ${i + 1}`,
+    headline:       r.headline       || db.headline || '',
+    body:           r.body           || db.body     || '',
+    cta:            r.cta            || db.cta      || 'LEARN_MORE',
+    imageUrl:       r.imageUrl       || db.imageUrl || finalImages[i] || '',
+    link:           r.link           || db.link     || '',
+    metaAdId:       r.adId,
+    metaCreativeId: r.creativeId     || db.metaCreativeId || null,
+    status:         r.adStatus === 'ACTIVE' ? 'active' : r.adStatus.toLowerCase(),
+    replacedMetaAdId: db.replacedMetaAdId || null,
+  };
+});
+
+console.log('[CREATIVES_REBUILD_FROM_META]', {
+  campaignId: normalizedCampaignId,
+  adCount,
+  launchedCreativeSetLength: rebuiltLaunchedCreativeSet.length,
+  storedLocalImagesLength: storedLocalImages.length,
+  existingUsableLocalImagesLength: existingUsableLocalImages.length,
+  rebuiltFromMeta: needsRebuild,
+  finalImagesLength: finalImages.length,
+});
 
 console.log('[creatives] final images selected', {
   campaignId: normalizedCampaignId,
-  perAdLocalImages,
-  storedLocalImages,
-  existingUsableLocalImages,
-  finalImages,
-  reusedExistingLocal: existingUsableLocalImages.length > 0,
+  adCount,
+  perAdLocalImagesLength: perAdLocalImages.length,
+  storedLocalImages: storedLocalImages.length,
+  existingUsableLocalImages: existingUsableLocalImages.length,
+  finalImages: finalImages.length,
+  reusedExistingLocal: !needsRebuild && existingUsableLocalImages.length >= adCount,
 });
 
 // Fall back to DB record only if Meta returned nothing for a field.
@@ -6993,13 +7025,16 @@ if (!finalImages.length) {
       );
     });
 
+    // Always persist the rebuilt launchedCreativeSet so future loads have all N creatives.
+    const updatedRecord = {
+      ...nextRecord,
+      launchedCreativeSet: rebuiltLaunchedCreativeSet.length > 0 ? rebuiltLaunchedCreativeSet : (rec?.launchedCreativeSet || null),
+    };
+
     if (idx >= 0) {
-      creativeList[idx] = {
-        ...creativeList[idx],
-        ...nextRecord,
-      };
+      creativeList[idx] = { ...creativeList[idx], ...updatedRecord };
     } else {
-      creativeList.push(nextRecord);
+      creativeList.push(updatedRecord);
     }
 
     db.data.campaign_creatives = creativeList;
@@ -7039,8 +7074,8 @@ if (!finalImages.length) {
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,
-      // Per-ad creative details saved at launch — authoritative for Creatives tab display.
-      launchedCreativeSet: nextRecord.launchedCreativeSet || null,
+      // Per-ad creative details — rebuilt from live Meta ads or saved at launch.
+      launchedCreativeSet: updatedRecord.launchedCreativeSet || null,
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
       source: 'facebook_cached_locally',

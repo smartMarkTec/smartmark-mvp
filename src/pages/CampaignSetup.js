@@ -5565,6 +5565,11 @@ async function adminCampaignControlFetch(adminClientId, campaignId, action, acco
   });
 }
 
+// Business Info form state — top-level to avoid React hook-in-IIFE crash (#310).
+const [bizForm, setBizForm] = useState({ businessName: "", services: "", offer: "", website: "", phone: "", serviceArea: "", idealCustomer: "" });
+const [bizSaving, setBizSaving] = useState(false);
+const [bizSaved, setBizSaved]   = useState(false);
+
 // Edit Creative: edit copy/image for a single launched ad, then create replacement on Meta.
 const [editCreativeIdx, setEditCreativeIdx] = React.useState(null);  // index in launchedCreativeSet
 const [editCreativeForm, setEditCreativeForm] = React.useState({ headline: "", body: "", cta: "", imageUrl: "", imageDataUrl: null });
@@ -5638,6 +5643,33 @@ const submitEditCreative = async () => {
   } finally {
     setEditCreativeSaving(false);
   }
+};
+
+// Pre-fill Business Info form from campaign-context when Account tab becomes active.
+useEffect(() => {
+  if (setupTab !== "account" || adminClientId) return;
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  fetch("/api/campaign-context", { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} })
+    .then((r) => r.json().catch(() => ({})))
+    .then((j) => {
+      if (j.ok && j.context) {
+        const c = j.context;
+        setBizForm({ businessName: c.businessName || "", services: c.industry || "", offer: c.offer || "", website: c.websiteUrl || "", phone: c.phoneNumber || "", serviceArea: c.serviceArea || "", idealCustomer: c.idealCustomer || "" });
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line
+}, [setupTab]);
+
+const saveBizInfo = async () => {
+  setBizSaving(true); setBizSaved(false);
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  await fetch("/api/campaign-context/save", {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+    body: JSON.stringify({ answers: { businessName: bizForm.businessName, industry: bizForm.services, offer: bizForm.offer, url: bizForm.website, phone: bizForm.phone, serviceArea: bizForm.serviceArea, idealCustomer: bizForm.idealCustomer } }),
+  }).catch(() => {});
+  setBizSaving(false); setBizSaved(true);
+  setTimeout(() => setBizSaved(false), 2500);
 };
 
 // Pause, resume, or delete a SINGLE Meta ad by its adId (not the whole campaign).
@@ -10877,78 +10909,30 @@ ${pendingTest ? `
         </div>
       </div>
 
-      {/* ── Business Info / Edit Intake ────────────────────────────────────── */}
-      {(() => {
-        const [bizForm, setBizForm] = React.useState({
-          businessName: "", services: "", offer: "", website: "", phone: "", serviceArea: "", idealCustomer: "",
-        });
-        const [bizSaving, setBizSaving] = React.useState(false);
-        const [bizSaved, setBizSaved]   = React.useState(false);
-
-        React.useEffect(() => {
-          // Pre-fill from saved context
-          const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-          fetch("/api/campaign-context", { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} })
-            .then((r) => r.json().catch(() => ({})))
-            .then((j) => {
-              if (j.ok && j.context) {
-                const c = j.context;
-                setBizForm({
-                  businessName:  c.businessName  || "",
-                  services:      c.industry      || "",
-                  offer:         c.offer         || "",
-                  website:       c.websiteUrl    || "",
-                  phone:         c.phoneNumber   || "",
-                  serviceArea:   c.serviceArea   || "",
-                  idealCustomer: c.idealCustomer || "",
-                });
-              }
-            }).catch(() => {});
-        // eslint-disable-next-line
-        }, []);
-
-        const saveBizInfo = async () => {
-          setBizSaving(true); setBizSaved(false);
-          const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-          await fetch("/api/campaign-context/save", {
-            method: "POST", credentials: "include",
-            headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
-            body: JSON.stringify({ answers: {
-              businessName: bizForm.businessName, industry: bizForm.services,
-              offer: bizForm.offer, url: bizForm.website, phone: bizForm.phone,
-              serviceArea: bizForm.serviceArea, idealCustomer: bizForm.idealCustomer,
-            }}),
-          }).catch(() => {});
-          setBizSaving(false); setBizSaved(true);
-          setTimeout(() => setBizSaved(false), 2500);
-        };
-
-        const fld = (key, label, placeholder) => (
-          <div key={key}>
-            <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>{label}</div>
-            <input value={bizForm[key] || ""} onChange={(e) => setBizForm((p) => ({ ...p, [key]: e.target.value }))}
-              placeholder={placeholder} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 14, fontFamily: "inherit" }} />
-          </div>
-        );
-
-        return (
-          <div style={{ border: "1px solid rgba(93,89,234,0.10)", borderRadius: 14, padding: 18, background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)" }}>
-            <div style={{ color: "#5d59ea", fontWeight: 800, fontSize: 14, marginBottom: 14 }}>Business Info</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {fld("businessName",  "Business Name",   "Aspen Air Conditioning")}
-              {fld("services",      "Services",        "AC repair, service and installation")}
-              {fld("offer",         "Current Offer",   "$75 AC tune-up")}
-              {fld("website",       "Website",         "https://yoursite.com")}
-              {fld("phone",         "Phone",           "+1 (713) 555-0100")}
-              {fld("serviceArea",   "Service Area",    "Houston, TX and surrounding areas")}
-              {fld("idealCustomer", "Ideal Customer",  "Houston homeowners with aging AC units")}
+      {/* ── Business Info / Edit Intake ── state lives at component top level (no hook-in-IIFE) ── */}
+      <div style={{ border: "1px solid rgba(93,89,234,0.10)", borderRadius: 14, padding: 18, background: "linear-gradient(135deg, #f7f8ff 0%, #eef0ff 100%)" }}>
+        <div style={{ color: "#5d59ea", fontWeight: 800, fontSize: 14, marginBottom: 14 }}>Business Info</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[
+            ["businessName",  "Business Name",   "Aspen Air Conditioning"],
+            ["services",      "Services",        "AC repair, service and installation"],
+            ["offer",         "Current Offer",   "$75 AC tune-up"],
+            ["website",       "Website",         "https://yoursite.com"],
+            ["phone",         "Phone",           "+1 (713) 555-0100"],
+            ["serviceArea",   "Service Area",    "Houston, TX and surrounding areas"],
+            ["idealCustomer", "Ideal Customer",  "Houston homeowners with aging AC units"],
+          ].map(([key, label, placeholder]) => (
+            <div key={key}>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+              <input value={bizForm[key] || ""} onChange={(e) => setBizForm((p) => ({ ...p, [key]: e.target.value }))}
+                placeholder={placeholder} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 14, fontFamily: "inherit" }} />
             </div>
-            <button onClick={saveBizInfo} disabled={bizSaving} style={{ marginTop: 14, padding: "10px 22px", borderRadius: 10, border: "none", background: "#5d59ea", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-              {bizSaving ? "Saving…" : bizSaved ? "Saved ✓" : "Save Business Info"}
-            </button>
-          </div>
-        );
-      })()}
+          ))}
+        </div>
+        <button onClick={saveBizInfo} disabled={bizSaving} style={{ marginTop: 14, padding: "10px 22px", borderRadius: 10, border: "none", background: "#5d59ea", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+          {bizSaving ? "Saving…" : bizSaved ? "Saved ✓" : "Save Business Info"}
+        </button>
+      </div>
 
       <div
         style={{
