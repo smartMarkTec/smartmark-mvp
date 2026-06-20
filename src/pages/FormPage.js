@@ -1422,7 +1422,9 @@ useEffect(() => {
     if (adminClientId) {
       draftRestoredRef.current = false;
       try {
-        // 1. Route state: CampaignSetup sends imageUrls when navigating back
+        // 1. Route state: CampaignSetup sends imageUrls when navigating back.
+        //    After restoring images, ALSO read copy/headline/body from localStorage
+        //    so the draft is fully restored, not just the image URL.
         const stateImgs = (location.state?.imageUrls || []).filter(Boolean);
         if (stateImgs.length && !isDraftDisabled()) {
           setImageUrls(stateImgs.slice(0, 2));
@@ -1431,8 +1433,41 @@ useEffect(() => {
           setHasGenerated(true);
           setAwaitingReady(false);
           draftRestoredRef.current = true;
-          console.debug("[CREATIVE PERSIST RESTORE]", {
-            page: "FormPage", adminClientId, source: "routeState", imageCount: stateImgs.length,
+
+          // Also restore headline/body/cta from route state (if CampaignSetup passed them)
+          // or fall back to the localStorage draft for the same client.
+          const stateHeadline = String(location.state?.headline || "").trim();
+          const stateBody     = String(location.state?.body     || "").trim();
+          const stateLink     = String(location.state?.link     || "").trim();
+          if (stateHeadline || stateBody) {
+            setResult((prev) => ({
+              ...(prev || {}),
+              headline: stateHeadline || prev?.headline || "",
+              body:     stateBody     || prev?.body     || "",
+            }));
+          } else {
+            // No copy in route state — read from admin-client localStorage draft
+            try {
+              const _clientNs = `adminClient:${adminClientId}`;
+              const rawDraft = localStorage.getItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`) ||
+                               localStorage.getItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`);
+              if (rawDraft) {
+                const draftObj = JSON.parse(rawDraft);
+                if (draftObj.headline || draftObj.body) {
+                  setResult((prev) => ({
+                    ...(prev || {}),
+                    headline: draftObj.headline || prev?.headline || "",
+                    body:     draftObj.body     || prev?.body     || "",
+                  }));
+                }
+              }
+            } catch {}
+          }
+          if (stateLink) setEditLink(stateLink);
+
+          console.debug("[DRAFT RESTORE]", {
+            page: "FormPage", adminClientId, source: "routeState",
+            imageCount: stateImgs.length, hasCopy: !!(stateHeadline || stateBody),
           });
           return;
         }
@@ -2211,6 +2246,12 @@ useEffect(() => {
 
         setResult((prev) => ({ ...(prev || {}), headline, body }));
         setCopyGenerated(true);
+        // Immediately persist copy with current images — copy is expensive, don't lose it
+        saveAdminClientDraftNow({
+          images: imageUrls, headline, body,
+          overlay: normalizeOverlayCTA(answers?.cta || ""),
+          draftAnswers: buildCurrentIntakeAnswers(),
+        });
 
         const srcLabel = data.usedVision
           ? "based on your photo"
@@ -2523,6 +2564,49 @@ useEffect(() => {
     }
   }
 
+// ── Immediate durable save for admin-client creative drafts ──────────────────
+// Called immediately after any state change (upload, copy, or navigation) so the
+// draft is never lost even if navigation happens before the 300ms autosave fires.
+function saveAdminClientDraftNow({ images, headline, body, overlay, link, draftAnswers }) {
+  if (!adminClientId || !images?.length) return;
+  try {
+    const _clientNs = `adminClient:${adminClientId}`;
+    const _ctxKey = getActiveCtx() || "";
+    const _intakeA = buildCurrentIntakeAnswers ? buildCurrentIntakeAnswers() : (draftAnswers || answers || {});
+    const _draft = {
+      ctxKey:          _ctxKey,
+      adminClientId,
+      images:          images.filter(Boolean).slice(0, 2),
+      headline:        (headline || "").slice(0, 55),
+      body:            body || "",
+      imageOverlayCTA: overlay || "",
+      link:            link || _intakeA.url || "",
+      answers:         draftAnswers || _intakeA,
+      mediaSelection:  "image",
+      savedAt:         Date.now(),
+      expiresAt:       Date.now() + CREATIVE_TTL_MS,
+    };
+    localStorage.setItem(`u:${_clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(_draft));
+    localStorage.setItem(`u:${_clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(_draft));
+    console.debug("[DRAFT SAVE]", {
+      page: "FormPage", adminClientId, ctxKey: _ctxKey,
+      source: creativeSource, imageCount: images.length,
+      hasCopy: !!(body || headline), headline: (headline || "").slice(0, 30),
+    });
+    // Backend fire-and-forget — persists beyond localStorage
+    try {
+      const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      fetch("/api/campaign-context/save-creative-draft", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(_sid ? { "x-sm-sid": _sid } : {}) },
+        body: JSON.stringify({ adminClientId, creativeDraft: _draft }),
+      }).catch(() => {});
+    } catch {}
+  } catch {}
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── Single source-of-truth for the current intake URL and business context ──
 // In admin-client mode, premiumIntake is authoritative — old chat conversation
 // answers (answers.url = "Aspen93.godaddysites.com") must never override it.
@@ -2669,11 +2753,12 @@ async function generatePosterBPair(runToken) {
       cacheImagesFor24h(getActiveCtx(), [serverUrl]).catch(() => {});
       // Preserve whatever copy already exists from the conversation
       const draftId = creativeIdFromUrl(serverUrl);
-      saveImageDraftById(draftId, {
-        headline: (editHeadline || result?.headline || "").slice(0, 55),
-        body: editBody || result?.body || "",
-        overlay: normalizeOverlayCTA(editCTA || answers?.cta || ""),
-      });
+      const _hlAS = (editHeadline || result?.headline || "").slice(0, 55);
+      const _bdAS = editBody || result?.body || "";
+      const _ovAS = normalizeOverlayCTA(editCTA || answers?.cta || "");
+      saveImageDraftById(draftId, { headline: _hlAS, body: _bdAS, overlay: _ovAS });
+      // Immediate durable save — preserves draft even if user navigates before autosave fires
+      saveAdminClientDraftNow({ images: [serverUrl], headline: _hlAS, body: _bdAS, overlay: _ovAS, draftAnswers: buildCurrentIntakeAnswers() });
     } catch (err) {
       const msg = String(err?.message || "Photo upload failed.");
       setError(msg);
@@ -2708,11 +2793,12 @@ async function generatePosterBPair(runToken) {
       setHasGenerated(true);
       cacheImagesFor24h(getActiveCtx(), [serverUrl]).catch(() => {});
       const draftId = creativeIdFromUrl(serverUrl);
-      saveImageDraftById(draftId, {
-        headline: (result?.headline || "").slice(0, 55),
-        body: result?.body || "",
-        overlay: normalizeOverlayCTA(answers?.cta || ""),
-      });
+      const _hlPC = (result?.headline || "").slice(0, 55);
+      const _bdPC = result?.body || "";
+      const _ovPC = normalizeOverlayCTA(answers?.cta || "");
+      saveImageDraftById(draftId, { headline: _hlPC, body: _bdPC, overlay: _ovPC });
+      // Immediate durable save
+      saveAdminClientDraftNow({ images: [serverUrl], headline: _hlPC, body: _bdPC, overlay: _ovPC, draftAnswers: buildCurrentIntakeAnswers() });
     } catch (err) {
       setError(String(err?.message || "Photo upload failed."));
     } finally {

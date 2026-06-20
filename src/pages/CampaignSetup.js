@@ -3890,7 +3890,7 @@ useEffect(() => {
     return;
   }
 
-  // ── Admin-client mode: read creative draft from the client-scoped namespace.
+  // ── Admin-client mode: read creative draft (localStorage first, then backend).
   // Never touches TheBoss's draft keys.
   if (adminClientId) {
     const clientNs = `adminClient:${adminClientId}`;
@@ -3906,9 +3906,43 @@ useEffect(() => {
           (Number.isFinite(expiresAt) && now <= expiresAt) ||
           (!obj.savedAt || now - obj.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
         if (ageOk) {
-          applyDraft(obj);
+          const ok = applyDraft(obj);
+          if (ok) {
+            console.debug("[DRAFT RESTORE]", {
+              page: "CampaignSetup", adminClientId, source: "namespacedLocalStorage",
+              imageCount: obj.images?.length || 0, hasCopy: !!(obj.headline || obj.body),
+              selectedCampaignId: "__DRAFT__",
+            });
+          }
         }
       } catch {}
+    } else {
+      // localStorage miss — try backend (covers dashboard navigation / device change)
+      const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      fetch(`/api/campaign-context/creative-draft?adminClientId=${encodeURIComponent(adminClientId)}`, {
+        credentials: "include",
+        headers: _sid ? { "x-sm-sid": _sid } : {},
+      })
+        .then((r) => r.json().catch(() => ({})))
+        .then((j) => {
+          if (j.ok && j.creativeDraft) {
+            const obj = j.creativeDraft;
+            const ok = applyDraft(obj);
+            if (ok) {
+              // Seed localStorage so subsequent loads don't need the backend
+              try {
+                localStorage.setItem(`u:${clientNs}:${CREATIVE_DRAFT_KEY}`, JSON.stringify(obj));
+                localStorage.setItem(`u:${clientNs}:sm_setup_creatives_backup_v1`, JSON.stringify(obj));
+              } catch {}
+              console.debug("[DRAFT RESTORE]", {
+                page: "CampaignSetup", adminClientId, source: "backend",
+                imageCount: obj.images?.length || 0, hasCopy: !!(obj.headline || obj.body),
+                selectedCampaignId: "__DRAFT__",
+              });
+            }
+          }
+        })
+        .catch(() => {});
     }
     return; // Do NOT read TheBoss's draft keys in admin-client mode
   }
@@ -4803,8 +4837,21 @@ useEffect(() => {
       const _incomingImages = Array.isArray(location.state?.imageUrls) &&
         location.state.imageUrls.filter(Boolean).length > 0;
 
-      // hasDraftOrIncoming: treat incoming route images the same as restored draft
-      const hasDraftOrIncoming = hasDraft || _incomingImages;
+      // hasDraftInStorage: check localStorage for a saved admin-client draft even if
+      // the async applyDraft hasn't set React state yet (race with campaigns loading).
+      const _hasDraftInStorage = adminClientId ? (() => {
+        try {
+          const ns = `adminClient:${adminClientId}`;
+          const raw = localStorage.getItem(`u:${ns}:${CREATIVE_DRAFT_KEY}`);
+          if (!raw) return false;
+          const obj = JSON.parse(raw);
+          return Array.isArray(obj?.images) && obj.images.filter(Boolean).length > 0;
+        } catch { return false; }
+      })() : false;
+
+      // hasDraftOrIncoming: treat incoming route images and saved localStorage draft
+      // the same as a fully-restored draft to prevent live campaign from overriding.
+      const hasDraftOrIncoming = hasDraft || _incomingImages || _hasDraftInStorage;
 
       if (_incomingImages) {
         // Fresh navigation from FormPage with creative — force draft view immediately.
@@ -7202,6 +7249,10 @@ ${pendingTest ? `
             onClick={() => navigate(withAdminClientQuery("/form", adminClientId), {
               state: {
                 imageUrls: Array.isArray(draftCreatives?.images) ? draftCreatives.images.filter(Boolean) : [],
+                // Pass copy fields so FormPage can restore the full creative without a localStorage read
+                headline: previewCopy?.headline || "",
+                body:     previewCopy?.body     || "",
+                link:     previewCopy?.link      || "",
                 ctxKey: getActiveCtx(resolvedUser) || "",
                 ...(adminClientId ? { adminClientId } : {}),
               },

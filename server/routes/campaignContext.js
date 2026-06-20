@@ -85,6 +85,7 @@ async function ensureData() {
   await db.read();
   db.data.campaign_contexts   ||= [];
   db.data.ai_action_proposals ||= [];
+  db.data.creative_drafts     ||= [];
   db.data.users               ||= [];
   db.data.sessions            ||= [];
 }
@@ -690,6 +691,96 @@ router.post('/ai-proposal/:id/apply', async (req, res) => {
   } catch (err) {
     console.error('[ai-proposal/apply] error:', err?.message);
     return res.status(500).json({ ok: false, error: 'Failed to apply proposal.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/save-creative-draft
+// Persists the admin-client creative draft server-side so it survives beyond
+// localStorage (browser clears, device changes, dashboard navigation).
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/save-creative-draft', async (req, res) => {
+  try {
+    await ensureData();
+    const callerOwnerKey = ownerKeyFromReq(req);
+    if (!callerOwnerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { adminClientId, creativeDraft } = req.body || {};
+    if (!creativeDraft || !Array.isArray(creativeDraft.images) || !creativeDraft.images.length) {
+      return res.status(400).json({ ok: false, error: 'creativeDraft with images is required.' });
+    }
+
+    let ownerKey = callerOwnerKey;
+    if (adminClientId) {
+      if (!isAdminOwnerKey(callerOwnerKey)) {
+        return res.status(403).json({ ok: false, error: 'Admin access required.' });
+      }
+      const clientUser = resolveClientUser(String(adminClientId).trim());
+      if (clientUser) ownerKey = `user:${String(clientUser.username || '').trim()}`;
+    }
+
+    const now = new Date().toISOString();
+    const draft = {
+      ...creativeDraft,
+      ownerKey,
+      adminClientId: adminClientId || null,
+      updatedAt: now,
+      status: 'draft',
+    };
+    if (!draft.savedAt) draft.savedAt = now;
+
+    // Upsert: one draft per ownerKey + adminClientId combination
+    const idx = db.data.creative_drafts.findIndex(
+      (d) => String(d.ownerKey || '') === ownerKey &&
+             String(d.adminClientId || '') === String(adminClientId || '')
+    );
+    if (idx !== -1) {
+      db.data.creative_drafts[idx] = { ...db.data.creative_drafts[idx], ...draft };
+    } else {
+      db.data.creative_drafts.push({ id: nanoid(8), ...draft });
+    }
+
+    await db.write();
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[save-creative-draft]', err?.message);
+    return res.status(500).json({ ok: false, error: 'Failed to save creative draft.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/campaign-context/creative-draft?adminClientId=...
+// Returns the most recent server-persisted creative draft for the given client.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/campaign-context/creative-draft', async (req, res) => {
+  try {
+    await ensureData();
+    const callerOwnerKey = ownerKeyFromReq(req);
+    if (!callerOwnerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const adminClientId = String(req.query.adminClientId || '').trim();
+    let ownerKey = callerOwnerKey;
+
+    if (adminClientId) {
+      if (!isAdminOwnerKey(callerOwnerKey)) {
+        return res.status(403).json({ ok: false, error: 'Admin access required.' });
+      }
+      const clientUser = resolveClientUser(adminClientId);
+      if (!clientUser) return res.json({ ok: true, creativeDraft: null });
+      ownerKey = `user:${String(clientUser.username || '').trim()}`;
+    }
+
+    const drafts = (db.data.creative_drafts || [])
+      .filter((d) =>
+        String(d.ownerKey || '') === ownerKey &&
+        String(d.adminClientId || '') === String(adminClientId || '')
+      )
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+    return res.json({ ok: true, creativeDraft: drafts[0] || null });
+  } catch (err) {
+    console.error('[get-creative-draft]', err?.message);
+    return res.status(500).json({ ok: false, error: 'Failed to get creative draft.' });
   }
 });
 
