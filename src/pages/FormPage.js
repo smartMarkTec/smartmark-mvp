@@ -2496,6 +2496,9 @@ async function generatePosterBPair(runToken) {
   // No AI processing — the user's photo becomes the creative as-is.
   async function handleUploadAsIs() {
     if (!userUploadedImage) return;
+    // Clear draft-disabled flag so the autosave effect doesn't wipe this freshly
+    // uploaded image when it fires (Bug 3: scroll/re-render after prior launch).
+    clearDraftDisabled();
     setImageLoading(true);
     setError("");
     try {
@@ -2534,6 +2537,9 @@ async function generatePosterBPair(runToken) {
   // Used by upload_photo mode so handleUploadChange can auto-upload on file selection.
   async function handlePhotoCreative(dataUrl) {
     if (!dataUrl) return;
+    // Clear draft-disabled flag so the autosave effect doesn't wipe this freshly
+    // uploaded image when it fires (Bug 3: scroll/re-render after prior launch).
+    clearDraftDisabled();
     setImageLoading(true);
     setError("");
     try {
@@ -3881,7 +3887,28 @@ async function generatePosterBPair(runToken) {
             );
 
             const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
-           const imgA = (cached.length ? cached : imageUrls.map(abs)).slice(0, 1);
+            let imgA = (cached.length ? cached : imageUrls.map(abs)).slice(0, 1);
+
+            // Fallback: if imageUrls was cleared by the autosave guard (Bug 2),
+            // recover the images from the last saved creative draft in localStorage.
+            if (!imgA.length) {
+              try {
+                const _fbKey = adminClientId
+                  ? `u:adminClient:${adminClientId}:${CREATIVE_DRAFT_KEY}`
+                  : null;
+                const _fbRaw = _fbKey
+                  ? localStorage.getItem(_fbKey)
+                  : (ssGet("draft_form_creatives") || lsGet(CREATIVE_DRAFT_KEY) || lsGet("sm_setup_creatives_backup_v1"));
+                if (_fbRaw) {
+                  const _fbObj = JSON.parse(_fbRaw);
+                  const _fbImgs = (Array.isArray(_fbObj?.images) ? _fbObj.images : []).filter(Boolean);
+                  if (_fbImgs.length) {
+                    imgA = _fbImgs.slice(0, 1);
+                    console.debug("[creative] imgA recovered from saved draft:", imgA);
+                  }
+                }
+              } catch {}
+            }
 
             const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);

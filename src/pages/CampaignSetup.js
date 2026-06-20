@@ -3665,18 +3665,22 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   const body = state.body || "";
   const answers = state.answers || {};
 
-  const inferredLink = (
-    state.websiteUrl ||
-    form?.websiteUrl ||
-    form?.website ||
-    answers?.websiteUrl ||
-    answers?.website ||
-    answers?.url ||
-    answers?.link ||
-    ""
-  )
-    .toString()
-    .trim();
+  // When answers came from FormPage route state (any key populated), trust answers.url
+  // as the single source of truth. Only fall back to form/localStorage values when
+  // route state was lost — those may be stale data from a previous client or session.
+  const _answersFromState = Object.keys(answers || {}).length > 0;
+  const inferredLink = _answersFromState
+    ? (answers?.url || answers?.websiteUrl || answers?.website || answers?.link || "")
+        .toString().trim()
+    : (
+        state.websiteUrl ||
+        form?.websiteUrl ||
+        form?.website ||
+        answers?.url ||
+        answers?.websiteUrl ||
+        answers?.link ||
+        ""
+      ).toString().trim();
 
   const [previewCopy, setPreviewCopy] = useState(() => {
     const fromState = {
@@ -6264,21 +6268,29 @@ const { startISO, endISO } = capTwoWeeksISO(
 );
 
 const websiteUrl = (() => {
+  // When answers came from the current FormPage session (any key populated), treat
+  // answers.url as the single authoritative URL. If the user left it blank, stay blank —
+  // do NOT silently substitute stale form/localStorage values from another session or client.
+  if (_answersFromState) {
+    let raw = String(answers?.url || answers?.websiteUrl || answers?.website || answers?.link || "").trim();
+    if (!raw) return ""; // user intentionally left URL blank — honor it
+    raw = raw.replace(/\s+/g, "");
+    if (raw.startsWith("//")) raw = "https:" + raw;
+    if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+    console.debug("[URL] from answers (route state):", raw);
+    return raw;
+  }
+
+  // Route state was lost (page refresh, direct navigation): use full fallback chain.
   let raw = (
     form?.websiteUrl ||
     form?.website ||
-    answers?.websiteUrl ||
-    answers?.website ||
-    answers?.url ||
-    answers?.link ||
     inferredLink ||
     previewCopy?.link ||
     ""
   ).toString().trim();
 
-  // Mobile fallback: if navigation state was lost (answers = {}), the website URL
-  // might only exist in FORM_DRAFT_KEY — the same key launchPhoneRaw reads from.
-  // Read both symmetrically so a website launch doesn't fall through to phone-only.
+  // Mobile fallback: FORM_DRAFT_KEY may have the URL when route state is gone.
   if (!raw) {
     try {
       const draftRaw = lsGet(resolvedUser, FORM_DRAFT_KEY) || localStorage.getItem(FORM_DRAFT_KEY);
@@ -6296,10 +6308,7 @@ const websiteUrl = (() => {
   }
 
   if (!raw) {
-    // Last-resort: dedicated persistent key written by FormPage before navigation and refreshed
-    // before OAuth redirect. No TTL, not purged post-launch — survives all route-state and TTL failures.
-    // In admin-client mode prefer the client-namespaced key so one client's URL never bleeds
-    // into another client's launch (root cause of "uses Joe's old URL" bug).
+    // Last-resort persistent key — client-namespaced in admin-client mode.
     try {
       if (adminClientId) {
         raw = String(localStorage.getItem(`u:adminClient:${adminClientId}:sm_last_website_url_v1`) || "").trim();
@@ -6314,6 +6323,7 @@ const websiteUrl = (() => {
   raw = raw.replace(/\s+/g, "");
   if (raw.startsWith("//")) raw = "https:" + raw;
   if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+  console.debug("[URL] from fallback chain (route state lost):", raw);
   return raw;
 })();
 
