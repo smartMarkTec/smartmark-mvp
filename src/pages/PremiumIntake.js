@@ -267,7 +267,12 @@ export default function PremiumIntake() {
       const r = await fetch(url, { method: "POST", credentials: "include", headers, body });
       const j = await r.json().catch(() => ({}));
       if (!j.ok) throw new Error(j.error || "Submission failed. Please try again.");
-      navigate("/premium-intake-complete");
+      // Admin filling intake for a client → go straight to AI Agent tab
+      if (adminClientId) {
+        navigate(`/setup?adminClientId=${encodeURIComponent(adminClientId)}&tab=ai-agent`);
+      } else {
+        navigate("/premium-intake-complete");
+      }
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {

@@ -2,6 +2,7 @@
 // src/pages/CampaignSetup.js
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import InlineAdAgent from "./InlineAdAgent";
 import {
   FaPause,
   FaPlay,
@@ -3099,6 +3100,7 @@ useEffect(() => {
   }, []);
 
   // ✅ Bootstrap ctxKey early (on first render + on OAuth return)
+  // Also open AI Agent tab if ?tab=ai-agent is in the URL
   useEffect(() => {
     const qs = new URLSearchParams(location.search || "");
     const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
@@ -3107,9 +3109,13 @@ useEffect(() => {
     const user = getUserFromStorage();
     const active = (getActiveCtx(user) || "").trim();
 
-    if (ctxFromState) return setActiveCtx(ctxFromState, user);
-    if (ctxFromUrl) return setActiveCtx(ctxFromUrl, user);
-    if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
+    if (ctxFromState) setActiveCtx(ctxFromState, user);
+    else if (ctxFromUrl) setActiveCtx(ctxFromUrl, user);
+    else if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
+
+    // Open AI Agent tab when ?tab=ai-agent is present in URL
+    const tabParam = (qs.get("tab") || "").trim().toLowerCase();
+    if (tabParam === "ai-agent") setSetupTab("ai-agent");
   }, [location.search]);
 
 // ✅ If a campaign was launched successfully, never show leftover "Untitled / IN PROGRESS"
@@ -7459,6 +7465,12 @@ ${pendingTest ? `
     subtitle: "Ad account details",
   },
   {
+    key: "ai-agent",
+    step: "AI",
+    title: "AI Ad Agent",
+    subtitle: "Create & test creatives",
+  },
+  {
     key: "creatives",
     step: "02",
     title: "Creatives",
@@ -7586,12 +7598,8 @@ ${pendingTest ? `
           type="button"
           title={locked ? "Upgrade to use Ad Agent" : "Ad Agent — AI marketing assistant"}
           onClick={() => {
-            if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
-              localStorage.setItem("sm_agent_campaign_id", String(selectedCampaignId).trim());
-            } else {
-              localStorage.removeItem("sm_agent_campaign_id");
-            }
-            navigate("/ad-agent");
+            // Open inline — no fullscreen navigation needed
+            setSetupTab("ai-agent");
           }}
           style={{
             flex: isMobile ? 1 : "unset",
@@ -10445,6 +10453,28 @@ ${pendingTest ? `
         </div>
       </>
     )}
+
+{/* ── AI Agent tab ── */}
+{setupTab === "ai-agent" && (
+  <InlineAdAgent
+    adminClientId={adminClientId}
+    adminClientInfo={adminClientInfo}
+    selectedCampaignId={selectedCampaignId}
+    onCreativesGenerated={({ images, creativeSet, creativeTestCount }) => {
+      setDraftCreatives({
+        images: images.filter(Boolean),
+        mediaSelection: "image",
+        creativeSet,
+        creativeTestCount,
+      });
+      setSelectedCampaignId("__DRAFT__");
+      setExpandedId("__DRAFT__");
+    }}
+    onGoToCreatives={() => setSetupTab("creatives")}
+    onGoToCampaign={() => setSetupTab("campaign")}
+    billingInfo={billingInfo}
+  />
+)}
 
 {setupTab === "account" && (
   <>

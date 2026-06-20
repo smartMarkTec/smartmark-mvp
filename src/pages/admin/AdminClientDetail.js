@@ -337,7 +337,7 @@ export default function AdminClientDetail() {
               Open as Admin →
             </button>
             <button
-              onClick={() => navigate(`/form?adminClientId=${encodeURIComponent(id)}`)}
+              onClick={() => navigate(`/setup?adminClientId=${encodeURIComponent(id)}&tab=ai-agent`)}
               style={{ padding: "10px 22px", background: PURPLE, color: "#fff", border: "none", borderRadius: 9, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: FONT }}
             >
               Manage →
