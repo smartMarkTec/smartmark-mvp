@@ -8691,6 +8691,165 @@ router.post('/facebook/optimizer/simulate', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /auth/facebook/adaccount/:accountId/campaign/:campaignId/ad-metrics
+// Returns per-ad Meta Insights for every ad in the campaign's launchedCreativeSet.
+// Response: { ok, byAdId: { [metaAdId]: { impressions, clicks, linkClicks, … } }, fetchedAt }
+//
+// Admin path: pass ?ownerKey=user:<username> to resolve the client's token.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/ad-metrics', async (req, res) => {
+  const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId  = String(accountId  || '').replace(/^act_/, '').trim();
+
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId:       normalizedCampaignId,
+    accountId:        normalizedAccountId,
+    preferredOwnerKey: String(
+      req.query?.ownerKey  ||
+      req.query?.owner_key ||
+      req.body?.ownerKey   ||
+      ''
+    ).trim(),
+  });
+
+  const ownerKey  = String(resolved?.ownerKey  || ownerKeyFromReq(req) || '').trim();
+  const userToken = String(resolved?.userToken  || '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook.' });
+  }
+
+  try {
+    await ensureUsersAndSessions();
+    await db.read();
+
+    // Look up the campaign's launchedCreativeSet from the DB.
+    const creativeRecord = (db.data.campaign_creatives || []).find(
+      (r) => String(r.campaignId || '').trim() === normalizedCampaignId
+    );
+
+    const rawSet = Array.isArray(creativeRecord?.launchedCreativeSet)
+      ? creativeRecord.launchedCreativeSet
+      : [];
+
+    // Only fetch ads that have a metaAdId and are not archived/deleted/replaced.
+    const HIDDEN = new Set(['archived', 'deleted', 'replaced']);
+    const adsToFetch = rawSet.filter((c) => {
+      const s = String(c.status || '').toLowerCase();
+      return !HIDDEN.has(s) && !!c.metaAdId;
+    }).slice(0, 6); // cap at 6 — each is a parallel Meta call
+
+    console.log('[AD_METRICS_FETCH_START]', {
+      campaignId: normalizedCampaignId,
+      accountId:  normalizedAccountId,
+      ownerKey,
+      adCount: adsToFetch.length,
+      adIds: adsToFetch.map((c) => c.metaAdId),
+    });
+
+    if (adsToFetch.length === 0) {
+      console.log('[AD_METRICS_EMPTY]', { campaignId: normalizedCampaignId, reason: 'no_ad_ids_in_launched_set' });
+      return res.json({ ok: true, byAdId: {}, adCount: 0, empty: true, fetchedAt: new Date().toISOString() });
+    }
+
+    const INSIGHT_FIELDS = [
+      'impressions', 'clicks', 'reach', 'spend', 'ctr', 'cpc', 'frequency',
+      'actions', 'cost_per_action_type', 'outbound_clicks', 'cost_per_outbound_click',
+    ].join(',');
+
+    const CONV_TYPES = new Set([
+      'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
+      'omni_lead', 'purchase', 'offsite_conversion.fb_pixel_purchase',
+    ]);
+    const LINK_TYPES = new Set(['link_click', 'landing_page_view']);
+
+    async function fetchOneAdMetrics(adId) {
+      try {
+        const [insRes] = await Promise.allSettled([
+          axios.get(`https://graph.facebook.com/${META_API_VERSION}/${adId}/insights`, {
+            params: {
+              access_token: userToken,
+              fields:       INSIGHT_FIELDS,
+              date_preset:  'maximum',
+            },
+            timeout: 12000,
+          }),
+        ]);
+
+        const row = insRes.status === 'fulfilled' && Array.isArray(insRes.value?.data?.data)
+          ? insRes.value.data.data[0] || {}
+          : {};
+
+        const actions    = Array.isArray(row.actions)             ? row.actions             : [];
+        const outboundArr = Array.isArray(row.outbound_clicks)    ? row.outbound_clicks     : [];
+        const cpaArr     = Array.isArray(row.cost_per_action_type) ? row.cost_per_action_type : [];
+
+        const conversions  = actions.reduce((s, a) => CONV_TYPES.has(String(a?.action_type || '').toLowerCase()) ? s + Number(a?.value || 0) : s, 0);
+        const linkClicks   = actions.reduce((s, a) => LINK_TYPES.has(String(a?.action_type || '').toLowerCase()) ? s + Number(a?.value || 0) : s, 0);
+        const outboundClicks = outboundArr.reduce((s, a) => s + Number(a?.value || 0), 0);
+
+        const clicks       = Number(row.clicks      || 0);
+        const impressions  = Number(row.impressions || 0);
+        const spend        = Number(row.spend       || 0);
+        const effectiveClicks = linkClicks > 0 ? linkClicks : (outboundClicks > 0 ? outboundClicks : clicks);
+        const cpc          = Number(row.cpc || 0) || (effectiveClicks > 0 ? spend / effectiveClicks : 0);
+        const ctr          = Number(row.ctr || 0) || (impressions > 0 ? (clicks / impressions) * 100 : 0);
+
+        const cplRow       = cpaArr.find((a) => a?.action_type === 'link_click');
+        const costPerLinkClick = cplRow ? Number(Number(cplRow.value).toFixed(4)) : null;
+
+        return {
+          adId,
+          ok:             true,
+          impressions,
+          clicks,
+          linkClicks,
+          outboundClicks,
+          spend:          Number(spend.toFixed(2)),
+          ctr:            Number(ctr.toFixed(4)),
+          cpc:            Number(cpc.toFixed(4)),
+          costPerLinkClick,
+          reach:          Number(row.reach     || 0),
+          frequency:      Number(row.frequency || 0),
+          conversions,
+          hasData:        impressions > 0 || spend > 0,
+        };
+      } catch (err) {
+        const fbErr = err?.response?.data?.error;
+        console.error('[AD_METRICS_ERROR]', { adId, error: fbErr?.message || err?.message });
+        return { adId, ok: false, error: String(fbErr?.message || err?.message || 'fetch failed') };
+      }
+    }
+
+    const results = await Promise.all(adsToFetch.map((c) => fetchOneAdMetrics(String(c.metaAdId))));
+
+    const byAdId = {};
+    for (const r of results) {
+      byAdId[r.adId] = r;
+    }
+
+    const succeededCount = results.filter((r) => r.ok).length;
+    console.log('[AD_METRICS_FETCHED]', {
+      campaignId:    normalizedCampaignId,
+      adsFetched:    results.length,
+      succeeded:     succeededCount,
+      adIds:         results.map((r) => r.adId),
+    });
+
+    return res.json({
+      ok:        true,
+      byAdId,
+      adCount:   results.length,
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[AD_METRICS_ERROR]', { campaignId: normalizedCampaignId, error: err?.message });
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to fetch ad metrics.' });
+  }
+});
+
 // Expose internal scheduled pass for the background auto-runner started in server.js.
 // The auto-runner calls router.runInternalScheduledPass({ minHoursBetweenRuns, limit }).
 router.runInternalScheduledPass = runInternalScheduledPass;

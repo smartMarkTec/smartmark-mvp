@@ -1,5 +1,5 @@
 // src/pages/LandingPage.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import LANDING_PAGES from "../data/landingPages";
 
@@ -155,6 +155,52 @@ export default function LandingPage({ slug: slugProp }) {
     window.fbq("track", "PageView");
   }, [page?.metaPixelId]);
 
+  /* ── GA4: inject gtag.js and fire page_view if gaMeasurementId is set ── */
+  useEffect(() => {
+    const mid = page?.gaMeasurementId;
+    if (!mid) return;
+
+    // Inject the gtag script only once
+    if (!window.gtag && !document.getElementById("ga4-script")) {
+      const script = document.createElement("script");
+      script.id = "ga4-script";
+      script.async = true;
+      script.src = `https://www.googletagmanager.com/gtag/js?id=${mid}`;
+      document.head.appendChild(script);
+
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function() { window.dataLayer.push(arguments); };
+      window.gtag("js", new Date());
+      window.gtag("config", mid, { send_page_view: false });
+    }
+
+    // Fire page_view with landing page context
+    if (window.gtag) {
+      window.gtag("event", "page_view", {
+        client:    page.clientSlug || page.slug,
+        page_slug: page.slug,
+      });
+    }
+  }, [page?.gaMeasurementId, page?.slug, page?.clientSlug]);
+
+  /* ── URL param extraction: fbclid, campaignId, metaAdId, utm_* ── */
+  // Stored in a ref so event handlers can read them without re-renders.
+  const urlParamsRef = useRef({});
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      urlParamsRef.current = {
+        fbclid:       sp.get("fbclid")       || "",
+        campaignId:   sp.get("campaignId")   || sp.get("campaign_id") || "",
+        metaAdId:     sp.get("metaAdId")     || sp.get("ad_id")       || "",
+        utm_source:   sp.get("utm_source")   || "",
+        utm_medium:   sp.get("utm_medium")   || "",
+        utm_campaign: sp.get("utm_campaign") || "",
+        utm_content:  sp.get("utm_content")  || "",
+      };
+    } catch {}
+  }, []);
+
   if (!page) {
     return (
       <div style={{
@@ -173,8 +219,79 @@ export default function LandingPage({ slug: slugProp }) {
     );
   }
 
+  // ── Meta Pixel event helper ──────────────────────────────────────────────
   const track = (event, data = {}) => {
     if (window.fbq) window.fbq("track", event, data);
+  };
+
+  // ── GA4 event helper (no-op when GA4 not loaded) ─────────────────────────
+  const trackGA4 = (eventName, params = {}) => {
+    if (window.gtag) {
+      window.gtag("event", eventName, {
+        client:    page.clientSlug || page.slug,
+        page_slug: page.slug,
+        ...params,
+      });
+    }
+  };
+
+  // ── Server-side event logger (/api/landing-events) ────────────────────────
+  // Fire-and-forget: never awaited so it never blocks the user action.
+  const logEvent = (eventName, extra = {}) => {
+    const p = urlParamsRef.current || {};
+    fetch("/api/landing-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientSlug:   page.clientSlug  || page.slug,
+        pageSlug:     page.slug,
+        eventName,
+        phone:        page.phone || "",
+        campaignId:   p.campaignId   || "",
+        metaAdId:     p.metaAdId     || "",
+        fbclid:       p.fbclid       || "",
+        utm_source:   p.utm_source   || "",
+        utm_medium:   p.utm_medium   || "",
+        utm_campaign: p.utm_campaign || "",
+        utm_content:  p.utm_content  || "",
+        userAgent:    navigator.userAgent || "",
+        timestamp:    new Date().toISOString(),
+        ...extra,
+      }),
+    }).catch(() => {}); // swallow network errors — never block the user
+  };
+
+  // ── Combined call-click handler ───────────────────────────────────────────
+  // Fires Meta Pixel Contact + GA4 click_to_call + server log.
+  // NOTE: This tracks call button CLICKS only, not actual answered calls.
+  // TODO: wire up real call tracking via Twilio/CallRail/GoHighLevel:
+  //   - tracking number receives the call
+  //   - webhook fires with caller number, duration, recording URL
+  //   - store in DB with campaignId/metaAdId attribution from URL params
+  const trackCallClick = () => {
+    const p = urlParamsRef.current || {};
+    track("Contact", {
+      content_name:  `${page.businessName} Call Button`,
+      business_name: page.businessName,
+      phone:         page.phone,
+    });
+    trackGA4("click_to_call", {
+      phone:       page.phone,
+      campaign_id: p.campaignId || "",
+      meta_ad_id:  p.metaAdId   || "",
+    });
+    logEvent("call_click", { phone: page.phone });
+  };
+
+  // ── CTA click handler ─────────────────────────────────────────────────────
+  const trackCtaClick = (label = "cta") => {
+    const p = urlParamsRef.current || {};
+    trackGA4("cta_click", {
+      cta_label:   label,
+      campaign_id: p.campaignId || "",
+      meta_ad_id:  p.metaAdId   || "",
+    });
+    logEvent("cta_click");
   };
 
   // Schedule Service modal
@@ -188,6 +305,7 @@ export default function LandingPage({ slug: slugProp }) {
     setFormData({ name: "", phone: "", preferredDate: "", preferredTime: "" });
     setFormError(""); setSubmitSuccess(false); setSubmitting(false);
     setModalOpen(true);
+    trackCtaClick("schedule_service");
   };
   const closeModal = () => setModalOpen(false);
 
@@ -216,10 +334,15 @@ export default function LandingPage({ slug: slugProp }) {
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Submission failed.");
       setSubmitSuccess(true);
+      // Meta Pixel Lead event
       track("Lead", {
-        content_name: `${page.businessName} Schedule Service Form Submitted`,
+        content_name:  `${page.businessName} Schedule Service Form Submitted`,
         business_name: page.businessName,
       });
+      // GA4 generate_lead
+      trackGA4("generate_lead", { form: "schedule_service" });
+      // Server-side event log
+      logEvent("lead_submit");
     } catch (err) {
       setFormError(err.message || "Something went wrong. Please try again.");
     } finally {
@@ -270,11 +393,7 @@ export default function LandingPage({ slug: slugProp }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <a
               href={`tel:${page.phone}`}
-              onClick={() => track("Contact", {
-                content_name: `${page.businessName} Call Button`,
-                business_name: page.businessName,
-                phone: page.phone,
-              })}
+              onClick={trackCallClick}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
                 background: "#f97316", color: "#fff", fontFamily: FONT,
@@ -348,11 +467,7 @@ export default function LandingPage({ slug: slugProp }) {
               phone={page.phone}
               label={page.primaryButtonText}
               size="lg"
-              onClick={() => track("Contact", {
-                content_name: `${page.businessName} Call Button`,
-                business_name: page.businessName,
-                phone: page.phone,
-              })}
+              onClick={trackCallClick}
             />
             <ScheduleBtn
               label="Schedule Service"
@@ -382,11 +497,7 @@ export default function LandingPage({ slug: slugProp }) {
           <CallBtn
             phone={page.phone}
             label={`Call: ${page.phoneDisplay}`}
-            onClick={() => track("Contact", {
-              content_name: `${page.businessName} Call Button`,
-              business_name: page.businessName,
-              phone: page.phone,
-            })}
+            onClick={trackCallClick}
           />
         </div>
       </div>
@@ -460,11 +571,7 @@ export default function LandingPage({ slug: slugProp }) {
               phone={page.phone}
               label={page.primaryButtonText}
               size="lg"
-              onClick={() => track("Contact", {
-                content_name: `${page.businessName} Call Button`,
-                business_name: page.businessName,
-                phone: page.phone,
-              })}
+              onClick={trackCallClick}
             />
             <ScheduleBtn
               label="Schedule Service"

@@ -2681,6 +2681,11 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   const [removeError, setRemoveError] = useState(null);
   const [removeSuccess, setRemoveSuccess] = useState(false);
 
+  // Per-ad metrics for the launched creative set
+  const [adMetricsMap, setAdMetricsMap] = useState({});   // { [metaAdId]: metricsObj }
+  const [adMetricsLoading, setAdMetricsLoading] = useState(false);
+  const [adMetricsError, setAdMetricsError] = useState(null);
+
   const pending = optimizerState?.pendingCreativeTest || null;
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
   const isLive = pendingStatus === "live";
@@ -2708,6 +2713,36 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
     if (adCount === 2) return { header: "A/B Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "2 ad variations running" };
     return { header: "A/B/C Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `${adCount} ad variations running` };
   })();
+
+  // Fetch per-ad Meta Insights for every ad in launchedCreativeSet that has a metaAdId.
+  // Results stored in adMetricsMap keyed by metaAdId.
+  const adsWithIds = launchedSet.filter((c) => !!c.metaAdId);
+  useEffect(() => {
+    if (!adsWithIds.length || !campaignId || campaignId === "__DRAFT__") return;
+    let cancelled = false;
+    setAdMetricsLoading(true);
+    setAdMetricsError(null);
+
+    const url = adminClientId
+      ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/ad-metrics`
+      : `/auth/facebook/adaccount/act_${encodeURIComponent(accountId || "")}/campaign/${encodeURIComponent(campaignId)}/ad-metrics`;
+
+    fetch(url, { credentials: "include" })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => {
+        if (cancelled) return;
+        if (j.ok && j.byAdId) {
+          setAdMetricsMap(j.byAdId);
+        } else if (!j.empty && !j.ok) {
+          setAdMetricsError(j.error || "Could not load per-ad metrics.");
+        }
+      })
+      .catch((e) => { if (!cancelled) setAdMetricsError(e.message); })
+      .finally(() => { if (!cancelled) setAdMetricsLoading(false); });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adsWithIds.length, campaignId, accountId, adminClientId]);
 
   useEffect(() => {
     if (!hasLiveAds || !campaignId) return;
@@ -2979,9 +3014,43 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
                   <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.5, maxHeight: 56, overflow: "hidden" }}>{creative.body}</div>
                 )}
 
-                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto" }}>
-                  Waiting for delivery data
-                </div>
+                {/* ── Per-ad metrics ── */}
+                {(() => {
+                  const m = creative.metaAdId ? adMetricsMap[creative.metaAdId] : null;
+                  if (adMetricsLoading) {
+                    return <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto" }}>Loading metrics…</div>;
+                  }
+                  if (m && m.ok && m.hasData) {
+                    const rows = [
+                      ["Impressions", Number(m.impressions || 0).toLocaleString()],
+                      ["Clicks",      Number(m.clicks      || 0).toLocaleString()],
+                      ["Link Clicks", Number(m.linkClicks  || 0).toLocaleString()],
+                      ["CTR",         `${Number(m.ctr || 0).toFixed(2)}%`],
+                      ["CPC",         m.cpc ? `$${Number(m.cpc).toFixed(2)}` : "—"],
+                      ["Spend",       `$${Number(m.spend || 0).toFixed(2)}`],
+                      ...(m.costPerLinkClick ? [["Cost/Link Click", `$${Number(m.costPerLinkClick).toFixed(2)}`]] : []),
+                      ...(m.conversions > 0   ? [["Conversions", String(m.conversions)]] : []),
+                    ];
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: "auto", paddingTop: 6, borderTop: "1px solid #f1f5f9" }}>
+                        {rows.map(([k, v]) => (
+                          <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                            <span style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>{k}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  if (m && !m.ok) {
+                    return <div style={{ fontSize: 10, color: "#f87171", marginTop: "auto" }}>Metrics unavailable</div>;
+                  }
+                  return (
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto" }}>
+                      Waiting for delivery data
+                    </div>
+                  );
+                })()}
 
                 {!!adminClientId && creative.metaAdId && (
                   <div style={{ fontSize: 10, color: "#cbd5e1" }}>Ad ID: {creative.metaAdId}</div>
@@ -2992,10 +3061,14 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
         </div>
       )}
 
-      {/* Campaign-level aggregate metrics (if available) */}
-      {adCount > 0 && campaignMetrics && (Number(campaignMetrics.impressions) > 0 || Number(campaignMetrics.spend) > 0) && (
+      {/* Campaign-level aggregate metrics — shown only when per-ad data is unavailable */}
+      {adCount > 0 && !adMetricsLoading &&
+        Object.keys(adMetricsMap).length === 0 &&
+        campaignMetrics && (Number(campaignMetrics.impressions) > 0 || Number(campaignMetrics.spend) > 0) && (
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 16px" }}>
-          <div style={{ fontWeight: 800, fontSize: 11, color: "#64748b", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Campaign Total</div>
+          <div style={{ fontWeight: 800, fontSize: 11, color: "#64748b", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Campaign Total (fallback — per-ad data not yet available)
+          </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 20px" }}>
             {[
               ["Impressions", Number(campaignMetrics.impressions || 0).toLocaleString()],
@@ -3011,8 +3084,15 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
             ))}
           </div>
           <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
-            Per-ad breakdown requires Meta Ads Manager. Aggregate data shown above.
+            This is the campaign-level total. Per-ad breakdown will appear on each ad card once Meta delivers data.
           </div>
+        </div>
+      )}
+
+      {/* Per-ad metrics error notice */}
+      {adMetricsError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#dc2626", fontWeight: 600 }}>
+          Could not load per-ad metrics: {adMetricsError}
         </div>
       )}
 

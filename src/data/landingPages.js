@@ -24,6 +24,12 @@
  */
 
 const LANDING_PAGES = {
+/**
+ * New optional fields added for tracking:
+ *   clientSlug       — short identifier used in landing_events logs (e.g. "aspen", "proteks")
+ *   gaMeasurementId  — GA4 Measurement ID (e.g. "G-XXXXXXXXXX"). Empty string = disabled.
+ */
+
   /* ── Pro Teks HVAC — Austin / Hill Country ── */
   "proteks-austin": {
     slug: "proteks-austin",
@@ -62,6 +68,8 @@ const LANDING_PAGES = {
     backgroundImage: null,
     offerHeadline: "$500 Off Full System Replacement",
     locationBadge: "Austin / Hill Country",
+    clientSlug: "proteks",
+    gaMeasurementId: "",
   },
 
   /* ── Pro Teks HVAC — North San Antonio ── */
@@ -102,6 +110,8 @@ const LANDING_PAGES = {
     backgroundImage: null,
     offerHeadline: "$500 Off Full System Replacement",
     locationBadge: "North San Antonio",
+    clientSlug: "proteks",
+    gaMeasurementId: "",
   },
 
   "aspen-ac": {
@@ -141,6 +151,10 @@ const LANDING_PAGES = {
     backgroundImage: null,
     offerHeadline: "$75 AC Tune-Up",
     locationBadge: "Houston, TX",
+    clientSlug: "aspen",
+    // GA4 Measurement ID — set this to the real ID when available (e.g. "G-XXXXXXXXXX").
+    // Leave empty to disable GA4 injection on this page.
+    gaMeasurementId: "",
   },
 };
 

@@ -2342,4 +2342,60 @@ router.post('/admin/clients/:id/multi-area-launch', limitAdmin, requireAdmin, as
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/clients/:id/campaign/:campaignId/ad-metrics
+// Admin-only. Returns per-ad Meta Insights for a client campaign.
+// Delegates to the auth-route ad-metrics endpoint using the client's FB token.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:id/campaign/:campaignId/ad-metrics', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required.' });
+
+    await ensureDB();
+    const clientOwnerKey = `user:${String(user.username || '').trim()}`;
+
+    const clientToken = getFbUserToken(clientOwnerKey);
+    if (!clientToken) {
+      return res.json({ ok: false, noToken: true, byAdId: {}, adCount: 0, error: 'No Facebook token for this client.' });
+    }
+
+    // Look up account ID for this campaign from DB
+    const creativeRecord = (db.data.campaign_creatives || []).find(
+      (r) => String(r.campaignId || '').trim() === campaignId &&
+             String(r.ownerKey   || '').trim() === clientOwnerKey
+    );
+    const accountId = String(creativeRecord?.accountId || '').replace(/^act_/, '').trim();
+    if (!accountId) {
+      return res.json({ ok: false, error: 'Account ID not found for this campaign.', byAdId: {}, adCount: 0 });
+    }
+
+    const selfBase  = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+    const adminSid  = getSidFromReq(req);
+
+    const r = await axios.get(
+      `${selfBase}/auth/facebook/adaccount/${accountId}/campaign/${campaignId}/ad-metrics`,
+      {
+        params:  { ownerKey: clientOwnerKey },
+        headers: { [SID_HEADER]: adminSid, Cookie: req.headers.cookie || '' },
+        timeout: 30000,
+      }
+    );
+    return res.json(r.data);
+  } catch (err) {
+    const upstream = err?.response?.data;
+    console.error('[Admin] ad-metrics error:', upstream || err?.message);
+    return res.status(err.response?.status || 500).json({
+      ok:    false,
+      error: upstream?.error || err?.message || 'Failed to fetch ad metrics.',
+      byAdId: {},
+      adCount: 0,
+    });
+  }
+});
+
 module.exports = router;
