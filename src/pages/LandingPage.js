@@ -278,6 +278,7 @@ export default function LandingPage({ slug: slugProp }) {
   //   - store in DB with campaignId/metaAdId attribution from URL params
   const trackCallClick = () => {
     const p = urlParamsRef.current || {};
+    console.log("[LANDING_EVENT] click_to_call", { pageSlug: page.slug, phone: page.phone });
     track("Contact", {
       content_name:  `${page.businessName} Call Button`,
       business_name: page.businessName,
@@ -294,6 +295,7 @@ export default function LandingPage({ slug: slugProp }) {
   // ── CTA click handler ─────────────────────────────────────────────────────
   const trackCtaClick = (label = "cta") => {
     const p = urlParamsRef.current || {};
+    console.log("[LANDING_EVENT] cta_click", { pageSlug: page.slug, cta: label });
     trackGA4("cta_click", {
       cta_label:   label,
       campaign_id: p.campaignId || "",
@@ -348,6 +350,7 @@ export default function LandingPage({ slug: slugProp }) {
         business_name: page.businessName,
       });
       // GA4 generate_lead
+      console.log("[LANDING_EVENT] generate_lead", { pageSlug: page.slug });
       trackGA4("generate_lead", { form: "schedule_service" });
       // Server-side event log
       logEvent("lead_submit");
