@@ -154,6 +154,55 @@ const LANDING_PAGES = {
     clientSlug: "aspen",
     gaMeasurementId: "G-YKSC8DNBHQ",
   },
+
+  /* ── Aspen AC — workshop/preview (hero photo test) ──────────────────────
+     DO NOT add to hostnames[]. NOT linked from production.
+     Safe to iterate on. Apply to "aspen-ac" only after review.
+  ── */
+  "aspen-ac-workshop": {
+    slug: "aspen-ac-workshop",
+    businessName: "Aspen Air Conditioning & Heating",
+    headline: "Houston AC Tune-Up Special",
+    subheadline: "Fast, reliable AC service from Aspen Air Conditioning & Heating.",
+    offer: "Having issues with your AC or due for maintenance? Take advantage of our $75 AC tune-up, or ask about the $120 annual maintenance plan.",
+    phone: "13466411064",
+    phoneDisplay: "(346) 641-1064",
+    forwardingPhone: "17138822767",
+    serviceArea: "Houston and surrounding areas",
+    services: [
+      "AC repair",
+      "AC service",
+      "AC installation",
+      "AC tune-ups",
+      "Annual maintenance plans",
+    ],
+    trustPoints: [
+      "Local Houston AC service",
+      "Fast response",
+      "Residential AC repair and service",
+      "Simple scheduling",
+      "Call for current availability",
+    ],
+    hostnames: [],
+    mainWebsiteUrl: "https://aspen93.godaddysites.com",
+    primaryButtonText: "Call Now: (346) 641-1064",
+    secondaryButtonText: "Home",
+    pageTitle: "Aspen Air Conditioning & Heating | Houston AC Tune-Up Special",
+    metaDescription: "Fast, reliable AC service in Houston. Call Aspen Air Conditioning & Heating for AC tune-ups, service, and maintenance.",
+    logo: "/client-assets/aspen-ac-logo.png",
+    favicon: "/client-assets/aspen-ac-logo.png",
+    metaPixelId: null,
+    scheduleUrl: null,
+    backgroundImage: null,
+    offerHeadline: "$75 AC Tune-Up",
+    locationBadge: "Houston, TX",
+    clientSlug: "aspen",
+    gaMeasurementId: "",
+    // ── Hero photo config (workshop only) ──
+    heroBackgroundImage: "/client-assets/aspen-hero-hvac.jpg",
+    heroOverlay: 0.62,
+    heroBackgroundPosition: "center 30%",
+  },
 };
 
 export default LANDING_PAGES;

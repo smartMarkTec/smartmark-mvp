@@ -439,7 +439,9 @@ export default function LandingPage({ slug: slugProp }) {
 
       {/* ════════════ HERO ════════════ */}
       <div style={{
-        background: "linear-gradient(160deg, #050e1a 0%, #0d1f3c 55%, #143055 100%)",
+        background: page.heroBackgroundImage
+          ? `linear-gradient(rgba(5,14,26,${page.heroOverlay ?? 0.68}), rgba(5,14,26,${page.heroOverlay ?? 0.68})), url(${page.heroBackgroundImage}) ${page.heroBackgroundPosition || "center"} / cover no-repeat`
+          : "linear-gradient(160deg, #050e1a 0%, #0d1f3c 55%, #143055 100%)",
         padding: "64px 20px 72px",
         textAlign: "center",
       }}>

@@ -149,6 +149,8 @@ function App() {
       <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
       <Route path="/admin/clients/:id/manage-campaign" element={<AdminManageCampaign />} />
       <Route path="/admin/leads" element={<AdminLeads />} />
+      {/* ── Workshop / preview routes — not linked from production ── */}
+      <Route path="/workshop/aspen-hero" element={<LandingPage slug="aspen-ac-workshop" />} />
       {/* ── Public client landing pages — no auth required ── */}
       <Route path="/lp/:slug" element={<LandingPage />} />
       {/* ── Pro Teks HVAC offer pages ── */}
