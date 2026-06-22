@@ -380,14 +380,15 @@ export default function LandingPage({ slug: slugProp }) {
         }}>
           {page.logo ? (
             <div style={{
-              background: "#fff", borderRadius: 6, padding: "3px 8px",
+              background: "#fff", borderRadius: 6,
+              padding: (page.logoHeight && page.logoHeight < 40) ? "2px 6px" : "3px 8px",
               display: "flex", alignItems: "center", flexShrink: 1,
             }}>
               <img
                 src={page.logo}
                 alt={page.businessName}
                 onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextSibling.style.display = "inline"; }}
-                style={{ height: 40, maxWidth: 180, objectFit: "contain", display: "block" }}
+                style={{ height: page.logoHeight || 40, maxWidth: page.logoHeight ? Math.round((page.logoHeight / 40) * 180) : 180, objectFit: "contain", display: "block" }}
               />
               <span style={{ display: "none", color: "#0a1628", fontWeight: 700, fontSize: 14 }}>
                 {page.businessName}
@@ -401,7 +402,7 @@ export default function LandingPage({ slug: slugProp }) {
               {page.businessName}
             </span>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: page.topBarCallText ? 5 : 8, flexShrink: 0 }}>
             <a
               href={`tel:${page.phone}`}
               onClick={trackCallClick}
@@ -416,7 +417,7 @@ export default function LandingPage({ slug: slugProp }) {
               onMouseLeave={(e) => { e.currentTarget.style.background = "#f97316"; }}
             >
               <PhoneIcon size={12} />
-              Call: {page.phoneDisplay}
+              {page.topBarCallText || `Call: ${page.phoneDisplay}`}
             </a>
             <a
               href={page.mainWebsiteUrl}
@@ -497,7 +498,7 @@ export default function LandingPage({ slug: slugProp }) {
 
       {/* ════════════ OFFER ════════════ */}
       <div style={{ background: "#fff7ed", borderTop: "3px solid #f97316", padding: "36px 20px" }}>
-        <div style={{ maxWidth: 740, margin: "0 auto" }}>
+        <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>
             Promotion
           </div>

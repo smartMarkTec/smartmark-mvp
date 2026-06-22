@@ -202,6 +202,10 @@ const LANDING_PAGES = {
     heroBackgroundImage: "/client-assets/aspen-hero-hvac.jpg",
     heroOverlay: 0.62,
     heroBackgroundPosition: "center 30%",
+    // ── Header / layout tweaks (workshop only) ──
+    topBarCallText: "Call Now",
+    logoHeight: 28,
+    offerMaxWidth: 680,
   },
 };
 
