@@ -155,33 +155,41 @@ export default function LandingPage({ slug: slugProp }) {
     window.fbq("track", "PageView");
   }, [page?.metaPixelId]);
 
-  /* ── GA4: inject gtag.js and fire page_view if gaMeasurementId is set ── */
+  /* ── GA4: inject gtag.js and configure only when gaMeasurementId is set ──
+     Guard uses the per-ID script element, not window.gtag, because the
+     Smartemark app may have already set window.gtag for its own property.
+     Each landing page with a distinct gaMeasurementId gets its own script. ── */
   useEffect(() => {
     const mid = page?.gaMeasurementId;
     if (!mid) return;
 
-    // Inject the gtag script only once
-    if (!window.gtag && !document.getElementById("ga4-script")) {
+    const scriptId = `gtag-js-${mid}`;
+
+    // Inject the gtag.js loader only once per measurement ID
+    if (!document.getElementById(scriptId)) {
       const script = document.createElement("script");
-      script.id = "ga4-script";
+      script.id    = scriptId;
       script.async = true;
-      script.src = `https://www.googletagmanager.com/gtag/js?id=${mid}`;
+      script.src   = `https://www.googletagmanager.com/gtag/js?id=${mid}`;
       document.head.appendChild(script);
+    }
 
-      window.dataLayer = window.dataLayer || [];
+    // Initialize the dataLayer and gtag function (idempotent)
+    window.dataLayer = window.dataLayer || [];
+    if (!window.gtag) {
       window.gtag = function() { window.dataLayer.push(arguments); };
-      window.gtag("js", new Date());
-      window.gtag("config", mid, { send_page_view: false });
     }
+    window.gtag("js", new Date());
 
-    // Fire page_view with landing page context
-    if (window.gtag) {
-      window.gtag("event", "page_view", {
-        client:    page.clientSlug || page.slug,
-        page_slug: page.slug,
-      });
-    }
-  }, [page?.gaMeasurementId, page?.slug, page?.clientSlug]);
+    // Standard config call — this is what Google Tag Assistant looks for
+    window.gtag("config", mid, {
+      page_path:     window.location.pathname,
+      page_location: window.location.href,
+      page_title:    document.title || page.businessName || "Landing Page",
+    });
+
+    console.log("[GA4] loaded", mid, page.slug);
+  }, [page?.gaMeasurementId, page?.slug, page?.businessName]);
 
   /* ── URL param extraction: fbclid, campaignId, metaAdId, utm_* ── */
   // Stored in a ref so event handlers can read them without re-renders.
