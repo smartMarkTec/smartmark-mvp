@@ -206,6 +206,8 @@ const LANDING_PAGES = {
     topBarCallText: "Call Now",
     logoHeight: 28,
     offerMaxWidth: 680,
+    fullWidthHeader: true,
+    centerOfferContent: true,
   },
 };
 

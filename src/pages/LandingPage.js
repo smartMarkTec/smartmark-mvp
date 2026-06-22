@@ -375,7 +375,7 @@ export default function LandingPage({ slug: slugProp }) {
       {/* ════════════ TOP BAR ════════════ */}
       <div style={{ background: "#0a1628", padding: "0 20px" }}>
         <div style={{
-          maxWidth: 900, margin: "0 auto", height: 52,
+          maxWidth: page.fullWidthHeader ? "none" : 900, margin: "0 auto", height: 52,
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
           {page.logo ? (
@@ -498,14 +498,14 @@ export default function LandingPage({ slug: slugProp }) {
 
       {/* ════════════ OFFER ════════════ */}
       <div style={{ background: "#fff7ed", borderTop: "3px solid #f97316", padding: "36px 20px" }}>
-        <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto" }}>
+        <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto", textAlign: page.centerOfferContent ? "center" : undefined }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>
             Promotion
           </div>
           <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>
             {page.offerHeadline || "Special Offer"}
           </div>
-          <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 0 22px", maxWidth: 560 }}>
+          <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.centerOfferContent ? "0 auto 22px" : "0 0 22px", maxWidth: 560 }}>
             {page.offer}
           </p>
           <CallBtn
