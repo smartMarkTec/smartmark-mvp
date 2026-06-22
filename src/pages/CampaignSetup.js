@@ -70,6 +70,26 @@ function ensureStoredSid() {
   return sid;
 }
 
+// Appends standard UTM + Smartemark attribution params to a destination URL.
+// Used when building ad destination URLs so future landing events can be
+// attributed back to the specific ad/variant. Does NOT modify live campaigns —
+// call this only at launch time for new ad creatives.
+function buildTrackingUrl(destinationUrl, { campaignId = "", variantIndex = 1, angle = "", campaignName = "" } = {}) {
+  try {
+    const u = new URL(destinationUrl);
+    if (!u.searchParams.get("utm_source"))   u.searchParams.set("utm_source",   "facebook");
+    if (!u.searchParams.get("utm_medium"))   u.searchParams.set("utm_medium",   "paid_social");
+    if (campaignName && !u.searchParams.get("utm_campaign")) u.searchParams.set("utm_campaign", campaignName.toLowerCase().replace(/\s+/g, "_").slice(0, 80));
+    if (angle        && !u.searchParams.get("utm_content"))  u.searchParams.set("utm_content",  angle.toLowerCase().replace(/\s+/g, "_").slice(0, 50));
+    if (campaignId   && !u.searchParams.get("sm_campaign_id")) u.searchParams.set("sm_campaign_id", campaignId);
+    if (variantIndex && !u.searchParams.get("sm_variant"))   u.searchParams.set("sm_variant",   String(variantIndex));
+    if (angle        && !u.searchParams.get("sm_angle"))     u.searchParams.set("sm_angle",     angle.toLowerCase().slice(0, 50));
+    return u.toString();
+  } catch {
+    return destinationUrl;
+  }
+}
+
 async function authFetch(path, opts = {}) {
   const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };
@@ -2672,6 +2692,126 @@ function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
 // Creative A/B Test Panel
 // Shows original ad vs AI challenger when a pendingCreativeTest exists.
 // ─────────────────────────────────────────────────────────────────────────────
+// ── LandingActionsCard ────────────────────────────────────────────────────────
+// Read-only card shown in the campaign Overview tab.
+// Admin path: /api/admin/clients/:clientId/campaign/:campaignId/conversion-summary
+// Regular path: /api/landing-events/summary?pageSlug=...&campaignId=...
+// Displays call button clicks (not actual calls), tracked Twilio calls, and form leads.
+// Does NOT claim call clicks are real calls — labels are explicit.
+function LandingActionsCard({ adminClientId, campaignId, pageSlug }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!campaignId || campaignId === "__DRAFT__") return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const headers = sid ? { "x-sm-sid": sid } : {};
+
+    let url;
+    if (adminClientId) {
+      url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/conversion-summary`;
+      if (pageSlug) url += `?pageSlug=${encodeURIComponent(pageSlug)}`;
+    } else {
+      const qs = new URLSearchParams({ campaignId, ...(pageSlug ? { pageSlug } : {}) });
+      url = `/api/landing-events/summary?${qs}`;
+    }
+
+    fetch(url, { credentials: "include", headers })
+      .then((r) => r.json().catch(() => null))
+      .then((j) => {
+        if (cancelled) return;
+        if (j && j.ok) setData(j);
+        else setError(j?.error || "Could not load landing data.");
+      })
+      .catch(() => { if (!cancelled) setError("Network error loading landing data."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminClientId, campaignId, pageSlug]);
+
+  if (!campaignId || campaignId === "__DRAFT__") return null;
+
+  const t = data?.totals || {};
+  const hasCalls = t.trackedCalls > 0;
+  const hasAnyData = (data && (t.pageViews > 0 || t.callClicks > 0 || t.formLeads > 0 || t.trackedCalls > 0));
+
+  const rowStyle = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #f1f5f9" };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: "#374151" };
+  const valStyle = (v) => ({ fontSize: 13, fontWeight: 800, color: v > 0 ? "#0f172a" : "#9ca3af" });
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: "14px 16px", marginTop: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10 }}>
+        Landing Page Actions &amp; Calls
+      </div>
+
+      {loading && (
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>Loading…</div>
+      )}
+
+      {!loading && error && (
+        <div style={{ fontSize: 12, color: "#dc2626" }}>{error}</div>
+      )}
+
+      {!loading && !error && !hasAnyData && (
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>No landing page activity recorded yet for this campaign.</div>
+      )}
+
+      {!loading && !error && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {[
+            { label: "Page views",       val: t.pageViews       || 0, note: null },
+            { label: "Call clicks",       val: t.callClicks      || 0, note: "Call button taps on landing page" },
+            { label: "Schedule clicks",   val: t.scheduleClicks  || 0, note: null },
+            { label: "Form leads",        val: t.formLeads       || 0, note: null },
+            { label: "Tracked calls",     val: t.trackedCalls    || 0, note: "Real inbound calls via Twilio tracking number" },
+            ...(hasCalls ? [
+              { label: "Answered calls",  val: t.answeredCalls   || 0, note: null },
+              { label: "Missed calls",    val: t.missedCalls     || 0, note: null },
+            ] : []),
+          ].map(({ label, val, note }) => (
+            <div key={label} style={rowStyle}>
+              <div>
+                <div style={labelStyle}>{label}</div>
+                {note && <div style={{ fontSize: 10, color: "#9ca3af" }}>{note}</div>}
+              </div>
+              <div style={valStyle(val)}>{val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && data && (
+        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 8 }}>
+          Last {data.sinceDays || 90} days · Call clicks ≠ actual calls unless Twilio is active
+        </div>
+      )}
+
+      {!loading && !error && data?.recentEvents?.length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ fontSize: 11, color: "#6b7280", cursor: "pointer", fontWeight: 600 }}>
+            Recent activity ({data.recentEvents.length})
+          </summary>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+            {data.recentEvents.slice(0, 8).map((e) => (
+              <div key={e.id} style={{ fontSize: 11, color: "#6b7280", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 600, color: "#374151" }}>{e.eventName}</span>
+                <span>{e.createdAt ? new Date(e.createdAt).toLocaleDateString() : "—"}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved, campaignMetrics }) {
   const [testMetrics, setTestMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -2727,17 +2867,25 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       ? `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/ad-metrics`
       : `/auth/facebook/adaccount/act_${encodeURIComponent(accountId || "")}/campaign/${encodeURIComponent(campaignId)}/ad-metrics`;
 
-    fetch(url, { credentials: "include" })
+    const _sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const _headers = _sid ? { "x-sm-sid": _sid } : {};
+    console.log("[AD_METRICS_FRONTEND_REQUEST]", { url, adminClientId, campaignId, hasSid: !!_sid });
+
+    fetch(url, { credentials: "include", headers: _headers })
       .then((r) => r.json().catch(() => ({})))
       .then((j) => {
         if (cancelled) return;
         if (j.ok && j.byAdId) {
           setAdMetricsMap(j.byAdId);
         } else if (!j.empty && !j.ok) {
+          console.error("[AD_METRICS_FRONTEND_ERROR]", { url, error: j.error });
           setAdMetricsError(j.error || "Could not load per-ad metrics.");
         }
       })
-      .catch((e) => { if (!cancelled) setAdMetricsError(e.message); })
+      .catch((e) => {
+        console.error("[AD_METRICS_FRONTEND_ERROR]", { url, error: e.message });
+        if (!cancelled) setAdMetricsError(e.message);
+      })
       .finally(() => { if (!cancelled) setAdMetricsLoading(false); });
 
     return () => { cancelled = true; };
@@ -10388,6 +10536,10 @@ ${pendingTest ? `
                     </div>
                   );
                 })()}
+                <LandingActionsCard
+                  adminClientId={adminClientId}
+                  campaignId={selectedCampaignId}
+                />
                 <button
                   onClick={generateCampaignReport}
                   style={{

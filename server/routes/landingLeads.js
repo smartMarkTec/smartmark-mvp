@@ -118,4 +118,91 @@ router.post('/landing-events', async (req, res) => {
   return res.json({ ok: true, id: event.id });
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+   GET /api/landing-events/summary
+   Read-only. Returns aggregated landing event counts filtered by query params.
+   No auth required — counts only, no PII.
+
+   Query params:
+     clientSlug   — e.g. "aspen"
+     pageSlug     — e.g. "aspen-ac"
+     campaignId   — optional; filters to events that carry this campaignId
+     sinceDays    — default 90, max 365
+     metaAdId     — optional attribution filter
+     utm_content  — optional attribution filter
+───────────────────────────────────────────────────────────────────────── */
+router.get('/landing-events/summary', async (req, res) => {
+  try {
+    const clientSlug  = String(req.query.clientSlug  || '').trim();
+    const pageSlug    = String(req.query.pageSlug    || '').trim();
+    const campaignId  = String(req.query.campaignId  || '').trim();
+    const metaAdId    = String(req.query.metaAdId    || '').trim();
+    const utmContent  = String(req.query.utm_content || '').trim();
+    const sinceDays   = Math.min(Math.max(Number(req.query.sinceDays || 90), 1), 365);
+    const sinceDate   = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+
+    if (!clientSlug && !pageSlug && !campaignId) {
+      return res.status(400).json({ ok: false, error: 'At least one of clientSlug, pageSlug, or campaignId is required.' });
+    }
+
+    await db.read();
+    const allEvents = Array.isArray(db.data.landing_events) ? db.data.landing_events : [];
+
+    const events = allEvents.filter((e) => {
+      if ((e.createdAt || '') < sinceDate) return false;
+      if (metaAdId   && e.metaAdId    !== metaAdId)   return false;
+      if (utmContent && e.utm_content !== utmContent)  return false;
+      if (campaignId) {
+        if (e.campaignId === campaignId) return true;
+        // fall through to slug check if no campaignId match
+      }
+      if (clientSlug && e.clientSlug !== clientSlug) return false;
+      if (pageSlug   && e.pageSlug   !== pageSlug)   return false;
+      return true;
+    });
+
+    const TRACKED = ['page_view', 'call_click', 'cta_click', 'lead_submit'];
+    const totals = Object.fromEntries(TRACKED.map((k) => [k, 0]));
+    const byMetaAdId   = {};
+    const byUtmContent = {};
+
+    for (const e of events) {
+      if (e.eventName in totals) totals[e.eventName]++;
+      if (e.metaAdId) {
+        byMetaAdId[e.metaAdId] = byMetaAdId[e.metaAdId] || {};
+        byMetaAdId[e.metaAdId][e.eventName] = (byMetaAdId[e.metaAdId][e.eventName] || 0) + 1;
+      }
+      if (e.utm_content) {
+        byUtmContent[e.utm_content] = byUtmContent[e.utm_content] || {};
+        byUtmContent[e.utm_content][e.eventName] = (byUtmContent[e.utm_content][e.eventName] || 0) + 1;
+      }
+    }
+
+    const recentEvents = [...events]
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 20)
+      .map((e) => ({
+        id:          e.id,
+        eventName:   e.eventName,
+        pageSlug:    e.pageSlug,
+        campaignId:  e.campaignId  || null,
+        metaAdId:    e.metaAdId    || null,
+        utm_content: e.utm_content || null,
+        createdAt:   e.createdAt,
+      }));
+
+    return res.json({
+      ok: true,
+      sinceDays,
+      totals,
+      byMetaAdId:    Object.keys(byMetaAdId).length  > 0 ? byMetaAdId  : {},
+      byUtmContent:  Object.keys(byUtmContent).length > 0 ? byUtmContent : {},
+      recentEvents,
+    });
+  } catch (err) {
+    console.error('[landing-events/summary]', err.message);
+    return res.status(500).json({ ok: false, error: 'Failed to load summary.' });
+  }
+});
+
 module.exports = router;

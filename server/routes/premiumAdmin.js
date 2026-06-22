@@ -2359,6 +2359,8 @@ router.get('/admin/clients/:id/campaign/:campaignId/ad-metrics', limitAdmin, req
     await ensureDB();
     const clientOwnerKey = `user:${String(user.username || '').trim()}`;
 
+    console.log('[AD_METRICS_ADMIN_REQUEST]', { username, campaignId, clientOwnerKey });
+
     const clientToken = getFbUserToken(clientOwnerKey);
     if (!clientToken) {
       return res.json({ ok: false, noToken: true, byAdId: {}, adCount: 0, error: 'No Facebook token for this client.' });
@@ -2370,6 +2372,9 @@ router.get('/admin/clients/:id/campaign/:campaignId/ad-metrics', limitAdmin, req
              String(r.ownerKey   || '').trim() === clientOwnerKey
     );
     const accountId = String(creativeRecord?.accountId || '').replace(/^act_/, '').trim();
+
+    console.log('[AD_METRICS_ADMIN_OWNER_RESOLVED]', { clientOwnerKey, accountId, hasCreativeRecord: !!creativeRecord });
+
     if (!accountId) {
       return res.json({ ok: false, error: 'Account ID not found for this campaign.', byAdId: {}, adCount: 0 });
     }
@@ -2385,6 +2390,8 @@ router.get('/admin/clients/:id/campaign/:campaignId/ad-metrics', limitAdmin, req
         timeout: 30000,
       }
     );
+
+    console.log('[AD_METRICS_ADMIN_SUCCESS]', { clientOwnerKey, campaignId, adCount: r.data?.adCount });
     return res.json(r.data);
   } catch (err) {
     const upstream = err?.response?.data;
@@ -2395,6 +2402,148 @@ router.get('/admin/clients/:id/campaign/:campaignId/ad-metrics', limitAdmin, req
       byAdId: {},
       adCount: 0,
     });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/clients/:clientId/campaign/:campaignId/conversion-summary
+// Admin-only. Read-only. Returns landing page events + call tracking totals.
+// Filters by pageSlug query param if provided; otherwise uses all known slugs
+// from LANDING_PAGE_CONFIGS (all currently belong to Aspen/Joe).
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:clientId/campaign/:campaignId/conversion-summary', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const clientId   = decodeURIComponent(req.params.clientId || '');
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!clientId) return res.status(400).json({ ok: false, error: 'clientId required.' });
+
+    await db.read();
+    db.data = db.data || {};
+
+    // Optional filters from query
+    const pageSlugParam = String(req.query.pageSlug || '').trim();
+    const sinceDays     = Math.min(Math.max(Number(req.query.sinceDays || 90), 1), 365);
+    const sinceDate     = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+
+    // Determine which page slugs to include
+    const knownSlugs = new Set(Object.keys(LANDING_PAGE_CONFIGS));
+    const pageSlugsToInclude = pageSlugParam
+      ? new Set([pageSlugParam])
+      : knownSlugs;
+
+    // ── Landing events ────────────────────────────────────────────────────────
+    const allEvents = Array.isArray(db.data.landing_events) ? db.data.landing_events : [];
+    const events = allEvents.filter((e) => {
+      if ((e.createdAt || '') < sinceDate) return false;
+      // Match by campaignId first; fall back to pageSlug / clientSlug
+      if (e.campaignId && e.campaignId === campaignId) return true;
+      if (pageSlugsToInclude.has(e.pageSlug)) return true;
+      // clientSlug "aspen" also maps to aspen-ac — accept either
+      return [...pageSlugsToInclude].some((slug) => {
+        const cfg = LANDING_PAGE_CONFIGS[slug];
+        return cfg && e.clientSlug && e.clientSlug === String(slug.split('-')[0]);
+      });
+    });
+
+    const TRACKED_EVENTS = ['page_view', 'call_click', 'cta_click', 'lead_submit'];
+    const landingCounts = Object.fromEntries(TRACKED_EVENTS.map((k) => [k, 0]));
+    for (const e of events) {
+      if (e.eventName in landingCounts) landingCounts[e.eventName]++;
+    }
+
+    // Break down by metaAdId and utm_content for future attribution
+    const byMetaAdId = {};
+    const byUtmContent = {};
+    for (const e of events) {
+      if (e.metaAdId) {
+        byMetaAdId[e.metaAdId] = byMetaAdId[e.metaAdId] || {};
+        byMetaAdId[e.metaAdId][e.eventName] = (byMetaAdId[e.metaAdId][e.eventName] || 0) + 1;
+      }
+      if (e.utm_content) {
+        byUtmContent[e.utm_content] = byUtmContent[e.utm_content] || {};
+        byUtmContent[e.utm_content][e.eventName] = (byUtmContent[e.utm_content][e.eventName] || 0) + 1;
+      }
+    }
+
+    // ── Call tracking events (real Twilio calls) ──────────────────────────────
+    const allCalls = Array.isArray(db.data.call_tracking_events) ? db.data.call_tracking_events : [];
+    const calls = allCalls.filter((c) => {
+      if ((c.createdAt || '') < sinceDate) return false;
+      return pageSlugsToInclude.has(c.landingPageSlug);
+    });
+
+    let answeredCalls = 0, missedCalls = 0, totalCallDurationSec = 0;
+    for (const c of calls) {
+      const statuses = Array.isArray(c.statusUpdates) ? c.statusUpdates : [];
+      const completedUpdate = statuses.find((s) => s.callStatus === 'completed');
+      const dur = Number(c.duration || completedUpdate?.duration || 0);
+      if (dur > 0) {
+        answeredCalls++;
+        totalCallDurationSec += dur;
+      } else {
+        const isCompleted = c.callStatus === 'completed' || statuses.some((s) => s.callStatus === 'completed');
+        if (isCompleted) answeredCalls++;
+        else missedCalls++;
+      }
+    }
+
+    const formLeads   = landingCounts.lead_submit;
+    const conversions = answeredCalls + formLeads;
+
+    const recentEvents = [...events]
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 20)
+      .map((e) => ({
+        id:          e.id,
+        eventName:   e.eventName,
+        pageSlug:    e.pageSlug,
+        campaignId:  e.campaignId  || null,
+        metaAdId:    e.metaAdId    || null,
+        utm_content: e.utm_content || null,
+        createdAt:   e.createdAt,
+      }));
+
+    const recentCalls = [...calls]
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 10)
+      .map((c) => ({
+        id:              c.id,
+        callStatus:      c.callStatus,
+        duration:        c.duration || null,
+        createdAt:       c.createdAt,
+        landingPageSlug: c.landingPageSlug,
+      }));
+
+    return res.json({
+      ok: true,
+      clientId,
+      campaignId,
+      sinceDays,
+      totals: {
+        pageViews:               landingCounts.page_view,
+        callClicks:              landingCounts.call_click,
+        scheduleClicks:          landingCounts.cta_click,
+        formLeads,
+        trackedCalls:            calls.length,
+        answeredCalls,
+        missedCalls,
+        totalCallDurationSeconds: totalCallDurationSec,
+        conversions,
+      },
+      landingEvents:   landingCounts,
+      byMetaAdId:      Object.keys(byMetaAdId).length  > 0 ? byMetaAdId  : null,
+      byUtmContent:    Object.keys(byUtmContent).length > 0 ? byUtmContent : null,
+      calls: {
+        total:    calls.length,
+        answered: answeredCalls,
+        missed:   missedCalls,
+        recent:   recentCalls,
+      },
+      recentEvents,
+    });
+  } catch (err) {
+    console.error('[conversion-summary] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Failed to load conversion summary.' });
   }
 });
 
