@@ -208,6 +208,9 @@ const LANDING_PAGES = {
     offerMaxWidth: 680,
     fullWidthHeader: true,
     centerOfferContent: true,
+    enhancedSections: true,
+    workshopServices: ["AC tune-ups", "AC installation", "Annual maintenance plans"],
+    workshopTrustPoints: ["Local Houston AC service", "Fast response", "Residential AC repair and service"],
   },
 };
 

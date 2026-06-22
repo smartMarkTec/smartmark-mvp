@@ -32,6 +32,62 @@ function ShieldIcon() {
   );
 }
 
+/* ─── Enhanced section icons (workshop only) ─────────────────── */
+function ServiceIconEnhanced({ index }) {
+  const base = { width: 32, height: 32, viewBox: "0 0 24 24", fill: "none", stroke: "#f97316", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+  if (index === 0) return (
+    <svg {...base}>
+      <circle cx="12" cy="12" r="9.5"/>
+      <path d="M12 7v.5M7.5 12h.5M16.5 12h-.5M9 9l.4.4"/>
+      <path d="M10.5 13.8l1.5-2.3" strokeWidth="2"/>
+      <circle cx="12" cy="12" r="1.1" fill="#f97316" stroke="none"/>
+    </svg>
+  );
+  if (index === 1) return (
+    <svg {...base}>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <polyline points="9 22 9 12 15 12 15 22"/>
+    </svg>
+  );
+  return (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
+      <circle cx="8" cy="15" r="1.2" fill="#f97316" stroke="none"/>
+      <circle cx="12" cy="15" r="1.2" fill="#f97316" stroke="none"/>
+      <circle cx="16" cy="15" r="1.2" fill="#f97316" stroke="none"/>
+    </svg>
+  );
+}
+
+function TrustIconEnhanced({ index }) {
+  const base = { width: 32, height: 32, viewBox: "0 0 24 24", fill: "none", stroke: "#0f2744", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+  const shield = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z";
+  if (index === 0) return (
+    <svg {...base}>
+      <path d={shield}/>
+      <circle cx="12" cy="10" r="2" strokeWidth="1.5"/>
+      <line x1="12" y1="12" x2="12" y2="14" strokeWidth="1.5"/>
+    </svg>
+  );
+  if (index === 1) return (
+    <svg {...base}>
+      <path d={shield}/>
+      <circle cx="12" cy="11" r="3" strokeWidth="1.5"/>
+      <path d="M12 9.5v1.5l1 1" strokeWidth="1.5" strokeLinejoin="round"/>
+    </svg>
+  );
+  return (
+    <svg {...base}>
+      <path d={shield}/>
+      <path d="M9.5 15.5l2.5-2 2.5 2" strokeWidth="1.4"/>
+      <path d="M10.5 15.5v-2h3v2" strokeWidth="1.4"/>
+    </svg>
+  );
+}
+
 /* ─────────────────── Big orange call button ─────────────────── */
 function CallBtn({ phone, label, size = "md", onClick }) {
   const big = size === "lg";
@@ -517,56 +573,111 @@ export default function LandingPage({ slug: slugProp }) {
       </div>
 
       {/* ════════════ SERVICES ════════════ */}
-      <div style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
-        <div style={{ maxWidth: 740, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
-            Air Conditioning Services
-          </h2>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: 10,
-          }}>
-            {page.services.map((svc, i) => (
+      {page.enhancedSections ? (
+        <div style={{ background: "#f0f4f8", padding: "60px 20px" }}>
+          {/* Snowflake accent */}
+          <div style={{ textAlign: "center", color: "#f97316", fontSize: 28, lineHeight: 1, marginBottom: 10 }}>❄</div>
+          {/* Title with flanking lines */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 40, flexWrap: "wrap" }}>
+            <div style={{ flex: "0 0 40px", height: 1, background: "#c5d0dc" }} />
+            <h2 style={{ fontSize: "clamp(1.25rem, 3.5vw, 1.7rem)", fontWeight: 800, color: "#0f2744", margin: 0, textAlign: "center" }}>
+              Air Conditioning Services
+            </h2>
+            <div style={{ flex: "0 0 40px", height: 1, background: "#c5d0dc" }} />
+          </div>
+          {/* 3-card grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, maxWidth: 880, margin: "0 auto" }}>
+            {(page.workshopServices || page.services.slice(0, 3)).map((svc, i) => (
               <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                background: "#fff", border: "1px solid #e2e8f0",
-                borderRadius: 6, padding: "12px 14px",
-                fontSize: "0.9rem", fontWeight: 600, color: "#1e293b",
+                background: "#fff", borderRadius: 16, padding: "34px 24px 28px",
+                textAlign: "center",
+                boxShadow: "0 2px 16px rgba(15,39,68,0.07)",
+                border: "1px solid #e4eaf2",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
               }}>
-                <CheckCircleIcon />
-                {svc}
+                <div style={{
+                  width: 66, height: 66, borderRadius: "50%",
+                  background: "rgba(249,115,22,0.08)",
+                  border: "1.5px solid rgba(249,115,22,0.18)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <ServiceIconEnhanced index={i} />
+                </div>
+                <div style={{ fontSize: "0.97rem", fontWeight: 700, color: "#0f2744", lineHeight: 1.3 }}>{svc}</div>
               </div>
             ))}
           </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ background: "#f8fafc", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
+          <div style={{ maxWidth: 740, margin: "0 auto" }}>
+            <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
+              Air Conditioning Services
+            </h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+              {page.services.map((svc, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, padding: "12px 14px", fontSize: "0.9rem", fontWeight: 600, color: "#1e293b" }}>
+                  <CheckCircleIcon />
+                  {svc}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ════════════ WHY CHOOSE US ════════════ */}
-      <div style={{ background: "#fff", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
-        <div style={{ maxWidth: 740, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
-            Why Choose {page.businessName}
-          </h2>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 10,
-          }}>
-            {page.trustPoints.map((pt, i) => (
+      {page.enhancedSections ? (
+        <div style={{ background: "#fff", padding: "60px 20px" }}>
+          {/* Title with orange underline */}
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <h2 style={{ fontSize: "clamp(1.25rem, 3.5vw, 1.7rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 12px" }}>
+              Why Choose {page.businessName}
+            </h2>
+            <div style={{ height: 3, width: 48, background: "#f97316", borderRadius: 2, margin: "0 auto" }} />
+          </div>
+          {/* 3-card grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, maxWidth: 880, margin: "0 auto" }}>
+            {(page.workshopTrustPoints || page.trustPoints.slice(0, 3)).map((pt, i) => (
               <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                background: "#f8fafc", border: "1px solid #e2e8f0",
-                borderRadius: 6, padding: "12px 14px",
-                fontSize: "0.9rem", fontWeight: 600, color: "#1e293b",
+                background: "#f5f8fb", borderRadius: 16, padding: "34px 24px 28px",
+                textAlign: "center",
+                boxShadow: "0 2px 12px rgba(15,39,68,0.05)",
+                border: "1px solid #e4eaf2",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
               }}>
-                <ShieldIcon />
-                {pt}
+                <div style={{
+                  width: 66, height: 66, borderRadius: "50%",
+                  background: "rgba(15,39,68,0.07)",
+                  border: "1.5px solid rgba(15,39,68,0.12)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <TrustIconEnhanced index={i} />
+                </div>
+                <div style={{ fontSize: "0.97rem", fontWeight: 700, color: "#0f2744", lineHeight: 1.3 }}>{pt}</div>
               </div>
             ))}
           </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ background: "#fff", borderTop: "1px solid #e2e8f0", padding: "40px 20px" }}>
+          <div style={{ maxWidth: 740, margin: "0 auto" }}>
+            <h2 style={{ fontSize: "clamp(1.2rem, 3.5vw, 1.5rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 24px" }}>
+              Why Choose {page.businessName}
+            </h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {page.trustPoints.map((pt, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "12px 14px", fontSize: "0.9rem", fontWeight: 600, color: "#1e293b" }}>
+                  <ShieldIcon />
+                  {pt}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ════════════ BOTTOM CTA ════════════ */}
       <div style={{
