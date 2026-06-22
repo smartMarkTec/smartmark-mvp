@@ -152,9 +152,7 @@ const LANDING_PAGES = {
     offerHeadline: "$75 AC Tune-Up",
     locationBadge: "Houston, TX",
     clientSlug: "aspen",
-    // GA4 Measurement ID — set this to the real ID when available (e.g. "G-XXXXXXXXXX").
-    // Leave empty to disable GA4 injection on this page.
-    gaMeasurementId: "",
+    gaMeasurementId: "G-6JM99P1V4T",
   },
 };
 
