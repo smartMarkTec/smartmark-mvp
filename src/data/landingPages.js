@@ -70,6 +70,24 @@ const LANDING_PAGES = {
     locationBadge: "Austin / Hill Country",
     clientSlug: "proteks",
     gaMeasurementId: "",
+    // ── Enhanced design layout ──
+    offerMaxWidth: 680,
+    centerOfferContent: true,
+    enhancedSections: true,
+    workshopServicesData: [
+      { label: "AC system replacement",     desc: "Replace an aging or failing system with a professionally installed high-efficiency unit." },
+      { label: "New AC installation",       desc: "Clean installation for reliable comfort, stronger airflow, and long-term performance." },
+      { label: "Free replacement estimate", desc: "Get clear options and pricing before deciding on your full system replacement." },
+    ],
+    workshopTrustData: [
+      { label: "Local HVAC replacement specialists", desc: "Serving the area with professional AC replacement and installation support." },
+      { label: "Competitive installed pricing",      desc: "Clear replacement offers designed to help homeowners upgrade with confidence." },
+      { label: "Financing available",                desc: "Ask about financing options for approved customers." },
+    ],
+    workshopTrustBar: {
+      headline: "Reliable Installation. Clear Pricing. Better Home Comfort.",
+      sub: "Upgrade your AC system with confidence.",
+    },
   },
 
   /* ── Pro Teks HVAC — North San Antonio ── */
@@ -112,6 +130,24 @@ const LANDING_PAGES = {
     locationBadge: "North San Antonio",
     clientSlug: "proteks",
     gaMeasurementId: "",
+    // ── Enhanced design layout ──
+    offerMaxWidth: 680,
+    centerOfferContent: true,
+    enhancedSections: true,
+    workshopServicesData: [
+      { label: "AC system replacement",     desc: "Replace an aging or failing system with a professionally installed high-efficiency unit." },
+      { label: "New AC installation",       desc: "Clean installation for reliable comfort, stronger airflow, and long-term performance." },
+      { label: "Free replacement estimate", desc: "Get clear options and pricing before deciding on your full system replacement." },
+    ],
+    workshopTrustData: [
+      { label: "Local HVAC replacement specialists", desc: "Serving the area with professional AC replacement and installation support." },
+      { label: "Competitive installed pricing",      desc: "Clear replacement offers designed to help homeowners upgrade with confidence." },
+      { label: "Financing available",                desc: "Ask about financing options for approved customers." },
+    ],
+    workshopTrustBar: {
+      headline: "Reliable Installation. Clear Pricing. Better Home Comfort.",
+      sub: "Upgrade your AC system with confidence.",
+    },
   },
 
   "aspen-ac": {
@@ -153,6 +189,40 @@ const LANDING_PAGES = {
     locationBadge: "Houston, TX",
     clientSlug: "aspen",
     gaMeasurementId: "G-YKSC8DNBHQ",
+    // ── Approved design (applied from workshop 2026-06-22) ──
+    heroBackgroundImage: "/client-assets/aspen-hero-hvac.jpg",
+    heroOverlay: 0.62,
+    heroBackgroundPosition: "center 30%",
+    topBarCallText: "Call Now",
+    logoHeight: 28,
+    offerMaxWidth: 680,
+    fullWidthHeader: true,
+    centerOfferContent: true,
+    enhancedSections: true,
+    promotionSidePhotos: {
+      left: [
+        { src: "/client-assets/aspen-work-before.jpg", label: "Before" },
+        { src: "/client-assets/aspen-work-after.jpg",  label: "After"  },
+      ],
+      right: [
+        { src: "/client-assets/aspen-work-1.jpg", label: "" },
+        { src: "/client-assets/aspen-work-2.jpg", label: "" },
+      ],
+    },
+    workshopServicesData: [
+      { label: "AC tune-ups",              desc: "Improve efficiency and catch small issues early with a professional tune-up." },
+      { label: "AC installation",          desc: "Expert installation for reliable performance and long-term comfort." },
+      { label: "Annual maintenance plans", desc: "Keep your system running strong year-round and avoid unexpected breakdowns." },
+    ],
+    workshopTrustData: [
+      { label: "Local Houston AC service",          desc: "Proudly serving Houston and surrounding areas with honest, dependable service." },
+      { label: "Fast response",                     desc: "We respond quickly when you need us most — because your comfort can't wait." },
+      { label: "Residential AC repair and service", desc: "From repairs to full system care, we keep your home cool and comfortable." },
+    ],
+    workshopTrustBar: {
+      headline: "Quality Work. Honest Pricing. Year-Round Comfort.",
+      sub: "Your comfort is our priority.",
+    },
   },
 
   /* ── Aspen AC — workshop/preview (hero photo test) ──────────────────────
