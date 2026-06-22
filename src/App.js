@@ -31,6 +31,14 @@ import OnboardingConnect from "./pages/OnboardingConnect";
 import LandingPage from "./pages/LandingPage";
 import LANDING_PAGES from "./data/landingPages";
 
+const SMARTEMARK_GA_ID = "G-XP146JNFE7";
+const SMARTEMARK_HOSTNAMES = new Set([
+  "www.smartemark.com",
+  "smartemark.com",
+  "smartmark-mvp.vercel.app",
+  "localhost",
+]);
+
 /* Renders the matching client landing page when the hostname is a known custom domain,
    otherwise falls through to the normal Smartemark homepage. */
 function HostnameGateway() {
@@ -77,11 +85,33 @@ function NotFound() {
 function App() {
   const location = useLocation();
 
+  // Inject Smartemark GA4 once — only on Smartemark domains, never on client landing page domains
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!SMARTEMARK_HOSTNAMES.has(window.location.hostname)) return;
+
+    const scriptId = `gtag-js-${SMARTEMARK_GA_ID}`;
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id    = scriptId;
+      script.async = true;
+      script.src   = `https://www.googletagmanager.com/gtag/js?id=${SMARTEMARK_GA_ID}`;
+      document.head.appendChild(script);
+    }
+
+    window.dataLayer = window.dataLayer || [];
+    if (!window.gtag) {
+      window.gtag = function () { window.dataLayer.push(arguments); };
+    }
+    window.gtag("js", new Date());
+    window.gtag("config", SMARTEMARK_GA_ID);
+  }, []); // runs once on mount
+
+  // Track SPA route changes for Smartemark GA — skipped on client landing page domains
+  useEffect(() => {
+    if (!SMARTEMARK_HOSTNAMES.has(window.location.hostname)) return;
     if (!window.gtag) return;
 
-    window.gtag("config", "G-XP146JNFE7", {
+    window.gtag("config", SMARTEMARK_GA_ID, {
       page_path: location.pathname + location.search,
     });
   }, [location]);

@@ -152,7 +152,7 @@ const LANDING_PAGES = {
     offerHeadline: "$75 AC Tune-Up",
     locationBadge: "Houston, TX",
     clientSlug: "aspen",
-    gaMeasurementId: "G-6JM99P1V4T",
+    gaMeasurementId: "G-YKSC8DNBHQ",
   },
 };
 
