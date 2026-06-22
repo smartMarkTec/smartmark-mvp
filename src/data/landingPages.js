@@ -211,6 +211,30 @@ const LANDING_PAGES = {
     enhancedSections: true,
     workshopServices: ["AC tune-ups", "AC installation", "Annual maintenance plans"],
     workshopTrustPoints: ["Local Houston AC service", "Fast response", "Residential AC repair and service"],
+    promotionSidePhotos: {
+      left: [
+        { src: "/client-assets/aspen-work-before.jpg", label: "Before" },
+        { src: "/client-assets/aspen-work-after.jpg",  label: "After"  },
+      ],
+      right: [
+        { src: "/client-assets/aspen-work-1.jpg", label: "" },
+        { src: "/client-assets/aspen-work-2.jpg", label: "" },
+      ],
+    },
+    workshopServicesData: [
+      { label: "AC tune-ups",              desc: "Improve efficiency and catch small issues early with a professional tune-up." },
+      { label: "AC installation",          desc: "Expert installation for reliable performance and long-term comfort." },
+      { label: "Annual maintenance plans", desc: "Keep your system running strong year-round and avoid unexpected breakdowns." },
+    ],
+    workshopTrustData: [
+      { label: "Local Houston AC service",         desc: "Proudly serving Houston and surrounding areas with honest, dependable service." },
+      { label: "Fast response",                    desc: "We respond quickly when you need us most — because your comfort can't wait." },
+      { label: "Residential AC repair and service", desc: "From repairs to full system care, we keep your home cool and comfortable." },
+    ],
+    workshopTrustBar: {
+      headline: "Quality Work. Honest Pricing. Year-Round Comfort.",
+      sub: "Your comfort is our priority.",
+    },
   },
 };
 

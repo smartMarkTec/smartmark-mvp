@@ -34,56 +34,62 @@ function ShieldIcon() {
 
 /* ─── Enhanced section icons (workshop only) ─────────────────── */
 function ServiceIconEnhanced({ index }) {
-  const base = { width: 32, height: 32, viewBox: "0 0 24 24", fill: "none", stroke: "#f97316", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
+  const base = { width: 26, height: 26, viewBox: "0 0 24 24", fill: "none", stroke: "#f97316", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
   if (index === 0) return (
+    // Wrench — tune-ups
     <svg {...base}>
-      <circle cx="12" cy="12" r="9.5"/>
-      <path d="M12 7v.5M7.5 12h.5M16.5 12h-.5M9 9l.4.4"/>
-      <path d="M10.5 13.8l1.5-2.3" strokeWidth="2"/>
-      <circle cx="12" cy="12" r="1.1" fill="#f97316" stroke="none"/>
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
     </svg>
   );
   if (index === 1) return (
+    // HVAC unit — installation
     <svg {...base}>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-      <polyline points="9 22 9 12 15 12 15 22"/>
+      <rect x="2" y="6" width="20" height="11" rx="2"/>
+      <line x1="6" y1="17" x2="6" y2="20"/>
+      <line x1="18" y1="17" x2="18" y2="20"/>
+      <line x1="7.5" y1="11.5" x2="7.5" y2="13.5"/>
+      <line x1="11" y1="11.5" x2="11" y2="13.5"/>
+      <line x1="14.5" y1="11.5" x2="14.5" y2="13.5"/>
     </svg>
   );
   return (
+    // Clipboard + check — maintenance
     <svg {...base}>
-      <rect x="3" y="4" width="18" height="18" rx="2"/>
-      <line x1="8" y1="2" x2="8" y2="6"/>
-      <line x1="16" y1="2" x2="16" y2="6"/>
-      <line x1="3" y1="10" x2="21" y2="10"/>
-      <circle cx="8" cy="15" r="1.2" fill="#f97316" stroke="none"/>
-      <circle cx="12" cy="15" r="1.2" fill="#f97316" stroke="none"/>
-      <circle cx="16" cy="15" r="1.2" fill="#f97316" stroke="none"/>
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+      <rect x="9" y="3" width="6" height="4" rx="1"/>
+      <path d="M9 12l2 2 4-4"/>
     </svg>
   );
 }
 
 function TrustIconEnhanced({ index }) {
-  const base = { width: 32, height: 32, viewBox: "0 0 24 24", fill: "none", stroke: "#0f2744", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
-  const shield = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z";
+  // White stroke — sits on dark navy circle background
+  const base = { width: 26, height: 26, viewBox: "0 0 24 24", fill: "none", stroke: "#fff", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
   if (index === 0) return (
+    // House — local Houston service
     <svg {...base}>
-      <path d={shield}/>
-      <circle cx="12" cy="10" r="2" strokeWidth="1.5"/>
-      <line x1="12" y1="12" x2="12" y2="14" strokeWidth="1.5"/>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <polyline points="9 22 9 12 15 12 15 22"/>
     </svg>
   );
   if (index === 1) return (
+    // Speedometer — fast response
     <svg {...base}>
-      <path d={shield}/>
-      <circle cx="12" cy="11" r="3" strokeWidth="1.5"/>
-      <path d="M12 9.5v1.5l1 1" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M12 2a10 10 0 0 1 7.36 16.7"/>
+      <path d="M12 2a10 10 0 0 0-7.36 16.7"/>
+      <line x1="12" y1="8" x2="12" y2="6"/>
+      <line x1="7" y1="12" x2="5" y2="12"/>
+      <path d="M10.5 13.5l2-4" strokeWidth="2"/>
+      <circle cx="12" cy="14" r="1.5" fill="#fff" stroke="none"/>
     </svg>
   );
   return (
+    // Snowflake — residential cooling & comfort
     <svg {...base}>
-      <path d={shield}/>
-      <path d="M9.5 15.5l2.5-2 2.5 2" strokeWidth="1.4"/>
-      <path d="M10.5 15.5v-2h3v2" strokeWidth="1.4"/>
+      <line x1="12" y1="2" x2="12" y2="22"/>
+      <line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M17 7l-5 5-5-5"/>
+      <path d="M7 17l5-5 5 5"/>
     </svg>
   );
 }
@@ -360,6 +366,23 @@ export default function LandingPage({ slug: slugProp }) {
     logEvent("cta_click");
   };
 
+  // Mobile breakpoint for side-photo layout
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 700);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 700);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Lightbox for work photos
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e) => { if (e.key === "Escape") setLightboxSrc(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lightboxSrc]);
+
   // Schedule Service modal
   const [modalOpen, setModalOpen] = useState(false);
   const [formData, setFormData] = useState({ name: "", phone: "", preferredDate: "", preferredTime: "" });
@@ -553,58 +576,103 @@ export default function LandingPage({ slug: slugProp }) {
       </div>
 
       {/* ════════════ OFFER ════════════ */}
-      <div style={{ background: "#fff7ed", borderTop: "3px solid #f97316", padding: "36px 20px" }}>
-        <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto", textAlign: page.centerOfferContent ? "center" : undefined }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>
-            Promotion
+      <div style={{ background: "#fff7ed", borderTop: "3px solid #f97316", padding: page.promotionSidePhotos ? "44px 24px" : "36px 20px" }}>
+        {page.promotionSidePhotos ? (
+          <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+            {isMobile ? (
+              /* ── Mobile: promo first, 2×2 photo grid below ── */
+              <>
+                <div style={{ textAlign: "center", marginBottom: 24 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
+                  <div style={{ fontSize: "clamp(1.6rem, 7vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
+                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 auto 22px", maxWidth: 420 }}>{page.offer}</p>
+                  <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxWidth: 340, margin: "0 auto" }}>
+                  {[...page.promotionSidePhotos.left, ...page.promotionSidePhotos.right].map((photo, i) => (
+                    <div key={i} style={{ position: "relative", cursor: "pointer" }} onClick={() => setLightboxSrc(photo.src)}>
+                      <img src={photo.src} alt={photo.label || "Work photo"} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 10, boxShadow: "0 2px 8px rgba(0,0,0,0.14)", border: "2px solid rgba(255,255,255,0.7)", display: "block" }} />
+                      {photo.label && <div style={{ position: "absolute", bottom: 6, left: 6, background: "rgba(10,22,40,0.65)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4 }}>{photo.label}</div>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              /* ── Desktop: [left photos] [promo] [right photos] ── */
+              <div style={{ display: "flex", alignItems: "center", gap: 28, justifyContent: "center" }}>
+                {/* Left photos */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, flexShrink: 0 }}>
+                  {page.promotionSidePhotos.left.map((photo, i) => (
+                    <div key={i} style={{ position: "relative", cursor: "pointer" }} onClick={() => setLightboxSrc(photo.src)}>
+                      <img
+                        src={photo.src} alt={photo.label || "Work photo"}
+                        style={{ width: 148, height: 108, objectFit: "cover", borderRadius: 10, boxShadow: "0 3px 12px rgba(0,0,0,0.16)", border: "2px solid rgba(255,255,255,0.7)", display: "block", transition: "transform 0.14s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.04)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+                      />
+                      {photo.label && <div style={{ position: "absolute", bottom: 7, left: 7, background: "rgba(10,22,40,0.65)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4 }}>{photo.label}</div>}
+                    </div>
+                  ))}
+                </div>
+                {/* Promo content */}
+                <div style={{ flex: "1 1 auto", maxWidth: 440, textAlign: "center" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
+                  <div style={{ fontSize: "clamp(1.5rem, 3.5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
+                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 auto 22px", maxWidth: 380 }}>{page.offer}</p>
+                  <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
+                </div>
+                {/* Right photos */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, flexShrink: 0 }}>
+                  {page.promotionSidePhotos.right.map((photo, i) => (
+                    <div key={i} style={{ position: "relative", cursor: "pointer" }} onClick={() => setLightboxSrc(photo.src)}>
+                      <img
+                        src={photo.src} alt={photo.label || "Work photo"}
+                        style={{ width: 148, height: 108, objectFit: "cover", borderRadius: 10, boxShadow: "0 3px 12px rgba(0,0,0,0.16)", border: "2px solid rgba(255,255,255,0.7)", display: "block", transition: "transform 0.14s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.04)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+                      />
+                      {photo.label && <div style={{ position: "absolute", bottom: 7, left: 7, background: "rgba(10,22,40,0.65)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4 }}>{photo.label}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>
-            {page.offerHeadline || "Special Offer"}
+        ) : (
+          /* ── Original single-column layout ── */
+          <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto", textAlign: page.centerOfferContent ? "center" : undefined }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
+            <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
+            <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.centerOfferContent ? "0 auto 22px" : "0 0 22px", maxWidth: 560 }}>{page.offer}</p>
+            <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
           </div>
-          <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.centerOfferContent ? "0 auto 22px" : "0 0 22px", maxWidth: 560 }}>
-            {page.offer}
-          </p>
-          <CallBtn
-            phone={page.phone}
-            label={`Call: ${page.phoneDisplay}`}
-            onClick={trackCallClick}
-          />
-        </div>
+        )}
       </div>
 
       {/* ════════════ SERVICES ════════════ */}
       {page.enhancedSections ? (
-        <div style={{ background: "#f0f4f8", padding: "60px 20px" }}>
-          {/* Snowflake accent */}
-          <div style={{ textAlign: "center", color: "#f97316", fontSize: 28, lineHeight: 1, marginBottom: 10 }}>❄</div>
-          {/* Title with flanking lines */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 40, flexWrap: "wrap" }}>
-            <div style={{ flex: "0 0 40px", height: 1, background: "#c5d0dc" }} />
-            <h2 style={{ fontSize: "clamp(1.25rem, 3.5vw, 1.7rem)", fontWeight: 800, color: "#0f2744", margin: 0, textAlign: "center" }}>
-              Air Conditioning Services
-            </h2>
-            <div style={{ flex: "0 0 40px", height: 1, background: "#c5d0dc" }} />
-          </div>
-          {/* 3-card grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, maxWidth: 880, margin: "0 auto" }}>
-            {(page.workshopServices || page.services.slice(0, 3)).map((svc, i) => (
+        <div style={{ background: "#f3f5f9", padding: "56px 20px" }}>
+          <h2 style={{ fontSize: "clamp(1.4rem, 3.5vw, 1.9rem)", fontWeight: 800, color: "#0f2744", textAlign: "center", margin: "0 0 36px" }}>
+            Air Conditioning Services
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, maxWidth: 980, margin: "0 auto" }}>
+            {(page.workshopServicesData || (page.workshopServices || page.services.slice(0, 3)).map((s) => ({ label: s, desc: "" }))).map((item, i) => (
               <div key={i} style={{
-                background: "#fff", borderRadius: 16, padding: "34px 24px 28px",
-                textAlign: "center",
-                boxShadow: "0 2px 16px rgba(15,39,68,0.07)",
-                border: "1px solid #e4eaf2",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+                background: "#fff", borderRadius: 14, padding: "20px 22px",
+                display: "flex", alignItems: "flex-start", gap: 16,
+                boxShadow: "0 2px 12px rgba(15,39,68,0.06)", border: "1px solid #e4eaf2",
               }}>
                 <div style={{
-                  width: 66, height: 66, borderRadius: "50%",
-                  background: "rgba(249,115,22,0.08)",
-                  border: "1.5px solid rgba(249,115,22,0.18)",
+                  flexShrink: 0, width: 52, height: 52, borderRadius: "50%",
+                  background: "rgba(249,115,22,0.10)", border: "1.5px solid rgba(249,115,22,0.22)",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0,
                 }}>
                   <ServiceIconEnhanced index={i} />
                 </div>
-                <div style={{ fontSize: "0.97rem", fontWeight: 700, color: "#0f2744", lineHeight: 1.3 }}>{svc}</div>
+                <div>
+                  <div style={{ fontSize: "1rem", fontWeight: 800, color: "#0f2744", marginBottom: 5 }}>{item.label}</div>
+                  {item.desc && <div style={{ fontSize: "0.87rem", color: "#64748b", lineHeight: 1.55 }}>{item.desc}</div>}
+                </div>
               </div>
             ))}
           </div>
@@ -629,34 +697,28 @@ export default function LandingPage({ slug: slugProp }) {
 
       {/* ════════════ WHY CHOOSE US ════════════ */}
       {page.enhancedSections ? (
-        <div style={{ background: "#fff", padding: "60px 20px" }}>
-          {/* Title with orange underline */}
-          <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <h2 style={{ fontSize: "clamp(1.25rem, 3.5vw, 1.7rem)", fontWeight: 800, color: "#0f2744", margin: "0 0 12px" }}>
-              Why Choose {page.businessName}
-            </h2>
-            <div style={{ height: 3, width: 48, background: "#f97316", borderRadius: 2, margin: "0 auto" }} />
-          </div>
-          {/* 3-card grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, maxWidth: 880, margin: "0 auto" }}>
-            {(page.workshopTrustPoints || page.trustPoints.slice(0, 3)).map((pt, i) => (
+        <div style={{ background: "#f3f5f9", padding: "56px 20px" }}>
+          <h2 style={{ fontSize: "clamp(1.4rem, 3.5vw, 1.9rem)", fontWeight: 800, color: "#0f2744", textAlign: "center", margin: "0 0 36px" }}>
+            Why Choose {page.businessName}
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, maxWidth: 980, margin: "0 auto" }}>
+            {(page.workshopTrustData || (page.workshopTrustPoints || page.trustPoints.slice(0, 3)).map((s) => ({ label: s, desc: "" }))).map((item, i) => (
               <div key={i} style={{
-                background: "#f5f8fb", borderRadius: 16, padding: "34px 24px 28px",
-                textAlign: "center",
-                boxShadow: "0 2px 12px rgba(15,39,68,0.05)",
-                border: "1px solid #e4eaf2",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+                background: "#fff", borderRadius: 14, padding: "20px 22px",
+                display: "flex", alignItems: "flex-start", gap: 16,
+                boxShadow: "0 2px 12px rgba(15,39,68,0.06)", border: "1px solid #e4eaf2",
               }}>
                 <div style={{
-                  width: 66, height: 66, borderRadius: "50%",
-                  background: "rgba(15,39,68,0.07)",
-                  border: "1.5px solid rgba(15,39,68,0.12)",
+                  flexShrink: 0, width: 52, height: 52, borderRadius: "50%",
+                  background: "#0f2744",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0,
                 }}>
                   <TrustIconEnhanced index={i} />
                 </div>
-                <div style={{ fontSize: "0.97rem", fontWeight: 700, color: "#0f2744", lineHeight: 1.3 }}>{pt}</div>
+                <div>
+                  <div style={{ fontSize: "1rem", fontWeight: 800, color: "#0f2744", marginBottom: 5 }}>{item.label}</div>
+                  {item.desc && <div style={{ fontSize: "0.87rem", color: "#64748b", lineHeight: 1.55 }}>{item.desc}</div>}
+                </div>
               </div>
             ))}
           </div>
@@ -676,6 +738,29 @@ export default function LandingPage({ slug: slugProp }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ════════════ TRUST BAR ════════════ */}
+      {page.workshopTrustBar && (
+        <div style={{
+          background: "#0a1628", padding: "18px 24px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 14, flexWrap: "wrap",
+        }}>
+          <span style={{ color: "#f97316", display: "flex", alignItems: "center", flexShrink: 0 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <polyline points="9 12 11 14 15 10"/>
+            </svg>
+          </span>
+          <span style={{ color: "#fff", fontWeight: 800, fontSize: "0.97rem", letterSpacing: "-0.1px", whiteSpace: "nowrap" }}>
+            {page.workshopTrustBar.headline}
+          </span>
+          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "1rem", flexShrink: 0 }}>|</span>
+          <span style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.9rem" }}>
+            {page.workshopTrustBar.sub}
+          </span>
         </div>
       )}
 
@@ -706,6 +791,46 @@ export default function LandingPage({ slug: slugProp }) {
           </div>
         </div>
       </div>
+
+      {/* ════════════ WORK PHOTO LIGHTBOX ════════════ */}
+      {lightboxSrc && (
+        <div
+          onClick={() => setLightboxSrc(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 2000,
+            background: "rgba(5,14,26,0.92)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "20px", boxSizing: "border-box",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxSrc(null)}
+            aria-label="Close"
+            style={{
+              position: "absolute", top: 16, right: 16,
+              background: "rgba(255,255,255,0.14)", border: "none",
+              color: "#fff", fontSize: 20, width: 40, height: 40,
+              borderRadius: "50%", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: FONT,
+            }}
+          >
+            ✕
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Work photo"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "90vw", maxHeight: "85vh",
+              objectFit: "contain",
+              borderRadius: 12,
+              boxShadow: "0 8px 48px rgba(0,0,0,0.6)",
+            }}
+          />
+        </div>
+      )}
 
       {/* ════════════ SCHEDULE SERVICE MODAL ════════════ */}
       {modalOpen && (
