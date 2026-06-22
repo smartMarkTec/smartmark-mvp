@@ -9,10 +9,11 @@ const HIGH_TICKET_PLANS = [
     cardTitle: "AI Campaign Manager",
     description:
       "For business owners who want to use Smartemark themselves to create, launch, and monitor Facebook/Instagram ads.",
-    badge: null,
+    badge: "Coming Soon",
     featured: false,
     isDark: false,
-    cta: "Get Base",
+    comingSoon: true,
+    cta: "Coming Soon",
     features: [
       "AI creates ads",
       "AI writes headlines/captions",
@@ -32,10 +33,11 @@ const HIGH_TICKET_PLANS = [
     cardTitle: "AI Campaign Manager + AI Assistant",
     description:
       "For business owners who want the Smartemark platform plus guided AI help with marketing decisions, offers, services, and campaign ideas.",
-    badge: "Most Popular",
-    featured: true,
+    badge: "Coming Soon",
+    featured: false,
     isDark: false,
-    cta: "Get Deluxe",
+    comingSoon: true,
+    cta: "Coming Soon",
     features: [
       "Everything in Base",
       "AI Marketing Assistant",
@@ -53,13 +55,14 @@ const HIGH_TICKET_PLANS = [
     name: "Premium",
     planKey: "premium",
     price: "$1,500",
-    cardTitle: "Done-For-You AI Ad Management",
+    cardTitle: "Done-For-You Ad Management",
     description:
       "For business owners who want our team to manage the campaign for them through Smartemark.",
-    badge: "Done For You",
+    badge: "Available Now",
     featured: false,
     isDark: true,
-    cta: "Get Premium",
+    comingSoon: false,
+    cta: "Get Started",
     features: [
       "Everything in Deluxe",
       "We create campaigns for you",

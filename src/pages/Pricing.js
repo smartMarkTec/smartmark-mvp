@@ -32,10 +32,11 @@ const plans = [
     cardTitle: "AI Campaign Manager",
     description:
       "The AI runs the campaign, but you operate it from your dashboard.",
-    badge: null,
+    badge: "Coming Soon",
     featured: false,
     isDark: false,
-    cta: "Get Base",
+    comingSoon: true,
+    cta: "Coming Soon",
     features: [
       "AI creates ads",
       "AI writes headlines/captions",
@@ -55,10 +56,11 @@ const plans = [
     cardTitle: "AI Campaign Manager + AI Assistant",
     description:
       "The AI runs the campaign, and you also get the AI Assistant to guide you with ideas, specials, ad angles, and campaign direction.",
-    badge: "Most Popular",
-    featured: true,
+    badge: "Coming Soon",
+    featured: false,
     isDark: false,
-    cta: "Get Deluxe",
+    comingSoon: true,
+    cta: "Coming Soon",
     features: [
       "Everything in Base",
       "AI Marketing Assistant",
@@ -76,13 +78,14 @@ const plans = [
     name: "Premium",
     planKey: "premium",
     price: "$749",
-    cardTitle: "Done-For-You AI Ad Management",
+    cardTitle: "Done-For-You Ad Management",
     description:
       "The AI runs the campaign, but we operate it for you. We handle setup, tracking, monitoring, and reporting.",
-    badge: "Done For You",
+    badge: "Available Now",
     featured: false,
     isDark: true,
-    cta: "Get Premium",
+    comingSoon: false,
+    cta: "Get Started",
     features: [
       "Everything in Deluxe",
       "We create campaigns for you",
@@ -408,7 +411,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
           style={{
             textAlign: "center",
             margin: "0 auto",
-            marginBottom: isMobile ? 32 : 40,
+            marginBottom: isMobile ? 12 : 16,
             fontFamily: "'Lora', Georgia, serif",
             fontSize: isMobile ? "2.6rem" : "4rem",
             lineHeight: 1.08,
@@ -419,6 +422,19 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
         >
           Pricing
         </h1>
+        <p
+          style={{
+            textAlign: "center",
+            fontSize: isMobile ? 14 : 15,
+            color: TEXT_SOFT,
+            margin: "0 auto",
+            marginBottom: isMobile ? 28 : 36,
+            maxWidth: 560,
+            lineHeight: 1.6,
+          }}
+        >
+          Available now: done-for-you ad management. Self-serve software plans are coming soon.
+        </p>
 
         {/* ── Market tabs ── */}
         <div
@@ -498,12 +514,12 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                       fontSize: 11,
                       fontWeight: 700,
                       letterSpacing: 0.4,
-                      background: "rgba(234,179,8,0.12)",
-                      color: "#d97706",
-                      border: "1px solid rgba(217,119,6,0.18)",
+                      background: "rgba(16,185,129,0.14)",
+                      color: "#059669",
+                      border: "1px solid rgba(5,150,105,0.22)",
                     }}
                   >
-                    Done For You
+                    Available Now
                   </span>
                 </div>
 
@@ -517,7 +533,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                     marginBottom: 4,
                   }}
                 >
-                  Service Business Growth Plan
+                  Done-For-You Ad Management
                 </div>
 
                 {/* Subtitle */}
@@ -529,7 +545,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                     marginBottom: 20,
                   }}
                 >
-                  Done-for-you Facebook ads
+                  We handle setup, launch, monitoring, and reporting
                 </div>
 
                 {/* Price */}
@@ -684,6 +700,56 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                   within 3 days.
                 </div>
               </div>
+
+            {/* Coming Soon: self-serve plans */}
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SOFT, textAlign: "center", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 14 }}>
+                Self-serve plans — coming soon
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+                {activePlans.filter((p) => p.comingSoon).map((p) => (
+                  <div
+                    key={p.planKey}
+                    style={{
+                      borderRadius: 14,
+                      padding: "18px 20px",
+                      background: "white",
+                      border: "1px solid rgba(0,0,0,0.08)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      opacity: 0.72,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: TEXT }}>{p.name}</div>
+                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.4, background: "#f3f4f6", color: "#9ca3af", border: "1px solid #e5e7eb", borderRadius: 999, padding: "3px 9px" }}>
+                        Coming Soon
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 20, color: TEXT }}>{p.price}<span style={{ fontSize: 13, fontWeight: 500, color: TEXT_SOFT }}>/mo</span></div>
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: "1.5px solid #e5e7eb",
+                        background: "#f9fafb",
+                        color: "#9ca3af",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        cursor: "not-allowed",
+                        fontFamily: FONT,
+                      }}
+                    >
+                      Coming Soon
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
             </div>
           );
         })()}
@@ -828,6 +894,27 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                   </p>
 
                   {/* CTA button */}
+                  {plan.comingSoon ? (
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        width: "100%",
+                        padding: "13px 16px",
+                        borderRadius: 10,
+                        border: "1.5px solid #e5e7eb",
+                        background: "#f9fafb",
+                        color: "#9ca3af",
+                        fontSize: 15,
+                        fontWeight: 700,
+                        cursor: "not-allowed",
+                        marginBottom: 28,
+                        fontFamily: FONT,
+                      }}
+                    >
+                      Coming Soon
+                    </button>
+                  ) : (
                   <button
                     type="button"
                     className="sm-plan-btn"
@@ -852,6 +939,7 @@ const Pricing = ({ pricingVariant: variantProp, customPlans, homeRoute }) => {
                   >
                     {isLoading ? "Continuing…" : plan.cta}
                   </button>
+                  )}
 
                   {/* Divider */}
                   <div
