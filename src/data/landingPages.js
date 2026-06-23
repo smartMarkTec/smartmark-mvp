@@ -34,9 +34,10 @@ const LANDING_PAGES = {
   "proteks-austin": {
     slug: "proteks-austin",
     businessName: "Pro Teks HVAC",
-    headline: "Replace Your Old AC System Before It Fails in the Texas Heat",
-    subheadline: "Austin / Hill Country AC system replacements starting at $6,995 installed.",
-    offer: "$500 Off Full System Replacement + Free Replacement Estimate. Financing available for approved customers through Synchrony Bank and other financing partners.",
+    headline: "Replace Your Old AC System With Confidence",
+    subheadline: "Pro Teks HVAC helps homeowners in Austin, the Hill Country, and surrounding areas replace older AC systems with clean, professional installation and competitive pricing.",
+    offer: "Get a free replacement estimate and ask about AC system replacement starting at $6,995 installed for Austin and Hill Country homeowners.",
+    offerNote: "Starting price varies by home, system size, and service area. Call for a free replacement estimate.",
     phone: "9564363122",
     phoneDisplay: "(956) 436-3122",
     forwardingPhone: "5129399485",
@@ -71,6 +72,8 @@ const LANDING_PAGES = {
     clientSlug: "proteks",
     gaMeasurementId: "",
     // ── Enhanced design layout ──
+    topBarCallText: "Call Now",
+    fullWidthHeader: true,
     offerMaxWidth: 680,
     centerOfferContent: true,
     enhancedSections: true,
@@ -80,7 +83,7 @@ const LANDING_PAGES = {
       { label: "Free replacement estimate", desc: "Get clear options and pricing before deciding on your full system replacement." },
     ],
     workshopTrustData: [
-      { label: "Local HVAC replacement specialists", desc: "Serving the area with professional AC replacement and installation support." },
+      { label: "Local HVAC replacement specialists", desc: "Professional AC replacement and installation support for homeowners in your area." },
       { label: "Competitive installed pricing",      desc: "Clear replacement offers designed to help homeowners upgrade with confidence." },
       { label: "Financing available",                desc: "Ask about financing options for approved customers." },
     ],
@@ -94,9 +97,10 @@ const LANDING_PAGES = {
   "proteks-san-antonio": {
     slug: "proteks-san-antonio",
     businessName: "Pro Teks HVAC",
-    headline: "Replace Your Old AC System Before It Fails in the Texas Heat",
-    subheadline: "North San Antonio area AC system replacements starting at $6,495 installed.",
-    offer: "$500 Off Full System Replacement + Free Replacement Estimate. Financing available for approved customers through Synchrony Bank and other financing partners.",
+    headline: "Need To Replace Your AC System?",
+    subheadline: "Pro Teks HVAC helps homeowners in North San Antonio, Helotes, and surrounding areas replace aging AC systems with professional installation and competitive pricing.",
+    offer: "Get a free replacement estimate and ask about AC system replacement starting at $6,495 installed for North San Antonio and Helotes homeowners.",
+    offerNote: "Starting price varies by home, system size, and service area. Call for a free replacement estimate.",
     phone: "9564363122",
     phoneDisplay: "(956) 436-3122",
     forwardingPhone: "5129399485",
@@ -131,6 +135,8 @@ const LANDING_PAGES = {
     clientSlug: "proteks",
     gaMeasurementId: "",
     // ── Enhanced design layout ──
+    topBarCallText: "Call Now",
+    fullWidthHeader: true,
     offerMaxWidth: 680,
     centerOfferContent: true,
     enhancedSections: true,
@@ -140,7 +146,7 @@ const LANDING_PAGES = {
       { label: "Free replacement estimate", desc: "Get clear options and pricing before deciding on your full system replacement." },
     ],
     workshopTrustData: [
-      { label: "Local HVAC replacement specialists", desc: "Serving the area with professional AC replacement and installation support." },
+      { label: "Local HVAC replacement specialists", desc: "Professional AC replacement and installation support for homeowners in your area." },
       { label: "Competitive installed pricing",      desc: "Clear replacement offers designed to help homeowners upgrade with confidence." },
       { label: "Financing available",                desc: "Ask about financing options for approved customers." },
     ],

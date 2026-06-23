@@ -585,7 +585,8 @@ export default function LandingPage({ slug: slugProp }) {
                 <div style={{ textAlign: "center", marginBottom: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
                   <div style={{ fontSize: "clamp(1.6rem, 7vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
-                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 auto 22px", maxWidth: 420 }}>{page.offer}</p>
+                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.offerNote ? "0 auto 6px" : "0 auto 22px", maxWidth: 420 }}>{page.offer}</p>
+                  {page.offerNote && <p style={{ fontSize: "0.8rem", color: "#b45309", lineHeight: 1.5, margin: "0 auto 22px", maxWidth: 420, fontStyle: "italic" }}>{page.offerNote}</p>}
                   <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxWidth: 340, margin: "0 auto" }}>
@@ -618,7 +619,8 @@ export default function LandingPage({ slug: slugProp }) {
                 <div style={{ flex: "1 1 auto", maxWidth: 440, textAlign: "center" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
                   <div style={{ fontSize: "clamp(1.5rem, 3.5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
-                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: "0 auto 22px", maxWidth: 380 }}>{page.offer}</p>
+                  <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.offerNote ? "0 auto 6px" : "0 auto 22px", maxWidth: 380 }}>{page.offer}</p>
+                  {page.offerNote && <p style={{ fontSize: "0.8rem", color: "#b45309", lineHeight: 1.5, margin: "0 auto 22px", maxWidth: 380, fontStyle: "italic" }}>{page.offerNote}</p>}
                   <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
                 </div>
                 {/* Right photos */}
@@ -643,7 +645,8 @@ export default function LandingPage({ slug: slugProp }) {
           <div style={{ maxWidth: page.offerMaxWidth || 740, margin: "0 auto", textAlign: page.centerOfferContent ? "center" : undefined }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: "#ea580c", marginBottom: 8 }}>Promotion</div>
             <div style={{ fontSize: "clamp(1.6rem, 5vw, 2rem)", fontWeight: 900, color: "#7c2d12", marginBottom: 12, lineHeight: 1.15 }}>{page.offerHeadline || "Special Offer"}</div>
-            <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.centerOfferContent ? "0 auto 22px" : "0 0 22px", maxWidth: 560 }}>{page.offer}</p>
+            <p style={{ fontSize: "0.97rem", color: "#92400e", lineHeight: 1.7, margin: page.offerNote ? (page.centerOfferContent ? "0 auto 6px" : "0 0 6px") : (page.centerOfferContent ? "0 auto 22px" : "0 0 22px"), maxWidth: 560 }}>{page.offer}</p>
+            {page.offerNote && <p style={{ fontSize: "0.8rem", color: "#b45309", lineHeight: 1.5, margin: page.centerOfferContent ? "0 auto 22px" : "0 0 22px", maxWidth: 520, fontStyle: "italic" }}>{page.offerNote}</p>}
             <CallBtn phone={page.phone} label={`Call: ${page.phoneDisplay}`} onClick={trackCallClick} />
           </div>
         )}
