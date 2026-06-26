@@ -3117,11 +3117,12 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {adCount > 0 && (
         <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 12, flexWrap: "wrap" }}>
           {launchedSet.map((creative, idx) => {
-            const statusStr = String(creative.status || "").toLowerCase();
-            const isPaused  = statusStr === "paused";
-            const badgeBg   = isPaused ? "#fef9c3" : "#dcfce7";
-            const badgeFg   = isPaused ? "#854d0e" : "#15803d";
-            const badgeBd   = isPaused ? "#fde68a" : "#bbf7d0";
+            // Prefer Meta-verified effectiveStatus (stored in DB after pause/resume) over local status field.
+            const rawStatus = String(creative.effectiveStatus || creative.status || "").toLowerCase();
+            const isPaused  = rawStatus === "paused";
+            const badgeBg    = isPaused ? "#fef9c3" : "#dcfce7";
+            const badgeFg    = isPaused ? "#854d0e" : "#15803d";
+            const badgeBd    = isPaused ? "#fde68a" : "#bbf7d0";
             const badgeLabel = isPaused ? "Paused" : "Active";
             const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
             const label  = creative.angleLabel || creative.angle || `Ad ${idx + 1}`;
@@ -3169,22 +3170,37 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
                     return <div style={{ fontSize: 11, color: "#94a3b8", marginTop: "auto" }}>Loading metrics…</div>;
                   }
                   if (m && m.ok && m.hasData) {
+                    const lpv = Number(m.landingPageViews || 0);
+                    const lc  = Number(m.linkClicks       || 0);
+                    const cl  = Number(m.clicks           || 0);
                     const rows = [
-                      ["Impressions", Number(m.impressions || 0).toLocaleString()],
-                      ["Clicks",      Number(m.clicks      || 0).toLocaleString()],
-                      ["Link Clicks", Number(m.linkClicks  || 0).toLocaleString()],
-                      ["CTR",         `${Number(m.ctr || 0).toFixed(2)}%`],
-                      ["CPC",         m.cpc ? `$${Number(m.cpc).toFixed(2)}` : "—"],
-                      ["Spend",       `$${Number(m.spend || 0).toFixed(2)}`],
+                      ["Impressions",      Number(m.impressions || 0).toLocaleString()],
+                      ["Clicks",           cl.toLocaleString()],
+                      ["Link Clicks",      lc.toLocaleString()],
+                      ["Landing Page Views", lpv.toLocaleString()],
+                      ["CTR",              `${Number(m.ctr || 0).toFixed(2)}%`],
+                      ["CPC",              m.cpc ? `$${Number(m.cpc).toFixed(2)}` : "—"],
+                      ["Spend",            `$${Number(m.spend || 0).toFixed(2)}`],
                       ...(m.costPerLinkClick ? [["Cost/Link Click", `$${Number(m.costPerLinkClick).toFixed(2)}`]] : []),
-                      ...(m.conversions > 0   ? [["Conversions", String(m.conversions)]] : []),
+                      ...(m.conversions > 0  ? [["Conversions", String(m.conversions)]] : []),
                     ];
+
+                    // Metric mapping warnings
+                    const warnings = [];
+                    if (lc > cl && cl > 0) warnings.push("Metric mapping warning: Link clicks are higher than clicks. Verify Meta fields/actions mapping.");
+                    if (lpv === 0 && lc > 5) warnings.push("Traffic tracking warning: Ads are getting link clicks but landing page views are missing or not mapped.");
+
                     return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: "auto", paddingTop: 6, borderTop: "1px solid #f1f5f9" }}>
                         {rows.map(([k, v]) => (
                           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
                             <span style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>{k}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>{v}</span>
+                          </div>
+                        ))}
+                        {warnings.map((w, i) => (
+                          <div key={i} style={{ fontSize: 10, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 4, padding: "3px 6px", marginTop: 4, lineHeight: 1.4 }}>
+                            ⚠ {w}
                           </div>
                         ))}
                       </div>
@@ -3241,6 +3257,35 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {adMetricsError && (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#dc2626", fontWeight: 600 }}>
           Could not load per-ad metrics: {adMetricsError}
+        </div>
+      )}
+
+      {/* ── Metric warnings across all ads ── */}
+      {adCount > 0 && !adMetricsLoading && (() => {
+        const adMetrics = Object.values(adMetricsMap).filter((m) => m && m.ok && m.hasData);
+        if (!adMetrics.length) return null;
+        const totalCallClicks = adMetrics.reduce((s, m) => s + Number(m.callClicks || 0), 0);
+        const totalLpv        = adMetrics.reduce((s, m) => s + Number(m.landingPageViews || 0), 0);
+        const globalWarnings  = [];
+        if (totalLpv > 10 && totalCallClicks === 0) {
+          globalWarnings.push("Conversion warning: Landing page traffic is not producing call clicks yet. Check that the call button tracking is firing.");
+        }
+        if (!globalWarnings.length) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {globalWarnings.map((w, i) => (
+              <div key={i} style={{ background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#92400e", fontWeight: 600, lineHeight: 1.5 }}>
+                ⚠ {w}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Call click clarification note */}
+      {adCount > 0 && Object.keys(adMetricsMap).length > 0 && (
+        <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6, borderTop: "1px solid #f1f5f9", paddingTop: 8 }}>
+          <strong style={{ color: "#64748b" }}>Call clicks</strong> are website button taps tracked by Smartemark. <strong style={{ color: "#64748b" }}>Tracked calls</strong> are real phone calls received through the tracking number.
         </div>
       )}
 
@@ -6040,9 +6085,16 @@ const handlePerAdAction = async (metaAdId, action) => {
       headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { alert(`Ad ${action} failed: ${j.error || "unknown error"}`); return; }
+    if (!r.ok) {
+      const errMsg = j.error || "unknown error";
+      const metaCode = j.metaCode ? ` (Meta code ${j.metaCode})` : "";
+      alert(`Ad ${action} failed: ${errMsg}${metaCode}`);
+      return;
+    }
 
-    const newStatus = action === "delete" ? "deleted" : action === "pause" ? "paused" : "active";
+    // Use Meta-verified effectiveStatus if returned; otherwise fall back to optimistic local value.
+    const metaVerifiedStatus = j.effectiveStatus ? j.effectiveStatus.toLowerCase() : null;
+    const newStatus = metaVerifiedStatus || (action === "delete" ? "deleted" : action === "pause" ? "paused" : "active");
 
     // 1. Update React state immediately (Creatives tab reflects change without reload)
     let updatedSet = null;

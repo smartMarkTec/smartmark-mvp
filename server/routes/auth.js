@@ -7717,43 +7717,160 @@ async function _resolveAdToken(req, accountId) {
 
 router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) => {
   const { accountId, adId } = req.params;
-  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'PAUSED' }, { params: { access_token: userToken } });
-    // Update launchedCreativeSet status in DB
+    console.log('[AD_PAUSE_REQUEST]', { accountId, adId, ip: req.ip || '' });
+    const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+    console.log('[AD_PAUSE_OWNER_RESOLVED]', { adId, ownerKey: ownerKey || '(none)', hasToken: !!userToken });
+    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+    console.log('[AD_PAUSE_META_REQUEST]', { adId, apiVersion: META_API_VERSION });
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: 'PAUSED' },
+      { params: { access_token: userToken } }
+    );
+
+    // Verify effective_status from Meta (same pattern as campaign pause)
+    let effectiveStatus = 'PAUSED';
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+        { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
+      );
+      effectiveStatus = String(verifyRes.data?.effective_status || 'PAUSED').toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { adId, effectiveStatus });
+    } catch (verifyErr) {
+      console.warn('[AD_STATUS_SYNC] verify fetch failed (non-fatal):', adId, verifyErr?.message);
+    }
+
+    // Update launchedCreativeSet in DB
     await db.read();
-    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
-    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'paused' } : c); await db.write(); }
-    return res.json({ ok: true, adId, status: 'paused' });
-  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to pause ad' }); }
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId ? { ...c, status: 'paused', effectiveStatus } : c
+      );
+      await db.write();
+    }
+
+    console.log('[AD_PAUSE_SUCCESS]', { adId, effectiveStatus, dbUpdated: !!rec });
+    return res.json({ ok: true, adId, status: 'paused', effectiveStatus });
+  } catch (err) {
+    const metaErr = err?.response?.data?.error;
+    console.error('[AD_PAUSE_META_ERROR]', {
+      adId,
+      accountId,
+      httpStatus: err?.response?.status,
+      metaCode:   metaErr?.code,
+      metaType:   metaErr?.type,
+      metaError:  metaErr?.message || err?.message,
+    });
+    return res.status(500).json({
+      error:    metaErr?.message || err?.message || 'Failed to pause ad',
+      metaCode: metaErr?.code   || null,
+    });
+  }
 });
 
 router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) => {
   const { accountId, adId } = req.params;
-  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'ACTIVE' }, { params: { access_token: userToken } });
+    console.log('[AD_PAUSE_REQUEST]', { action: 'resume', accountId, adId, ip: req.ip || '' });
+    const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+    console.log('[AD_PAUSE_OWNER_RESOLVED]', { action: 'resume', adId, ownerKey: ownerKey || '(none)', hasToken: !!userToken });
+    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+    console.log('[AD_PAUSE_META_REQUEST]', { action: 'resume', adId, apiVersion: META_API_VERSION });
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: 'ACTIVE' },
+      { params: { access_token: userToken } }
+    );
+
+    let effectiveStatus = 'ACTIVE';
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+        { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
+      );
+      effectiveStatus = String(verifyRes.data?.effective_status || 'ACTIVE').toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { action: 'resume', adId, effectiveStatus });
+    } catch (verifyErr) {
+      console.warn('[AD_STATUS_SYNC] verify fetch failed (non-fatal):', adId, verifyErr?.message);
+    }
+
     await db.read();
-    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
-    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'active' } : c); await db.write(); }
-    return res.json({ ok: true, adId, status: 'active' });
-  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to resume ad' }); }
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId ? { ...c, status: 'active', effectiveStatus } : c
+      );
+      await db.write();
+    }
+
+    console.log('[AD_PAUSE_SUCCESS]', { action: 'resume', adId, effectiveStatus, dbUpdated: !!rec });
+    return res.json({ ok: true, adId, status: 'active', effectiveStatus });
+  } catch (err) {
+    const metaErr = err?.response?.data?.error;
+    console.error('[AD_PAUSE_META_ERROR]', {
+      action: 'resume', adId, accountId,
+      httpStatus: err?.response?.status,
+      metaCode:   metaErr?.code,
+      metaError:  metaErr?.message || err?.message,
+    });
+    return res.status(500).json({
+      error:    metaErr?.message || err?.message || 'Failed to resume ad',
+      metaCode: metaErr?.code   || null,
+    });
+  }
 });
 
 router.post('/facebook/adaccount/:accountId/ad/:adId/delete', async (req, res) => {
   const { accountId, adId } = req.params;
-  const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
+    console.log('[AD_PAUSE_REQUEST]', { action: 'delete', accountId, adId, ip: req.ip || '' });
+    const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
+    console.log('[AD_PAUSE_OWNER_RESOLVED]', { action: 'delete', adId, ownerKey: ownerKey || '(none)', hasToken: !!userToken });
+    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
     // Archive the ad on Meta (cannot permanently delete — archive is the safe equivalent)
-    await axios.post(`https://graph.facebook.com/${META_API_VERSION}/${adId}`, { status: 'ARCHIVED' }, { params: { access_token: userToken } });
+    console.log('[AD_PAUSE_META_REQUEST]', { action: 'archive', adId, apiVersion: META_API_VERSION });
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: 'ARCHIVED' },
+      { params: { access_token: userToken } }
+    );
+
     await db.read();
-    const rec = (db.data.campaign_creatives || []).find((r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey);
-    if (rec) { rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) => c.metaAdId === adId ? { ...c, status: 'deleted' } : c); await db.write(); }
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId ? { ...c, status: 'deleted' } : c
+      );
+      await db.write();
+    }
+
+    console.log('[AD_PAUSE_SUCCESS]', { action: 'delete', adId, dbUpdated: !!rec });
     return res.json({ ok: true, adId, status: 'deleted' });
-  } catch (err) { return res.status(500).json({ error: err?.response?.data?.error?.message || 'Failed to delete ad' }); }
+  } catch (err) {
+    const metaErr = err?.response?.data?.error;
+    console.error('[AD_PAUSE_META_ERROR]', {
+      action: 'delete', adId, accountId,
+      httpStatus: err?.response?.status,
+      metaCode:   metaErr?.code,
+      metaError:  metaErr?.message || err?.message,
+    });
+    return res.status(500).json({
+      error:    metaErr?.message || err?.message || 'Failed to delete ad',
+      metaCode: metaErr?.code   || null,
+    });
+  }
 });
 
 // ── Replace a single launched ad (edit creative) ─────────────────────────────
@@ -8763,8 +8880,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/ad-metrics', asy
       'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead',
       'omni_lead', 'purchase', 'offsite_conversion.fb_pixel_purchase',
     ]);
-    const LINK_TYPES = new Set(['link_click', 'landing_page_view']);
-
     async function fetchOneAdMetrics(adId) {
       try {
         const [insRes] = await Promise.allSettled([
@@ -8782,39 +8897,52 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/ad-metrics', asy
           ? insRes.value.data.data[0] || {}
           : {};
 
-        const actions    = Array.isArray(row.actions)             ? row.actions             : [];
-        const outboundArr = Array.isArray(row.outbound_clicks)    ? row.outbound_clicks     : [];
-        const cpaArr     = Array.isArray(row.cost_per_action_type) ? row.cost_per_action_type : [];
+        const actions     = Array.isArray(row.actions)              ? row.actions             : [];
+        const outboundArr = Array.isArray(row.outbound_clicks)      ? row.outbound_clicks     : [];
+        const cpaArr      = Array.isArray(row.cost_per_action_type) ? row.cost_per_action_type : [];
 
-        const conversions  = actions.reduce((s, a) => CONV_TYPES.has(String(a?.action_type || '').toLowerCase()) ? s + Number(a?.value || 0) : s, 0);
-        const linkClicks   = actions.reduce((s, a) => LINK_TYPES.has(String(a?.action_type || '').toLowerCase()) ? s + Number(a?.value || 0) : s, 0);
-        const outboundClicks = outboundArr.reduce((s, a) => s + Number(a?.value || 0), 0);
+        const conversions = actions.reduce((s, a) => CONV_TYPES.has(String(a?.action_type || '').toLowerCase()) ? s + Number(a?.value || 0) : s, 0);
 
-        const clicks       = Number(row.clicks      || 0);
-        const impressions  = Number(row.impressions || 0);
-        const spend        = Number(row.spend       || 0);
+        // link_click and landing_page_view are SEPARATE Meta action types — do NOT combine them.
+        // Combining them inflates linkClicks and can produce linkClicks > clicks.
+        const linkClicks      = actions.reduce((s, a) => String(a?.action_type || '').toLowerCase() === 'link_click'       ? s + Number(a?.value || 0) : s, 0);
+        const landingPageViews = actions.reduce((s, a) => String(a?.action_type || '').toLowerCase() === 'landing_page_view' ? s + Number(a?.value || 0) : s, 0);
+        const outboundClicks  = outboundArr.reduce((s, a) => s + Number(a?.value || 0), 0);
+
+        const clicks      = Number(row.clicks      || 0);
+        const impressions = Number(row.impressions || 0);
+        const spend       = Number(row.spend       || 0);
         const effectiveClicks = linkClicks > 0 ? linkClicks : (outboundClicks > 0 ? outboundClicks : clicks);
-        const cpc          = Number(row.cpc || 0) || (effectiveClicks > 0 ? spend / effectiveClicks : 0);
-        const ctr          = Number(row.ctr || 0) || (impressions > 0 ? (clicks / impressions) * 100 : 0);
+        const cpc = Number(row.cpc || 0) || (effectiveClicks > 0 ? spend / effectiveClicks : 0);
+        const ctr = Number(row.ctr || 0) || (impressions > 0 ? (clicks / impressions) * 100 : 0);
 
-        const cplRow       = cpaArr.find((a) => a?.action_type === 'link_click');
+        const cplRow           = cpaArr.find((a) => a?.action_type === 'link_click');
         const costPerLinkClick = cplRow ? Number(Number(cplRow.value).toFixed(4)) : null;
+
+        // Metric mapping warnings — logged server-side for debugging
+        if (linkClicks > clicks && clicks > 0) {
+          console.warn('[AD_METRICS_WARNING] linkClicks > clicks — verify Meta fields/actions mapping', { adId, linkClicks, clicks });
+        }
+        if (landingPageViews === 0 && linkClicks > 5) {
+          console.warn('[AD_METRICS_WARNING] landing_page_views=0 but linkClicks>5 — check pixel or URL tracking', { adId, linkClicks, landingPageViews });
+        }
 
         return {
           adId,
-          ok:             true,
+          ok:              true,
           impressions,
           clicks,
           linkClicks,
+          landingPageViews,
           outboundClicks,
-          spend:          Number(spend.toFixed(2)),
-          ctr:            Number(ctr.toFixed(4)),
-          cpc:            Number(cpc.toFixed(4)),
+          spend:           Number(spend.toFixed(2)),
+          ctr:             Number(ctr.toFixed(4)),
+          cpc:             Number(cpc.toFixed(4)),
           costPerLinkClick,
-          reach:          Number(row.reach     || 0),
-          frequency:      Number(row.frequency || 0),
+          reach:           Number(row.reach     || 0),
+          frequency:       Number(row.frequency || 0),
           conversions,
-          hasData:        impressions > 0 || spend > 0,
+          hasData:         impressions > 0 || spend > 0,
         };
       } catch (err) {
         const fbErr = err?.response?.data?.error;
