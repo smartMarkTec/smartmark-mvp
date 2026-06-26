@@ -7715,6 +7715,54 @@ async function _resolveAdToken(req, accountId) {
   return { ownerKey, userToken };
 }
 
+// Verify that adId is a real, accessible Meta ad object before mutating it.
+// Returns { ok: true, ad } on success, or { ok: false, httpStatus, json } on failure.
+async function _verifyAdObject(adId, userToken) {
+  try {
+    const r = await axios.get(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      {
+        params: { access_token: userToken, fields: 'id,name,account_id,campaign_id,adset_id,status,effective_status,configured_status' },
+        timeout: 10000,
+      }
+    );
+    console.log('[AD_ACTION_VERIFY_SUCCESS]', {
+      adId,
+      metaId:     r.data?.id,
+      accountId:  r.data?.account_id,
+      campaignId: r.data?.campaign_id,
+      status:     r.data?.status,
+      effectiveStatus: r.data?.effective_status,
+    });
+    return { ok: true, ad: r.data || {} };
+  } catch (err) {
+    const fbErr  = err?.response?.data?.error || {};
+    const fbCode = fbErr?.code;
+    console.error('[AD_ACTION_VERIFY_ERROR]', {
+      adId,
+      httpStatus: err?.response?.status,
+      metaCode:   fbCode,
+      metaType:   fbErr?.type,
+      metaError:  fbErr?.message,
+    });
+    const httpStatus = (fbCode === 100 || fbCode === 200 || fbCode === 190) ? 400 : 500;
+    return {
+      ok: false,
+      httpStatus,
+      json: {
+        ok:          false,
+        error:       'Smartemark could not access this ad ID. It may be stale, not an ad object, or the connected account may lack permission. Refresh the campaign creatives from Meta and try again.',
+        metaCode:    fbCode    || null,
+        metaMessage: fbErr?.message || err?.message || null,
+        adId,
+        hint: fbCode === 100
+          ? 'The stored ad ID may be stale. Use Refresh from Meta in the Creatives tab to rebuild the creative set with current ad IDs.'
+          : undefined,
+      },
+    };
+  }
+}
+
 router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) => {
   const { accountId, adId } = req.params;
   try {
@@ -7722,6 +7770,11 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) =>
     const { ownerKey, userToken } = await _resolveAdToken(req, String(accountId || '').replace(/^act_/, ''));
     console.log('[AD_PAUSE_OWNER_RESOLVED]', { adId, ownerKey: ownerKey || '(none)', hasToken: !!userToken });
     if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+    // Verify ad exists and is accessible before mutating
+    console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action: 'pause' });
+    const preCheck = await _verifyAdObject(adId, userToken);
+    if (!preCheck.ok) return res.status(preCheck.httpStatus).json(preCheck.json);
 
     console.log('[AD_PAUSE_META_REQUEST]', { adId, apiVersion: META_API_VERSION });
     await axios.post(
@@ -7782,6 +7835,10 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) =
     console.log('[AD_PAUSE_OWNER_RESOLVED]', { action: 'resume', adId, ownerKey: ownerKey || '(none)', hasToken: !!userToken });
     if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
+    console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action: 'resume' });
+    const preCheck = await _verifyAdObject(adId, userToken);
+    if (!preCheck.ok) return res.status(preCheck.httpStatus).json(preCheck.json);
+
     console.log('[AD_PAUSE_META_REQUEST]', { action: 'resume', adId, apiVersion: META_API_VERSION });
     await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
@@ -7838,6 +7895,10 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/delete', async (req, res) =
     if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
     // Archive the ad on Meta (cannot permanently delete — archive is the safe equivalent)
+    console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action: 'delete' });
+    const preCheck = await _verifyAdObject(adId, userToken);
+    if (!preCheck.ok) return res.status(preCheck.httpStatus).json(preCheck.json);
+
     console.log('[AD_PAUSE_META_REQUEST]', { action: 'archive', adId, apiVersion: META_API_VERSION });
     await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/${adId}`,

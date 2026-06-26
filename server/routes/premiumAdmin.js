@@ -2547,4 +2547,179 @@ router.get('/admin/clients/:clientId/campaign/:campaignId/conversion-summary', l
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:clientId/ad/:adId/pause
+// POST /api/admin/clients/:clientId/ad/:adId/resume
+// POST /api/admin/clients/:clientId/ad/:adId/delete
+//
+// Admin-only per-ad pause/resume/delete that always uses the CLIENT's FB token.
+// The regular /auth/facebook/adaccount/:accountId/ad/:adId/pause path resolves
+// the token from the admin's session — which has no permission on the client's
+// ad account — causing Meta code 100. This path resolves the client's own token.
+//
+// Steps:
+//   1. Resolve client's FB token.
+//   2. Verify the ad exists and is accessible via GET before attempting mutation.
+//   3. If code 100 → return 400 with clear explanation (not generic 500).
+//   4. Perform action (PAUSED / ACTIVE / ARCHIVED).
+//   5. Re-fetch effective_status from Meta.
+//   6. Update DB launchedCreativeSet.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:clientId/ad/:adId/:action', limitAdmin, requireAdmin, async (req, res) => {
+  const clientId  = decodeURIComponent(req.params.clientId || '').trim();
+  const adId      = String(req.params.adId   || '').trim();
+  const action    = String(req.params.action || '').trim(); // pause | resume | delete
+
+  const ALLOWED_ACTIONS = new Set(['pause', 'resume', 'delete']);
+  if (!ALLOWED_ACTIONS.has(action)) {
+    return res.status(400).json({ ok: false, error: `Unknown action "${action}". Allowed: pause, resume, delete.` });
+  }
+  if (!clientId) return res.status(400).json({ ok: false, error: 'clientId is required.' });
+  if (!adId)     return res.status(400).json({ ok: false, error: 'adId is required.' });
+
+  const ownerKey  = `user:${clientId}`;
+  const userToken = getFbUserToken(ownerKey);
+
+  console.log('[AD_ACTION_REQUEST]', {
+    action,
+    adId,
+    clientId,
+    ownerKey,
+    hasToken: !!userToken,
+  });
+
+  if (!userToken) {
+    return res.status(401).json({
+      ok:      false,
+      error:   `Client ${clientId} does not have Facebook connected. Ask them to reconnect their account.`,
+      ownerKey,
+      adId,
+      action,
+    });
+  }
+
+  try {
+    // ── Step 1: Verify the ad object is accessible before mutating ──────────
+    console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action, ownerKey });
+    let verifiedAd = null;
+    try {
+      const verifyRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+        {
+          params: {
+            access_token: userToken,
+            fields: 'id,name,account_id,campaign_id,adset_id,status,effective_status,configured_status,creative{id,name}',
+          },
+          timeout: 10000,
+        }
+      );
+      verifiedAd = verifyRes.data || null;
+      console.log('[AD_ACTION_VERIFY_SUCCESS]', {
+        adId,
+        metaId:     verifiedAd?.id,
+        accountId:  verifiedAd?.account_id,
+        campaignId: verifiedAd?.campaign_id,
+        status:     verifiedAd?.status,
+        effectiveStatus: verifiedAd?.effective_status,
+      });
+    } catch (verifyErr) {
+      const fbErr  = verifyErr?.response?.data?.error || {};
+      const fbCode = fbErr?.code;
+      console.error('[AD_ACTION_VERIFY_ERROR]', {
+        adId,
+        action,
+        ownerKey,
+        httpStatus: verifyErr?.response?.status,
+        metaCode:   fbCode,
+        metaType:   fbErr?.type,
+        metaError:  fbErr?.message,
+      });
+
+      // Meta code 100 = object not found / no permission — do not return 500.
+      const httpStatus = (fbCode === 100 || fbCode === 200 || fbCode === 190) ? 400 : 500;
+      return res.status(httpStatus).json({
+        ok:          false,
+        error:       'Smartemark could not access this ad ID. It may be stale, not an ad object, or the connected account may lack permission. Refresh the campaign creatives from Meta and try again.',
+        metaCode:    fbCode    || null,
+        metaMessage: fbErr?.message || verifyErr?.message || null,
+        adId,
+        ownerKey,
+        action,
+        hint:        fbCode === 100
+          ? 'The stored ad ID may be stale. Use Refresh from Meta in the Creatives tab to rebuild the creative set with current ad IDs.'
+          : undefined,
+      });
+    }
+
+    // ── Step 2: Perform the action ──────────────────────────────────────────
+    const metaStatus =
+      action === 'pause'  ? 'PAUSED'   :
+      action === 'resume' ? 'ACTIVE'   :
+      /* delete */          'ARCHIVED';
+
+    console.log('[AD_ACTION_META_REQUEST]', { adId, metaStatus, apiVersion: META_API_VERSION });
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: metaStatus },
+      { params: { access_token: userToken } }
+    );
+
+    // ── Step 3: Re-fetch effective_status to confirm ─────────────────────────
+    let effectiveStatus = metaStatus;
+    try {
+      const confirmRes = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+        { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
+      );
+      effectiveStatus = String(confirmRes.data?.effective_status || metaStatus).toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { adId, action, effectiveStatus });
+    } catch (confirmErr) {
+      console.warn('[AD_STATUS_SYNC] post-action verify failed (non-fatal):', adId, confirmErr?.message);
+    }
+
+    // ── Step 4: Update DB launchedCreativeSet ─────────────────────────────────
+    const dbStatus = action === 'delete' ? 'deleted' : action === 'pause' ? 'paused' : 'active';
+    try {
+      await db.read();
+      const rec = (db.data.campaign_creatives || []).find(
+        (r) => Array.isArray(r.launchedCreativeSet) &&
+               r.launchedCreativeSet.some((c) => c.metaAdId === adId) &&
+               r.ownerKey === ownerKey
+      );
+      if (rec) {
+        rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+          c.metaAdId === adId ? { ...c, status: dbStatus, effectiveStatus } : c
+        );
+        await db.write();
+      }
+      console.log('[AD_ACTION_SUCCESS]', { adId, action, effectiveStatus, dbUpdated: !!rec, ownerKey });
+    } catch (dbErr) {
+      console.warn('[AD_ACTION_SUCCESS] DB update failed (non-fatal):', dbErr?.message);
+    }
+
+    return res.json({ ok: true, adId, action, status: dbStatus, effectiveStatus });
+
+  } catch (err) {
+    const fbErr = err?.response?.data?.error || {};
+    console.error('[AD_ACTION_META_ERROR]', {
+      adId,
+      action,
+      clientId,
+      httpStatus: err?.response?.status,
+      metaCode:   fbErr?.code,
+      metaType:   fbErr?.type,
+      metaError:  fbErr?.message || err?.message,
+    });
+    const httpStatus = (fbErr?.code === 100 || fbErr?.code === 200) ? 400 : 500;
+    return res.status(httpStatus).json({
+      ok:          false,
+      error:       fbErr?.message || err?.message || `Failed to ${action} ad.`,
+      metaCode:    fbErr?.code    || null,
+      metaMessage: fbErr?.message || null,
+      adId,
+      action,
+    });
+  }
+});
+
 module.exports = router;

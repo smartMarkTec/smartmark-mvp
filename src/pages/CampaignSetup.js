@@ -5950,6 +5950,19 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
 }
 
 // Helper: fetch wrapper for admin-client campaign control routes.
+// Per-ad pause/resume/delete for admin-client mode.
+// Always resolves the CLIENT's FB token — never TheBoss's session token.
+// The regular /auth/facebook/adaccount/:accountId/ad/:adId/:action path would
+// use TheBoss's token, which has no permission on the client's ad account.
+async function adminPerAdActionFetch(adminClientId, adId, action) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (sid) headers["x-sm-sid"] = sid;
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/ad/${encodeURIComponent(adId)}/${action}`;
+  console.log("[per-ad-action]", { action, adminClientId, adId, url });
+  return fetch(url, { method: "POST", credentials: "include", headers });
+}
+
 // Uses the dedicated /api/admin/clients/:id/campaign/:id/:action endpoint
 // which always resolves the CLIENT's FB token, never TheBoss's.
 async function adminCampaignControlFetch(adminClientId, campaignId, action, accountId) {
@@ -6074,21 +6087,26 @@ const saveBizInfo = async () => {
 };
 
 // Pause, resume, or delete a SINGLE Meta ad by its adId (not the whole campaign).
+// In admin-client mode, uses the dedicated admin endpoint so the CLIENT's FB token
+// is resolved — not TheBoss's session token (which has no access to the client's ads).
 const handlePerAdAction = async (metaAdId, action) => {
   if (!metaAdId) return;
   if (action === "delete" && !window.confirm("Archive this ad on Meta? It will stop running.")) return;
   const acctId = String(selectedAccount || "").trim();
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
   try {
-    const r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
-    });
+    const r = adminClientId
+      ? await adminPerAdActionFetch(adminClientId, metaAdId, action)
+      : await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+        });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const errMsg = j.error || "unknown error";
+      const errMsg   = j.error    || "unknown error";
       const metaCode = j.metaCode ? ` (Meta code ${j.metaCode})` : "";
-      alert(`Ad ${action} failed: ${errMsg}${metaCode}`);
+      const hint     = j.hint     ? `\n\n${j.hint}` : "";
+      alert(`Ad ${action} failed: ${errMsg}${metaCode}${hint}`);
       return;
     }
 
