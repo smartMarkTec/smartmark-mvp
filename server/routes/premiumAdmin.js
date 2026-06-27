@@ -2655,6 +2655,40 @@ router.post('/admin/clients/:clientId/ad/:adId/:action', limitAdmin, requireAdmi
       });
     }
 
+    // ── Step 1b: Block pause/resume on archived/deleted ads ────────────────
+    if (action === 'pause' || action === 'resume') {
+      const verifiedEff = String(verifiedAd?.effective_status || verifiedAd?.status || '').toUpperCase();
+      if (verifiedEff === 'ARCHIVED' || verifiedEff === 'DELETED') {
+        const termStatus = verifiedEff.toLowerCase();
+        const termUi     = verifiedEff;
+        const termAction = termStatus === 'archived' ? 'archive_detected' : 'delete_detected';
+        // Best-effort DB update
+        try {
+          await db.read();
+          const rec = (db.data.campaign_creatives || []).find(
+            (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+          );
+          if (rec) {
+            rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+              c.metaAdId === adId ? { ...c, status: termStatus, uiStatus: termUi, configuredStatus: termUi, effectiveStatus: termUi, lastAction: termAction, lastActionAt: new Date().toISOString() } : c
+            );
+            await db.write();
+          }
+        } catch {}
+        return res.status(400).json({
+          ok:              false,
+          archived:        true,
+          adId,
+          status:          termUi,
+          uiStatus:        termUi,
+          configuredStatus: termUi,
+          effectiveStatus: termUi,
+          lastAction:      termAction,
+          error:           `This ad is ${termStatus} in Meta and cannot be paused or resumed.`,
+        });
+      }
+    }
+
     // ── Step 2: Perform the action ──────────────────────────────────────────
     const metaStatus =
       action === 'pause'  ? 'PAUSED'   :

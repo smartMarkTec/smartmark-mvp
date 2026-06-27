@@ -6955,6 +6955,35 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   const dbConfigured     = String(db.configuredStatus || '').toUpperCase();
   const dbStoredStatus   = String(db.status || '').toLowerCase();
 
+  // ARCHIVED and DELETED are terminal states from Meta — always authoritative, never overridden by DB.
+  const TERMINAL = new Set(['ARCHIVED', 'DELETED']);
+  const now = new Date().toISOString();
+
+  if (TERMINAL.has(metaRawStatus)) {
+    const termStatus  = metaRawStatus.toLowerCase(); // 'archived' | 'deleted'
+    const termUi      = metaRawStatus;               // 'ARCHIVED' | 'DELETED'
+    const termAction  = metaRawStatus === 'ARCHIVED' ? 'archive_detected' : 'delete_detected';
+    return {
+      id:               db.id           || `meta-${r.adId}`,
+      angle:            db.angle        || null,
+      angleLabel:       db.angleLabel   || r.adName || `Ad ${i + 1}`,
+      headline:         r.headline      || db.headline || '',
+      body:             r.body          || db.body     || '',
+      cta:              r.cta           || db.cta      || 'LEARN_MORE',
+      imageUrl:         r.imageUrl      || db.imageUrl || finalImages[i] || '',
+      link:             r.link          || db.link     || '',
+      metaAdId:         r.adId,
+      metaCreativeId:   r.creativeId    || db.metaCreativeId || null,
+      status:           termStatus,
+      uiStatus:         termUi,
+      configuredStatus: termUi,
+      effectiveStatus:  termUi,
+      lastAction:       termAction,
+      lastActionAt:     db.lastActionAt || now,
+      replacedMetaAdId: db.replacedMetaAdId || null,
+    };
+  }
+
   let resolvedStatus;
   if (metaRawStatus === 'IN_PROCESS') {
     // Meta is transitioning — trust DB's stored action result
@@ -6962,7 +6991,7 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   } else if (metaRawStatus === 'ACTIVE') {
     resolvedStatus = 'active';
   } else {
-    resolvedStatus = metaRawStatus.toLowerCase(); // 'paused', 'archived', 'deleted', etc.
+    resolvedStatus = metaRawStatus.toLowerCase(); // 'paused', etc.
   }
 
   return {
@@ -6977,11 +7006,9 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
     metaAdId:         r.adId,
     metaCreativeId:   r.creativeId      || db.metaCreativeId || null,
     status:           resolvedStatus,
-    // Carry over rich status fields written by pause/resume routes so the frontend
-    // resolver (uiStatus > configuredStatus > status) works correctly after a reload.
-    uiStatus:         dbUiStatus        || (resolvedStatus === 'paused' ? 'PAUSED' : resolvedStatus === 'active' ? 'ACTIVE' : resolvedStatus.toUpperCase()),
+    uiStatus:         dbUiStatus        || (resolvedStatus === 'paused' ? 'PAUSED' : 'ACTIVE'),
     configuredStatus: dbConfigured      || null,
-    effectiveStatus:  metaRawStatus,    // raw from Meta — only used as secondary sync label
+    effectiveStatus:  metaRawStatus,
     lastAction:       db.lastAction     || null,
     lastActionAt:     db.lastActionAt   || null,
     replacedMetaAdId: db.replacedMetaAdId || null,
@@ -7790,6 +7817,41 @@ async function _verifyAdObject(adId, userToken) {
   }
 }
 
+// Helper: return a clean error when trying to act on an already-archived/deleted ad.
+// Updates DB launchedCreativeSet so the frontend knows not to show Pause/Resume.
+async function _rejectArchivedAd(adId, metaStatus, ownerKey) {
+  const termStatus = metaStatus.toLowerCase();       // 'archived' | 'deleted'
+  const termUi     = metaStatus.toUpperCase();        // 'ARCHIVED' | 'DELETED'
+  const termAction = termStatus === 'archived' ? 'archive_detected' : 'delete_detected';
+  // Best-effort DB update
+  try {
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId ? { ...c, status: termStatus, uiStatus: termUi, configuredStatus: termUi, effectiveStatus: termUi, lastAction: termAction, lastActionAt: new Date().toISOString() } : c
+      );
+      await db.write();
+    }
+  } catch {}
+  return {
+    httpStatus: 400,
+    json: {
+      ok:              false,
+      archived:        true,
+      adId,
+      status:          termUi,
+      uiStatus:        termUi,
+      configuredStatus: termUi,
+      effectiveStatus: termUi,
+      lastAction:      termAction,
+      error:           `This ad is ${termStatus} in Meta and cannot be paused or resumed.`,
+    },
+  };
+}
+
 router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) => {
   const { accountId, adId } = req.params;
   try {
@@ -7802,6 +7864,13 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) =>
     console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action: 'pause' });
     const preCheck = await _verifyAdObject(adId, userToken);
     if (!preCheck.ok) return res.status(preCheck.httpStatus).json(preCheck.json);
+
+    // Block pause/resume if Meta says the ad is already archived or deleted
+    const verifiedEffective = String(preCheck.ad?.effective_status || preCheck.ad?.status || '').toUpperCase();
+    if (verifiedEffective === 'ARCHIVED' || verifiedEffective === 'DELETED') {
+      const rejected = await _rejectArchivedAd(adId, verifiedEffective, ownerKey);
+      return res.status(rejected.httpStatus).json(rejected.json);
+    }
 
     console.log('[AD_PAUSE_META_REQUEST]', { adId, apiVersion: META_API_VERSION });
     await axios.post(
@@ -7872,6 +7941,12 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) =
     console.log('[AD_ACTION_VERIFY_META_OBJECT]', { adId, action: 'resume' });
     const preCheck = await _verifyAdObject(adId, userToken);
     if (!preCheck.ok) return res.status(preCheck.httpStatus).json(preCheck.json);
+
+    const verifiedEffectiveResume = String(preCheck.ad?.effective_status || preCheck.ad?.status || '').toUpperCase();
+    if (verifiedEffectiveResume === 'ARCHIVED' || verifiedEffectiveResume === 'DELETED') {
+      const rejected = await _rejectArchivedAd(adId, verifiedEffectiveResume, ownerKey);
+      return res.status(rejected.httpStatus).json(rejected.json);
+    }
 
     console.log('[AD_PAUSE_META_REQUEST]', { action: 'resume', adId, apiVersion: META_API_VERSION });
     await axios.post(

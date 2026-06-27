@@ -3414,6 +3414,22 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   );
 }
 
+// ─── Archived/deleted creative detector ─────────────────────────────────────
+// Returns true when an ad should not be shown in the active creative section.
+// Checks every field that could signal the ad is no longer manageable.
+function isArchivedOrDeletedCreative(c) {
+  if (!c) return false;
+  const DEAD = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+  const DEAD_ACTIONS = new Set(['delete', 'archive', 'archive_detected', 'delete_detected']);
+  return (
+    DEAD.has(String(c.status          || '')) ||
+    DEAD.has(String(c.uiStatus        || '')) ||
+    DEAD.has(String(c.configuredStatus || '')) ||
+    DEAD.has(String(c.effectiveStatus  || '')) ||
+    DEAD_ACTIONS.has(String(c.lastAction || ''))
+  );
+}
+
 // ─── Per-ad delivery status resolver ────────────────────────────────────────
 // Reads from adStatusById (local override map) first, then falls back to the
 // creative object from DB/Meta. effectiveStatus "IN_PROCESS" never decides
@@ -9529,25 +9545,27 @@ ${pendingTest ? `
                         </div>
                       </div>
                     )}
-                    {/* Launched campaign multi-creative cards.
-                        Filters out deleted/archived and replaced ads (only show current visible ads). */}
+                    {/* Launched campaign multi-creative cards — active and archived. */}
                     {!isDraftView && selectedCampaignCreatives?.launchedCreativeSet?.length > 0 && (() => {
-                      // Build set of IDs that have been replaced (are "old" versions)
                       const replacedIds = new Set(
                         (selectedCampaignCreatives.launchedCreativeSet || [])
-                          .map((c) => c.replacedMetaAdId)
-                          .filter(Boolean)
+                          .map((c) => c.replacedMetaAdId).filter(Boolean)
                       );
-                      // Only show: not deleted, not archived, not a replaced-original
-                      const visibleSet = selectedCampaignCreatives.launchedCreativeSet.filter((c) =>
-                        c.status !== "deleted" && c.status !== "archived" && !replacedIds.has(c.metaAdId)
-                      );
-                      if (visibleSet.length === 0) return null;
+                      const allSet       = selectedCampaignCreatives.launchedCreativeSet.filter((c) => !replacedIds.has(c.metaAdId));
+                      const activeCreatives   = allSet.filter((c) => !isArchivedOrDeletedCreative(c));
+                      const archivedCreatives = allSet.filter((c) =>  isArchivedOrDeletedCreative(c));
+                      if (allSet.length === 0) return null;
+                      // Use activeCreatives as visibleSet for the existing card render below
+                      const visibleSet = activeCreatives;
+                      if (visibleSet.length === 0 && archivedCreatives.length === 0) return null;
                       return (
+                        <>
                         <div style={{ width: "100%", marginTop: 16 }}>
+                          {visibleSet.length > 0 && (
                           <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
                             {visibleSet.length}-Ad Creative Test — Launched
                           </div>
+                          )}
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {visibleSet.map((c, idx) => {
                               const ds = resolveCreativeDeliveryStatus(c, adStatusById);
@@ -9663,13 +9681,63 @@ ${pendingTest ? `
                               );
                             })}
                           </div>
-                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
-                            1 campaign · 1 ad set · {visibleSet.length} active ads
-                          </div>
+                          {visibleSet.length > 0 && (
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
+                              1 campaign · 1 ad set · {visibleSet.length} active ad{visibleSet.length !== 1 ? "s" : ""}
+                            </div>
+                          )}
                           <div style={{ marginTop: 10, padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 12, color: "#64748b", fontStyle: "italic" }}>
                             Ad-level metrics will appear after delivery data is available.
                           </div>
                         </div>
+
+                      {/* ── Archived Ads section ── */}
+                      {archivedCreatives.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                            <div style={{ fontWeight: 800, fontSize: 13, color: "#94a3b8" }}>Archived Ads</div>
+                            <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
+                              {archivedCreatives.length}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            {archivedCreatives.map((c, aidx) => (
+                              <div
+                                key={c.id || c.metaAdId || `arch-${aidx}`}
+                                style={{
+                                  flex: "1 1 200px", minWidth: 160, maxWidth: 280,
+                                  background: "#f8fafc", border: "1px solid #e2e8f0",
+                                  borderRadius: 14, padding: "10px 12px",
+                                  display: "flex", flexDirection: "column", gap: 5,
+                                  opacity: 0.75,
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                    {c.angleLabel || `Ad ${aidx + 1}`}
+                                  </span>
+                                  <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
+                                    Archived
+                                  </span>
+                                </div>
+                                {c.metaAdId && <div style={{ fontSize: 10, color: "#94a3b8" }}>Ad ID: {c.metaAdId}</div>}
+                                {c.imageUrl && (
+                                  <img src={toAbsoluteMedia(c.imageUrl)} alt="archived creative"
+                                    style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", filter: "grayscale(40%)" }}
+                                    onError={(e) => { e.target.style.display = "none"; }} />
+                                )}
+                                <div style={{ fontWeight: 700, fontSize: 12, color: "#64748b", lineHeight: 1.3 }}>
+                                  {c.headline || "(no headline)"}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
+                                  {(c.body || "").slice(0, 80)}{(c.body || "").length > 80 ? "…" : ""}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      </>
                       );
                     })()}
                     {/* old map/closing tags removed — new IIFE block above handles all rendering */}
