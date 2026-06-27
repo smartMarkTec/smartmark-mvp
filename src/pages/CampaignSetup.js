@@ -3473,6 +3473,41 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   );
 }
 
+// ─── Archive-safe creative record merge ─────────────────────────────────────
+// Merges two campaign creative record objects, ensuring archivedMetaAdIds always
+// wins over any stale "active" status in either source.  Used for every
+// setCampaignCreativesMap write that might overwrite correct archived status.
+function mergeCreativeRecordPreservingArchive(existing = {}, incoming = {}) {
+  // Union of both archived maps — archived status can never be removed by a merge
+  const archivedMetaAdIds = {
+    ...(existing.archivedMetaAdIds || {}),
+    ...(incoming.archivedMetaAdIds || {}),
+  };
+
+  const existingSet = Array.isArray(existing.launchedCreativeSet) ? existing.launchedCreativeSet : [];
+  const incomingSet = Array.isArray(incoming.launchedCreativeSet) ? incoming.launchedCreativeSet : [];
+
+  // Build by-id map, incoming wins for non-archived fields, archive map wins for status
+  const byId = new Map();
+  [...existingSet, ...incomingSet].forEach((c) => {
+    const id = String(c?.metaAdId || c?.adId || "");
+    if (!id) return;
+    const prev = byId.get(id) || {};
+    const forced = archivedMetaAdIds[id];
+    byId.set(id, forced
+      ? { ...prev, ...c, ...forced, status: "archived", uiStatus: "ARCHIVED", configuredStatus: "ARCHIVED", effectiveStatus: "ARCHIVED" }
+      : { ...prev, ...c }
+    );
+  });
+
+  return {
+    ...existing,
+    ...incoming,
+    archivedMetaAdIds,
+    launchedCreativeSet: byId.size > 0 ? Array.from(byId.values()) : (incomingSet.length > 0 ? incomingSet : existingSet),
+  };
+}
+
 // ─── Archived/deleted creative detector ─────────────────────────────────────
 // Returns true when an ad should not be shown in the active creative section.
 // Checks every field that could signal the ad is no longer manageable.
@@ -5260,21 +5295,28 @@ useEffect(() => {
       for (const c of list) {
         if (!c.id) continue;
 
-        // Creative data — only populate when real content exists so campaigns without
-        // stored creatives don't pollute the map with empty entries that mask the
-        // "no creative" fallback.
-        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body;
+        // Creative data — populate when real content exists, always including
+        // launchedCreativeSet and archivedMetaAdIds so archived status isn't lost.
+        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body || c.launchedCreativeSet?.length > 0;
         if (hasCreative) {
           newCreatives[c.id] = {
-            images:         (c.images || []).filter(Boolean),
-            mediaSelection: c.mediaSelection || "image",
+            images:              (c.images || []).filter(Boolean),
+            mediaSelection:      c.mediaSelection || "image",
             meta: {
               headline: String(c.meta?.headline || "").trim(),
               body:     String(c.meta?.body     || "").trim(),
               link:     String(c.meta?.link     || "").trim(),
             },
+            launchedCreativeSet: Array.isArray(c.launchedCreativeSet) && c.launchedCreativeSet.length > 0 ? c.launchedCreativeSet : null,
+            archivedMetaAdIds:   (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === "object") ? c.archivedMetaAdIds : {},
           };
         }
+        console.log("[FRONTEND_CREATIVE_MAP_WRITE]", {
+          source: "admin_campaigns_initial_load",
+          campaignId: c.id,
+          launchedCreativeSet: (c.launchedCreativeSet || []).map((x) => ({ metaAdId: x.metaAdId, status: x.status, uiStatus: x.uiStatus, lastAction: x.lastAction })),
+          archivedMetaAdIds: c.archivedMetaAdIds || {},
+        });
 
         // Metrics + optimizer state
         const snap = c.optimizerState?.metricsSnapshot;
@@ -5303,7 +5345,13 @@ useEffect(() => {
           };
         }
       }
-      setCampaignCreativesMap((prev) => ({ ...prev, ...newCreatives }));
+      setCampaignCreativesMap((prev) => {
+        const next = { ...prev };
+        for (const [id, incoming] of Object.entries(newCreatives)) {
+          next[id] = mergeCreativeRecordPreservingArchive(prev[id] || {}, incoming);
+        }
+        return next;
+      });
       setMetricsMap((prev)            => ({ ...prev, ...newMetrics  }));
       setOptimizerStateMap((prev)     => ({ ...prev, ...newOptStates }));
 
@@ -5566,29 +5614,38 @@ useEffect(() => {
               link:     String(serverSet?.[0]?.link     || creativeData?.meta?.link     || "").trim(),
             };
 
-            setCampaignCreativesMap((prev) => ({
-              ...prev,
-              [campaignId]: {
+            setCampaignCreativesMap((prev) => {
+              const incoming = {
                 images:              imgs,
-                launchedCreativeSet: serverSet || prev[campaignId]?.launchedCreativeSet || null,
+                launchedCreativeSet: serverSet || null,
                 mediaSelection:      "image",
                 meta:                nextMeta,
-              },
-            }));
+                // server may return archivedMetaAdIds from the auth.js creatives endpoint
+                archivedMetaAdIds:   creativeData?.archivedMetaAdIds || {},
+              };
+              console.log("[FRONTEND_CREATIVE_MAP_WRITE]", {
+                source: "creatives_preload_authFetch",
+                campaignId,
+                launchedCreativeSet: (incoming.launchedCreativeSet || []).map((x) => ({ metaAdId: x.metaAdId, status: x.status, uiStatus: x.uiStatus, lastAction: x.lastAction })),
+                archivedMetaAdIds: incoming.archivedMetaAdIds,
+              });
+              return { ...prev, [campaignId]: mergeCreativeRecordPreservingArchive(prev[campaignId] || {}, incoming) };
+            });
 
             const existingMap = readCreativeMap(resolvedUser, acctId);
             const prevSaved = existingMap[campaignId] || {};
 
-            existingMap[campaignId] = {
-              ...prevSaved,
+            // Preserve archivedMetaAdIds in localStorage so getSavedCreatives can use it
+            existingMap[campaignId] = mergeCreativeRecordPreservingArchive(prevSaved, {
               images:              imgs,
-              launchedCreativeSet: serverSet || prevSaved?.launchedCreativeSet || null,
+              launchedCreativeSet: serverSet || null,
               mediaSelection:      "image",
               time:                Date.now(),
               expiresAt:           prevSaved?.expiresAt || Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
               name:                prevSaved?.name || c?.name || "Untitled",
               meta:                nextMeta,
-            };
+              archivedMetaAdIds:   creativeData?.archivedMetaAdIds || {},
+            });
 
             writeCreativeMap(resolvedUser, acctId, existingMap);
 
@@ -6138,19 +6195,7 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
         setCampaignCreativesMap((m) => {
           const merged = { ...m };
           for (const [id, incoming] of Object.entries(newCreatives)) {
-            const existing = m[id] || {};
-            // Merge archivedMetaAdIds: union of existing and incoming so no archived ad is lost.
-            const mergedArchivedIds = Object.assign(
-              {},
-              existing.archivedMetaAdIds || {},
-              incoming.archivedMetaAdIds || {}
-            );
-            merged[id] = {
-              ...existing,
-              ...incoming,
-              launchedCreativeSet: incoming.launchedCreativeSet || existing.launchedCreativeSet || [],
-              archivedMetaAdIds:   Object.keys(mergedArchivedIds).length > 0 ? mergedArchivedIds : (existing.archivedMetaAdIds || {}),
-            };
+            merged[id] = mergeCreativeRecordPreservingArchive(m[id] || {}, incoming);
           }
           return merged;
         });
@@ -8104,8 +8149,36 @@ const getSavedCreatives = (campaignId) => {
   const localMap = acctKey ? readCreativeMap(resolvedUser, acctKey) : {};
   const saved = localMap[campaignId] || null;
 
-  // Prefer launchedCreativeSet from localStorage (has all N ads with per-ad copy).
-  const launchedSet = saved?.launchedCreativeSet || runtime?.launchedCreativeSet || null;
+  // Merge archivedMetaAdIds from both sources — archived status is never lost.
+  const combinedArchivedMap = {
+    ...(runtime?.archivedMetaAdIds || {}),
+    ...(saved?.archivedMetaAdIds   || {}),
+  };
+
+  // Build the launched set: prefer saved (has per-ad copy) but merge runtime entries,
+  // then apply archivedMetaAdIds overrides so stale localStorage "active" entries
+  // are correctly shown as archived when the runtime/backend says they are.
+  const _rawLaunched = (() => {
+    const s = Array.isArray(saved?.launchedCreativeSet)   ? saved.launchedCreativeSet   : [];
+    const r = Array.isArray(runtime?.launchedCreativeSet) ? runtime.launchedCreativeSet : [];
+    if (s.length === 0 && r.length === 0) return null;
+    // Union by metaAdId — runtime wins for status fields, saved wins for copy/image fields
+    const byId = new Map();
+    [...s, ...r].forEach((c) => {
+      const id = String(c?.metaAdId || "");
+      if (!id) return;
+      byId.set(id, { ...(byId.get(id) || {}), ...c });
+    });
+    return Array.from(byId.values());
+  })();
+
+  // Apply archivedMetaAdIds overrides — these always beat any source
+  const launchedSet = _rawLaunched
+    ? _rawLaunched.map((c) => {
+        const forced = combinedArchivedMap[String(c?.metaAdId || "")];
+        return forced ? { ...c, ...forced, status: "archived", uiStatus: "ARCHIVED", configuredStatus: "ARCHIVED", effectiveStatus: "ARCHIVED" } : c;
+      })
+    : null;
 
   console.debug("[CAMPAIGN_CREATIVE_RENDER_SOURCE]", {
     campaignId, hasRuntime: !!runtime, hasSaved: !!saved,
@@ -8122,6 +8195,8 @@ const getSavedCreatives = (campaignId) => {
         ? launchedSet.map((c) => toAbsoluteMedia(c.imageUrl)).filter(Boolean)
         : fallbackImages,
       launchedCreativeSet: launchedSet,
+      // Expose the merged archived map so render paths can apply it
+      archivedMetaAdIds: combinedArchivedMap,
       mediaType: runtime?.mediaType || saved?.mediaType || "image",
       mediaSelection: runtime?.mediaSelection || saved?.mediaSelection || "image",
       videos: runtime?.videos || saved?.videos || [],
