@@ -2812,7 +2812,7 @@ function LandingActionsCard({ adminClientId, campaignId, pageSlug }) {
   );
 }
 
-function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved, campaignMetrics }) {
+function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClientId, isMobile, campaignCreatives, campaignName, onChallengerRemoved, campaignMetrics, adStatusById = {} }) {
   const [testMetrics, setTestMetrics] = useState(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState(null);
@@ -2838,12 +2838,18 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
 
   // Launched creative set — source of truth for the initial ads the campaign launched with.
   // Filter out archived/deleted/replaced entries so only visible live ads show.
-  // Split into active vs archived/deleted using the same helper used in the Creatives tab.
+  // Split into active vs archived/deleted.
+  // Merge adStatusById overrides before filtering so an immediate archive action
+  // is reflected even before campaignCreatives prop has re-propagated.
+  const TEN_MIN = 10 * 60 * 1000;
   const _allLaunched = Array.isArray(campaignCreatives?.launchedCreativeSet)
-    ? campaignCreatives.launchedCreativeSet.filter((c) => {
-        const s = String(c.status || "").toLowerCase();
-        return !["replaced"].includes(s); // keep archived in the list — isArchivedOrDeletedCreative handles the split
-      })
+    ? campaignCreatives.launchedCreativeSet
+        .filter((c) => String(c.status || "").toLowerCase() !== "replaced")
+        .map((c) => {
+          const ov = c.metaAdId ? adStatusById[c.metaAdId] : null;
+          const ovActive = ov && ov.lastActionAt && (Date.now() - new Date(ov.lastActionAt).getTime()) < TEN_MIN;
+          return ovActive ? { ...c, ...ov } : c;
+        })
     : [];
   const launchedSet         = _allLaunched.filter((c) => !isArchivedOrDeletedCreative(c));
   const archivedLaunchedSet = _allLaunched.filter((c) =>  isArchivedOrDeletedCreative(c));
@@ -6349,19 +6355,28 @@ const handlePerAdAction = async (metaAdId, action) => {
       finalFrontendStatus: resolvedUiStatus,
     });
 
-    // 1. Update React state immediately — card flips to Paused/Active without reload.
+    // Build the canonical status patch for this ad.
+    const nowTs  = new Date().toISOString();
+    const patch  = {
+      status:           resolvedUiStatus,
+      configuredStatus: j.configuredStatus || resolvedUiStatus.toUpperCase(),
+      effectiveStatus:  j.effectiveStatus  || resolvedUiStatus.toUpperCase(),
+      uiStatus:         j.uiStatus         || resolvedUiStatus.toUpperCase(),
+      lastAction:       action,
+      lastActionAt:     nowTs,
+      isSyncing:        false,
+      error:            null,
+    };
+
+    // 1a. Update adStatusById immediately — this is read by isArchivedOrDeletedCreative via
+    // the merged-override path in both render sections (Creatives tab + CreativeABTestPanel).
+    setAdStatusById((prev) => ({ ...prev, [metaAdId]: patch }));
+
+    // 1b. Update campaignCreativesMap so the status persists through re-renders and reloads.
     setCampaignCreativesMap((prev) => {
       const rec = prev[selectedCampaignId] || {};
       const updatedSet = (rec.launchedCreativeSet || []).map((c) =>
-        c.metaAdId === metaAdId ? {
-          ...c,
-          status:          resolvedUiStatus,
-          configuredStatus: j.configuredStatus || c.configuredStatus,
-          effectiveStatus:  j.effectiveStatus  || c.effectiveStatus,
-          uiStatus:         j.uiStatus         || resolvedUiStatus.toUpperCase(),
-          lastAction:       action,
-          lastActionAt:     new Date().toISOString(),
-        } : c
+        c.metaAdId === metaAdId ? { ...c, ...patch } : c
       );
       return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet } };
     });
@@ -9627,7 +9642,16 @@ ${pendingTest ? `
                         (selectedCampaignCreatives.launchedCreativeSet || [])
                           .map((c) => c.replacedMetaAdId).filter(Boolean)
                       );
-                      const allSet       = selectedCampaignCreatives.launchedCreativeSet.filter((c) => !replacedIds.has(c.metaAdId));
+                      const _TEN_MIN = 10 * 60 * 1000;
+                      // Merge adStatusById overrides so an immediate archive/pause action
+                      // is reflected before campaignCreativesMap has propagated.
+                      const allSet = selectedCampaignCreatives.launchedCreativeSet
+                        .filter((c) => !replacedIds.has(c.metaAdId))
+                        .map((c) => {
+                          const ov = c.metaAdId ? adStatusById[c.metaAdId] : null;
+                          const ovActive = ov && ov.lastActionAt && (Date.now() - new Date(ov.lastActionAt).getTime()) < _TEN_MIN;
+                          return ovActive ? { ...c, ...ov } : c;
+                        });
                       const activeCreatives   = allSet.filter((c) => !isArchivedOrDeletedCreative(c));
                       const archivedCreatives = allSet.filter((c) =>  isArchivedOrDeletedCreative(c));
                       if (allSet.length === 0) return null;
@@ -10968,6 +10992,7 @@ ${pendingTest ? `
             campaignCreatives={selectedCampaignCreatives}
             campaignName={selectedLiveCampaign?.name || ""}
             campaignMetrics={metricsMap[selectedCampaignId] || null}
+            adStatusById={adStatusById}
             onChallengerRemoved={() => {
               setOptimizerStateMap((prev) => ({
                 ...prev,
