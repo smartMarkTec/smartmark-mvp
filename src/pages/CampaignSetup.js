@@ -3966,6 +3966,7 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   // Top-level state for expanded creative card in Creatives tab multi-card section.
   // Must live here — cannot be inside an IIFE/conditional render (Rules of Hooks).
   const [expandedCreativeCardIdx, setExpandedCreativeCardIdx] = useState(null);
+  const [perAdActionLoading, setPerAdActionLoading] = useState(null); // metaAdId currently being actioned
 
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
@@ -6087,25 +6088,50 @@ const saveBizInfo = async () => {
 };
 
 // Pause, resume, or delete a SINGLE Meta ad by its adId (not the whole campaign).
-// In admin-client mode, uses the dedicated admin endpoint so the CLIENT's FB token
-// is resolved — not TheBoss's session token (which has no access to the client's ads).
+// In admin-client mode uses /api/admin/clients/:clientId/ad/:adId/:action so the
+// CLIENT's FB token is resolved — not TheBoss's session token.
 const handlePerAdAction = async (metaAdId, action) => {
-  if (!metaAdId) return;
+  console.log("[PER_AD_ACTION_START]", {
+    action,
+    metaAdId,
+    adminClientId,
+    selectedAccount,
+    selectedCampaignId,
+    hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim(),
+  });
+
+  if (!metaAdId) {
+    console.warn("[PER_AD_ACTION_START] early return — metaAdId is falsy");
+    return;
+  }
   if (action === "delete" && !window.confirm("Archive this ad on Meta? It will stop running.")) return;
-  const acctId = String(selectedAccount || "").trim();
-  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+
+  setPerAdActionLoading(metaAdId);
+  const sid    = (localStorage.getItem("sm_sid_v1") || "").trim();
+  // acctId only needed for the non-admin path
+  const acctId = adminClientId ? "" : String(selectedAccount || "").trim();
+
   try {
-    const r = adminClientId
-      ? await adminPerAdActionFetch(adminClientId, metaAdId, action)
-      : await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
-          method: "POST", credentials: "include",
-          headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
-        });
+    let r;
+    if (adminClientId) {
+      console.log("[PER_AD_ACTION_ROUTE]", { routeType: "admin", url: `/api/admin/clients/${adminClientId}/ad/${metaAdId}/${action}` });
+      r = await adminPerAdActionFetch(adminClientId, metaAdId, action);
+    } else {
+      console.log("[PER_AD_ACTION_ROUTE]", { routeType: "regular-auth", url: `/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}` });
+      r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+      });
+    }
+
     const j = await r.json().catch(() => ({}));
+    console.log("[PER_AD_ACTION_RESPONSE]", { status: r.status, ok: r.ok, json: j });
+
     if (!r.ok) {
       const errMsg   = j.error    || "unknown error";
       const metaCode = j.metaCode ? ` (Meta code ${j.metaCode})` : "";
       const hint     = j.hint     ? `\n\n${j.hint}` : "";
+      console.error("[PER_AD_ACTION_ERROR]", { action, metaAdId, errMsg, metaCode: j.metaCode, hint: j.hint });
       alert(`Ad ${action} failed: ${errMsg}${metaCode}${hint}`);
       return;
     }
@@ -6115,30 +6141,33 @@ const handlePerAdAction = async (metaAdId, action) => {
     const newStatus = metaVerifiedStatus || (action === "delete" ? "deleted" : action === "pause" ? "paused" : "active");
 
     // 1. Update React state immediately (Creatives tab reflects change without reload)
-    let updatedSet = null;
     setCampaignCreativesMap((prev) => {
       const rec = prev[selectedCampaignId] || {};
-      updatedSet = (rec.launchedCreativeSet || []).map((c) =>
-        c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
+      const updatedSet = (rec.launchedCreativeSet || []).map((c) =>
+        c.metaAdId === metaAdId ? { ...c, status: newStatus, effectiveStatus: j.effectiveStatus || newStatus.toUpperCase() } : c
       );
-      return {
-        ...prev,
-        [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet },
-      };
+      return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet } };
     });
 
-    // 2. Update localStorage creative map so status persists on refresh
-    try {
-      const acctKey = acctId.replace(/^act_/, "");
-      const localMap = readCreativeMap(resolvedUser, acctKey);
-      if (localMap[selectedCampaignId]?.launchedCreativeSet) {
-        localMap[selectedCampaignId].launchedCreativeSet = localMap[selectedCampaignId].launchedCreativeSet.map((c) =>
-          c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
-        );
-        writeCreativeMap(resolvedUser, acctKey, localMap);
-      }
-    } catch {}
-  } catch (e) { alert(`Ad ${action} failed: ${e?.message}`); }
+    // 2. Update localStorage creative map so status persists on refresh (non-admin only — admin reads from DB)
+    if (!adminClientId) {
+      try {
+        const acctKey = acctId.replace(/^act_/, "");
+        const localMap = readCreativeMap(resolvedUser, acctKey);
+        if (localMap[selectedCampaignId]?.launchedCreativeSet) {
+          localMap[selectedCampaignId].launchedCreativeSet = localMap[selectedCampaignId].launchedCreativeSet.map((c) =>
+            c.metaAdId === metaAdId ? { ...c, status: newStatus } : c
+          );
+          writeCreativeMap(resolvedUser, acctKey, localMap);
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.error("[PER_AD_ACTION_ERROR]", { action, metaAdId, error: e?.message, stack: e?.stack });
+    alert(`Ad ${action} failed: ${e?.message || "unexpected error"}`);
+  } finally {
+    setPerAdActionLoading(null);
+  }
 };
 
 const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
@@ -9330,15 +9359,43 @@ ${pendingTest ? `
                                       )}
                                       <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700, marginBottom: 6 }}>CTA: {c.cta || "Learn more"}</div>
                                       {/* Per-ad actions: Pause / Resume / Delete only */}
-                                      {c.metaAdId && (
-                                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
-                                          {isPaused
-                                            ? <button onClick={() => handlePerAdAction(c.metaAdId, "resume")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", cursor: "pointer", fontWeight: 700 }}>▶ Resume</button>
-                                            : <button onClick={() => handlePerAdAction(c.metaAdId, "pause")}  style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 700 }}>⏸ Pause</button>
-                                          }
-                                          <button onClick={() => handlePerAdAction(c.metaAdId, "delete")} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>✕ Delete</button>
-                                        </div>
-                                      )}
+                                      {c.metaAdId && (() => {
+                                        const isActioning = perAdActionLoading === c.metaAdId;
+                                        const btnBase = { fontSize: 10, padding: "3px 8px", borderRadius: 5, fontWeight: 700, cursor: isActioning ? "not-allowed" : "pointer", opacity: isActioning ? 0.6 : 1 };
+                                        return (
+                                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                                            {isActioning ? (
+                                              <span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic", padding: "3px 0" }}>Working…</span>
+                                            ) : isPaused ? (
+                                              <button
+                                                disabled={isActioning}
+                                                onClick={() => {
+                                                  console.log("[PER_AD_BUTTON_CLICK]", { action: "resume", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
+                                                  handlePerAdAction(c.metaAdId, "resume");
+                                                }}
+                                                style={{ ...btnBase, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d" }}
+                                              >▶ Resume</button>
+                                            ) : (
+                                              <button
+                                                disabled={isActioning}
+                                                onClick={() => {
+                                                  console.log("[PER_AD_BUTTON_CLICK]", { action: "pause", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
+                                                  handlePerAdAction(c.metaAdId, "pause");
+                                                }}
+                                                style={{ ...btnBase, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309" }}
+                                              >⏸ Pause</button>
+                                            )}
+                                            <button
+                                              disabled={isActioning}
+                                              onClick={() => {
+                                                console.log("[PER_AD_BUTTON_CLICK]", { action: "delete", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
+                                                handlePerAdAction(c.metaAdId, "delete");
+                                              }}
+                                              style={{ ...btnBase, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c" }}
+                                            >✕ Delete</button>
+                                          </div>
+                                        );
+                                      })()}
                                     </>
                                   )}
                                 </div>
