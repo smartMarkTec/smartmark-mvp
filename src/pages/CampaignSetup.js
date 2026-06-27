@@ -3414,6 +3414,80 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   );
 }
 
+// ─── Per-ad delivery status resolver ────────────────────────────────────────
+// Reads from adStatusById (local override map) first, then falls back to the
+// creative object from DB/Meta. effectiveStatus "IN_PROCESS" never decides
+// isPaused by itself — it only sets isSyncing.
+// lastActionAt within 10 minutes keeps the override alive against stale refreshes.
+function resolveCreativeDeliveryStatus(creative, adStatusById) {
+  const mid  = creative?.metaAdId;
+  const over = mid ? adStatusById[mid] : null;
+
+  // Respect override only if it was set within the last 10 minutes
+  const TEN_MIN = 10 * 60 * 1000;
+  const overrideActive = over && over.lastActionAt &&
+    (Date.now() - new Date(over.lastActionAt).getTime()) < TEN_MIN;
+
+  const src  = overrideActive ? over : (creative || {});
+
+  const uiSt  = String(src.uiStatus         || "").toUpperCase();
+  const cfgSt = String(src.configuredStatus || "").toUpperCase();
+  const rawSt = String(src.status           || "").toUpperCase();
+  const effSt = String(src.effectiveStatus  || "").toUpperCase();
+  const last  = String(src.lastAction       || "").toLowerCase();
+
+  let isPaused = false;
+  if      (uiSt  === "PAUSED") isPaused = true;
+  else if (uiSt  === "ACTIVE") isPaused = false;
+  else if (cfgSt === "PAUSED") isPaused = true;
+  else if (cfgSt === "ACTIVE") isPaused = false;
+  else if (rawSt === "PAUSED") isPaused = true;
+  else if (rawSt === "ACTIVE") isPaused = false;
+  else if (last  === "pause")  isPaused = true;
+  else if (last  === "resume") isPaused = false;
+  else if (effSt === "PAUSED") isPaused = true;
+
+  const isSyncing  = effSt === "IN_PROCESS";
+  const error      = overrideActive ? (over.error || null) : null;
+  const isUpdating = !!(overrideActive && over.isSyncing);
+  const uiStatus   = isPaused ? "PAUSED" : "ACTIVE";
+  const nextAction = isPaused ? "resume" : "pause";
+  const label = isPaused
+    ? (isSyncing ? "Paused · Meta syncing" : "Paused")
+    : (isSyncing ? "Active · Meta syncing" : "Active");
+
+  return { uiStatus, isPaused, isActive: !isPaused, isSyncing, isUpdating, label, nextAction, error };
+}
+
+// ─── Inline slider toggle component ─────────────────────────────────────────
+function AdDeliveryToggle({ isOn, disabled, onClick }) {
+  return (
+    <div
+      role="switch"
+      aria-checked={isOn}
+      onClick={disabled ? undefined : onClick}
+      style={{
+        width: 36, height: 20, borderRadius: 10, flexShrink: 0,
+        background: isOn ? "#22c55e" : "#94a3b8",
+        position: "relative",
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "background 0.18s",
+        opacity: disabled ? 0.6 : 1,
+        boxShadow: "inset 0 1px 2px rgba(0,0,0,0.15)",
+      }}
+    >
+      <div style={{
+        position: "absolute", top: 2,
+        left: isOn ? 18 : 2,
+        width: 16, height: 16, borderRadius: "50%",
+        background: "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+        transition: "left 0.18s",
+      }} />
+    </div>
+  );
+}
+
 const CampaignSetup = () => {
 
 // ✅ HOTFIX: rewrite ANY /api/auth/* or /auth/* calls to SAME-ORIGIN /auth/*
@@ -3966,7 +4040,10 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   // Top-level state for expanded creative card in Creatives tab multi-card section.
   // Must live here — cannot be inside an IIFE/conditional render (Rules of Hooks).
   const [expandedCreativeCardIdx, setExpandedCreativeCardIdx] = useState(null);
-  const [perAdActionLoading, setPerAdActionLoading] = useState(null); // metaAdId currently being actioned
+  const [perAdActionLoading, setPerAdActionLoading] = useState(null); // metaAdId currently being actioned (legacy)
+  // Single source of truth for per-ad delivery status overrides.
+  // Wins over launchedCreativeSet data for 10 minutes after an action.
+  const [adStatusById, setAdStatusById] = useState({});
 
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
@@ -6195,6 +6272,103 @@ const handlePerAdAction = async (metaAdId, action) => {
     alert(`Ad ${action} failed: ${e?.message || "unexpected error"}`);
   } finally {
     setPerAdActionLoading(null);
+  }
+};
+
+// ─── Ad delivery toggle ───────────────────────────────────────────────────────
+// Replaces the old Pause/Resume button pair.  Uses adStatusById as the single
+// source of truth so the slider moves immediately on click.
+const handleAdDeliveryToggle = async (creative) => {
+  const metaAdId = creative?.metaAdId;
+  if (!metaAdId) return;
+
+  const current  = resolveCreativeDeliveryStatus(creative, adStatusById);
+  const action   = current.nextAction; // "pause" | "resume"
+  const optimisticStatus = action === "pause" ? "PAUSED" : "ACTIVE";
+  const previousEntry    = adStatusById[metaAdId] || {};
+
+  console.log("[AD_DELIVERY_TOGGLE_CLICK]", {
+    adId: metaAdId, action,
+    previousStatus: current.uiStatus,
+    optimisticStatus,
+  });
+
+  // Optimistic update — slider moves before the network round-trip.
+  setAdStatusById((prev) => ({
+    ...prev,
+    [metaAdId]: {
+      ...prev[metaAdId],
+      uiStatus:         optimisticStatus,
+      configuredStatus: optimisticStatus,
+      status:           optimisticStatus.toLowerCase(),
+      effectiveStatus:  "IN_PROCESS",
+      lastAction:       action,
+      lastActionAt:     new Date().toISOString(),
+      isSyncing:        true,
+      error:            null,
+    },
+  }));
+  console.log("[AD_DELIVERY_OPTIMISTIC_UPDATE]", { adId: metaAdId, optimisticStatus });
+
+  const sid    = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const acctId = adminClientId ? "" : String(selectedAccount || "").trim();
+
+  try {
+    let r;
+    if (adminClientId) {
+      r = await adminPerAdActionFetch(adminClientId, metaAdId, action);
+    } else {
+      r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${metaAdId}/${action}`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+      });
+    }
+
+    const j = await r.json().catch(() => ({}));
+    console.log("[AD_DELIVERY_RESPONSE]", { adId: metaAdId, action, status: r.status, ok: r.ok, json: j });
+
+    if (!r.ok) {
+      const errMsg = j.error || "unknown error";
+      console.warn("[AD_DELIVERY_REVERT]", { adId: metaAdId, action, error: errMsg });
+      setAdStatusById((prev) => ({
+        ...prev,
+        [metaAdId]: {
+          ...previousEntry,
+          isSyncing: false,
+          error: `Could not update ad delivery: ${errMsg}${j.metaCode ? ` (Meta code ${j.metaCode})` : ""}`,
+        },
+      }));
+      return;
+    }
+
+    // Resolve final status — uiStatus > configuredStatus > status > requestedStatus > optimistic fallback.
+    const resp     = j;
+    const finalUi  = resp.uiStatus || resp.configuredStatus || resp.status || optimisticStatus;
+    const finalState = {
+      uiStatus:         String(finalUi).toUpperCase(),
+      configuredStatus: String(resp.configuredStatus || finalUi).toUpperCase(),
+      status:           String(resp.status           || finalUi).toLowerCase(),
+      effectiveStatus:  String(resp.effectiveStatus  || "").toUpperCase() || undefined,
+      lastAction:       action,
+      lastActionAt:     new Date().toISOString(),
+      isSyncing:        String(resp.effectiveStatus || "").toUpperCase() === "IN_PROCESS",
+      error:            null,
+    };
+    setAdStatusById((prev) => ({ ...prev, [metaAdId]: finalState }));
+    console.log("[AD_DELIVERY_FINAL_STATE]", {
+      adId: metaAdId, action,
+      responseUiStatus:         resp.uiStatus,
+      responseConfiguredStatus: resp.configuredStatus,
+      responseEffectiveStatus:  resp.effectiveStatus,
+      finalStatus:              finalState.uiStatus,
+    });
+
+  } catch (e) {
+    console.error("[AD_DELIVERY_REVERT]", { adId: metaAdId, action, error: e?.message });
+    setAdStatusById((prev) => ({
+      ...prev,
+      [metaAdId]: { ...previousEntry, isSyncing: false, error: "Could not update ad delivery. Try again." },
+    }));
   }
 };
 
@@ -9340,101 +9514,72 @@ ${pendingTest ? `
                           </div>
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {visibleSet.map((c, idx) => {
-                              // isPaused: use uiStatus > configuredStatus > lastAction > status.
-                              // effectiveStatus is intentionally NOT used for primary isPaused determination
-                              // because Meta returns "IN_PROCESS" during propagation after a pause action.
-                              const uiSt   = String(c.uiStatus          || "").toUpperCase();
-                              const cfgSt  = String(c.configuredStatus  || "").toUpperCase();
-                              const rawSt  = String(c.status            || "").toLowerCase();
-                              const effSt  = String(c.effectiveStatus   || "").toUpperCase();
-                              const isPaused = uiSt === "PAUSED" || cfgSt === "PAUSED" || rawSt === "paused" || c.lastAction === "pause";
-                              const isSyncing = effSt === "IN_PROCESS" && isPaused;
-                              const isDeleted = rawSt === "deleted";
+                              const ds = resolveCreativeDeliveryStatus(c, adStatusById);
+                              const { isPaused, label, isSyncing, isUpdating, error } = ds;
+                              const isDeleted = String(c.status || "").toLowerCase() === "deleted";
                               const statusColor = isPaused ? "#b45309" : "#15803d";
                               const statusBg    = isPaused ? "#fef3c7" : "#dcfce7";
-                              const statusLabel = isPaused
-                                ? (isSyncing ? "Paused · Meta syncing" : "Paused")
-                                : "Active";
                               return (
                                 <div
                                   key={c.id || c.metaAdId || idx}
-                                  onClick={() => setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx)}
                                   style={{
-                                    flex: "1 1 200px", minWidth: 160, maxWidth: 260,
-                                    background: "#fff", cursor: "pointer",
-                                    border: expandedCreativeCardIdx === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
+                                    flex: "1 1 200px", minWidth: 160, maxWidth: 280,
+                                    background: "#fff",
+                                    border: "1px solid #dbe4ff",
                                     borderRadius: 14, padding: "10px 12px",
-                                    boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
+                                    boxShadow: "0 2px 8px rgba(93,89,234,0.08)",
+                                    display: "flex", flexDirection: "column", gap: 6,
                                     opacity: isDeleted ? 0.5 : 1,
                                   }}
                                 >
-                                  {/* Header row: angle + status badge */}
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                                  {/* Header row: angle label + status badge */}
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                     <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
                                       {c.angleLabel || `Ad ${idx + 1}`}
                                     </span>
                                     <span style={{ background: statusBg, color: statusColor, borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
-                                      {statusLabel}
+                                      {label}
                                     </span>
                                   </div>
+
+                                  {/* Creative preview */}
                                   {c.imageUrl && (
                                     <img src={toAbsoluteMedia(c.imageUrl)} alt="creative"
-                                      style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", marginBottom: 6 }}
+                                      style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover" }}
                                       onError={(e) => { e.target.style.display = "none"; }} />
                                   )}
-                                  <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
+                                  <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", lineHeight: 1.3 }}>
                                     {c.headline || "(no headline)"}
                                   </div>
-                                  {/* Body preview — always visible */}
-                                  <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                                  <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5 }}>
                                     {(c.body || "").slice(0, 70)}{(c.body || "").length > 70 ? "…" : ""}
                                   </div>
-                                  {/* Expanded: full body + CTA + per-ad controls */}
-                                  {expandedCreativeCardIdx === idx && (
-                                    <>
-                                      {(c.body || "").length > 70 && (
-                                        <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>{c.body}</div>
+
+                                  {/* Ad Delivery toggle — always visible, never behind an expand click */}
+                                  {c.metaAdId && !isDeleted && (
+                                    <div
+                                      style={{ borderTop: "1px solid #f1f5f9", paddingTop: 8, marginTop: 2 }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                                        Ad Delivery
+                                      </div>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <AdDeliveryToggle
+                                          isOn={!isPaused}
+                                          disabled={isUpdating}
+                                          onClick={() => handleAdDeliveryToggle(c)}
+                                        />
+                                        <span style={{ fontSize: 11, color: isUpdating ? "#94a3b8" : statusColor, fontWeight: 700 }}>
+                                          {isUpdating ? "Updating…" : label}
+                                        </span>
+                                      </div>
+                                      {error && (
+                                        <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4, lineHeight: 1.4 }}>
+                                          {error}
+                                        </div>
                                       )}
-                                      <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700, marginBottom: 6 }}>CTA: {c.cta || "Learn more"}</div>
-                                      {/* Per-ad actions: Pause / Resume / Delete only */}
-                                      {c.metaAdId && (() => {
-                                        const isActioning = perAdActionLoading === c.metaAdId;
-                                        const btnBase = { fontSize: 10, padding: "3px 8px", borderRadius: 5, fontWeight: 700, cursor: isActioning ? "not-allowed" : "pointer", opacity: isActioning ? 0.6 : 1 };
-                                        return (
-                                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
-                                            {isActioning ? (
-                                              <span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic", padding: "3px 0" }}>Working…</span>
-                                            ) : isPaused ? (
-                                              <button
-                                                disabled={isActioning}
-                                                onClick={() => {
-                                                  console.log("[PER_AD_BUTTON_CLICK]", { action: "resume", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
-                                                  handlePerAdAction(c.metaAdId, "resume");
-                                                }}
-                                                style={{ ...btnBase, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d" }}
-                                              >▶ Resume</button>
-                                            ) : (
-                                              <button
-                                                disabled={isActioning}
-                                                onClick={() => {
-                                                  console.log("[PER_AD_BUTTON_CLICK]", { action: "pause", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
-                                                  handlePerAdAction(c.metaAdId, "pause");
-                                                }}
-                                                style={{ ...btnBase, border: "1px solid #fde68a", background: "#fffbeb", color: "#b45309" }}
-                                              >⏸ Pause</button>
-                                            )}
-                                            <button
-                                              disabled={isActioning}
-                                              onClick={() => {
-                                                console.log("[PER_AD_BUTTON_CLICK]", { action: "delete", metaAdId: c.metaAdId, adminClientId, selectedAccount, selectedCampaignId, hasSid: !!(localStorage.getItem("sm_sid_v1") || "").trim() });
-                                                handlePerAdAction(c.metaAdId, "delete");
-                                              }}
-                                              style={{ ...btnBase, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c" }}
-                                            >✕ Delete</button>
-                                          </div>
-                                        );
-                                      })()}
-                                    </>
+                                    </div>
                                   )}
                                 </div>
                               );
