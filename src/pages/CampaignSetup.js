@@ -2838,20 +2838,25 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
 
   // Launched creative set — source of truth for the initial ads the campaign launched with.
   // Filter out archived/deleted/replaced entries so only visible live ads show.
-  const launchedSet = Array.isArray(campaignCreatives?.launchedCreativeSet)
+  // Split into active vs archived/deleted using the same helper used in the Creatives tab.
+  const _allLaunched = Array.isArray(campaignCreatives?.launchedCreativeSet)
     ? campaignCreatives.launchedCreativeSet.filter((c) => {
         const s = String(c.status || "").toLowerCase();
-        return !["archived", "deleted", "replaced"].includes(s);
+        return !["replaced"].includes(s); // keep archived in the list — isArchivedOrDeletedCreative handles the split
       })
     : [];
-  const adCount = launchedSet.length;
+  const launchedSet         = _allLaunched.filter((c) => !isArchivedOrDeletedCreative(c));
+  const archivedLaunchedSet = _allLaunched.filter((c) =>  isArchivedOrDeletedCreative(c));
+  const adCount = launchedSet.length; // active-only count
 
-  // Determine Creative Test header/subtitle/count based on ad count
+  // Determine Creative Test header/subtitle/count based on ACTIVE ad count
+  const archSuffix = archivedLaunchedSet.length > 0 ? ` · ${archivedLaunchedSet.length} archived` : "";
   const testLabel = (() => {
+    if (adCount === 0 && archivedLaunchedSet.length > 0) return { header: "Creative Test", sub: "All ad variations for this campaign are archived.", count: `${archivedLaunchedSet.length} archived` };
     if (adCount === 0) return { header: "Creative Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "No launched ad creatives found yet." };
-    if (adCount === 1) return { header: "Creative Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "1 ad running — add another variation to compare performance." };
-    if (adCount === 2) return { header: "A/B Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: "2 ad variations running" };
-    return { header: "A/B/C Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `${adCount} ad variations running` };
+    if (adCount === 1) return { header: "Creative Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `1 ad running${archSuffix}` };
+    if (adCount === 2) return { header: "A/B Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `2 active variations${archSuffix}` };
+    return { header: "A/B/C Test", sub: "Smartemark is comparing the active ad variations in this campaign.", count: `${adCount} active variations${archSuffix}` };
   })();
 
   // Fetch per-ad Meta Insights for every ad in launchedCreativeSet that has a metaAdId.
@@ -3117,13 +3122,31 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {adCount > 0 && (
         <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 12, flexWrap: "wrap" }}>
           {launchedSet.map((creative, idx) => {
-            // Prefer Meta-verified effectiveStatus (stored in DB after pause/resume) over local status field.
-            const rawStatus = String(creative.effectiveStatus || creative.status || "").toLowerCase();
-            const isPaused  = rawStatus === "paused";
+            // Use the same priority chain as resolveCreativeDeliveryStatus:
+            // uiStatus > configuredStatus > status > lastAction > effectiveStatus
+            // effectiveStatus "IN_PROCESS" must never drive isPaused.
+            const uiSt    = String(creative.uiStatus         || "").toUpperCase();
+            const cfgSt   = String(creative.configuredStatus || "").toUpperCase();
+            const rawSt   = String(creative.status           || "").toUpperCase();
+            const lastAct = String(creative.lastAction        || "").toLowerCase();
+            const effSt   = String(creative.effectiveStatus  || "").toUpperCase();
+            let isPaused = false;
+            if      (uiSt  === "PAUSED") isPaused = true;
+            else if (uiSt  === "ACTIVE") isPaused = false;
+            else if (cfgSt === "PAUSED") isPaused = true;
+            else if (cfgSt === "ACTIVE") isPaused = false;
+            else if (rawSt === "PAUSED") isPaused = true;
+            else if (rawSt === "ACTIVE") isPaused = false;
+            else if (lastAct === "pause")  isPaused = true;
+            else if (lastAct === "resume") isPaused = false;
+            else if (effSt === "PAUSED")   isPaused = true;
+            const isSyncing  = effSt === "IN_PROCESS";
             const badgeBg    = isPaused ? "#fef9c3" : "#dcfce7";
             const badgeFg    = isPaused ? "#854d0e" : "#15803d";
             const badgeBd    = isPaused ? "#fde68a" : "#bbf7d0";
-            const badgeLabel = isPaused ? "Paused" : "Active";
+            const badgeLabel = isPaused
+              ? (isSyncing ? "Paused · Syncing" : "Paused")
+              : (isSyncing ? "Active · Syncing" : "Active");
             const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
             const label  = creative.angleLabel || creative.angle || `Ad ${idx + 1}`;
             return (
@@ -3286,6 +3309,59 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {adCount > 0 && Object.keys(adMetricsMap).length > 0 && (
         <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6, borderTop: "1px solid #f1f5f9", paddingTop: 8 }}>
           <strong style={{ color: "#64748b" }}>Call clicks</strong> are website button taps tracked by Smartemark. <strong style={{ color: "#64748b" }}>Tracked calls</strong> are real phone calls received through the tracking number.
+        </div>
+      )}
+
+      {/* ── Archived Ads section (read-only, no controls) ── */}
+      {archivedLaunchedSet.length > 0 && (
+        <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#94a3b8" }}>Archived Ads</div>
+            <span style={{ background: "#f1f5f9", color: "#94a3b8", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
+              {archivedLaunchedSet.length}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {archivedLaunchedSet.map((creative, aidx) => {
+              const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
+              const label  = creative.angleLabel || creative.angle || `Ad ${aidx + 1}`;
+              return (
+                <div
+                  key={creative.id || creative.metaAdId || `arch-${aidx}`}
+                  style={{
+                    background: "#f8fafc", border: "1px solid #e2e8f0",
+                    borderRadius: 14, padding: 14,
+                    flex: "1 1 160px", minWidth: 0,
+                    display: "flex", flexDirection: "column", gap: 8,
+                    opacity: 0.7,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <span style={{ fontWeight: 800, fontSize: 13, color: "#64748b" }}>{label}</span>
+                    <span style={{ background: "#f1f5f9", color: "#94a3b8", border: "1px solid #e2e8f0", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
+                      Archived
+                    </span>
+                  </div>
+                  {creative.metaAdId && (
+                    <div style={{ fontSize: 10, color: "#94a3b8" }}>Ad ID: {creative.metaAdId}</div>
+                  )}
+                  {imgUrl ? (
+                    <img src={imgUrl} alt={label} style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0", filter: "grayscale(40%)" }} />
+                  ) : (
+                    <div style={{ height: 60, background: "#f1f5f9", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 11 }}>
+                      No image
+                    </div>
+                  )}
+                  {creative.headline && (
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", lineHeight: 1.4 }}>{creative.headline}</div>
+                  )}
+                  {creative.body && (
+                    <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5, maxHeight: 48, overflow: "hidden" }}>{creative.body}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
