@@ -7783,18 +7783,25 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) =>
       { params: { access_token: userToken } }
     );
 
-    // Verify effective_status from Meta (same pattern as campaign pause)
-    let effectiveStatus = 'PAUSED';
+    // Re-fetch to confirm Meta's view. effectiveStatus may be "IN_PROCESS" immediately after mutation.
+    // configuredStatus reflects what Meta was told — use that for UI, not effectiveStatus.
+    const requestedStatus = 'PAUSED';
+    let effectiveStatus   = 'PAUSED';
+    let configuredStatus  = 'PAUSED';
     try {
       const verifyRes = await axios.get(
         `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
         { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
       );
-      effectiveStatus = String(verifyRes.data?.effective_status || 'PAUSED').toUpperCase();
-      console.log('[AD_STATUS_SYNC]', { adId, effectiveStatus });
+      effectiveStatus  = String(verifyRes.data?.effective_status  || 'PAUSED').toUpperCase();
+      configuredStatus = String(verifyRes.data?.configured_status || 'PAUSED').toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { adId, effectiveStatus, configuredStatus });
     } catch (verifyErr) {
       console.warn('[AD_STATUS_SYNC] verify fetch failed (non-fatal):', adId, verifyErr?.message);
     }
+
+    const uiStatus = (configuredStatus && configuredStatus !== 'IN_PROCESS') ? configuredStatus : requestedStatus;
+    console.log('[AD_ACTION_STATUS_PAYLOAD]', { adId, action: 'pause', requestedStatus, configuredStatus, effectiveStatus, uiStatus });
 
     // Update launchedCreativeSet in DB
     await db.read();
@@ -7803,13 +7810,13 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/pause', async (req, res) =>
     );
     if (rec) {
       rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-        c.metaAdId === adId ? { ...c, status: 'paused', effectiveStatus } : c
+        c.metaAdId === adId ? { ...c, status: 'paused', configuredStatus, effectiveStatus, uiStatus, lastAction: 'pause', lastActionAt: new Date().toISOString() } : c
       );
       await db.write();
     }
 
-    console.log('[AD_PAUSE_SUCCESS]', { adId, effectiveStatus, dbUpdated: !!rec });
-    return res.json({ ok: true, adId, status: 'paused', effectiveStatus });
+    console.log('[AD_PAUSE_SUCCESS]', { adId, uiStatus, effectiveStatus, dbUpdated: !!rec });
+    return res.json({ ok: true, adId, action: 'pause', requestedStatus, status: requestedStatus, configuredStatus, effectiveStatus, uiStatus });
   } catch (err) {
     const metaErr = err?.response?.data?.error;
     console.error('[AD_PAUSE_META_ERROR]', {
@@ -7846,17 +7853,23 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) =
       { params: { access_token: userToken } }
     );
 
-    let effectiveStatus = 'ACTIVE';
+    const requestedStatus = 'ACTIVE';
+    let effectiveStatus   = 'ACTIVE';
+    let configuredStatus  = 'ACTIVE';
     try {
       const verifyRes = await axios.get(
         `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
         { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
       );
-      effectiveStatus = String(verifyRes.data?.effective_status || 'ACTIVE').toUpperCase();
-      console.log('[AD_STATUS_SYNC]', { action: 'resume', adId, effectiveStatus });
+      effectiveStatus  = String(verifyRes.data?.effective_status  || 'ACTIVE').toUpperCase();
+      configuredStatus = String(verifyRes.data?.configured_status || 'ACTIVE').toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { action: 'resume', adId, effectiveStatus, configuredStatus });
     } catch (verifyErr) {
       console.warn('[AD_STATUS_SYNC] verify fetch failed (non-fatal):', adId, verifyErr?.message);
     }
+
+    const uiStatus = (configuredStatus && configuredStatus !== 'IN_PROCESS') ? configuredStatus : requestedStatus;
+    console.log('[AD_ACTION_STATUS_PAYLOAD]', { adId, action: 'resume', requestedStatus, configuredStatus, effectiveStatus, uiStatus });
 
     await db.read();
     const rec = (db.data.campaign_creatives || []).find(
@@ -7864,13 +7877,13 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/resume', async (req, res) =
     );
     if (rec) {
       rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-        c.metaAdId === adId ? { ...c, status: 'active', effectiveStatus } : c
+        c.metaAdId === adId ? { ...c, status: 'active', configuredStatus, effectiveStatus, uiStatus, lastAction: 'resume', lastActionAt: new Date().toISOString() } : c
       );
       await db.write();
     }
 
-    console.log('[AD_PAUSE_SUCCESS]', { action: 'resume', adId, effectiveStatus, dbUpdated: !!rec });
-    return res.json({ ok: true, adId, status: 'active', effectiveStatus });
+    console.log('[AD_PAUSE_SUCCESS]', { action: 'resume', adId, uiStatus, effectiveStatus, dbUpdated: !!rec });
+    return res.json({ ok: true, adId, action: 'resume', requestedStatus, status: requestedStatus, configuredStatus, effectiveStatus, uiStatus });
   } catch (err) {
     const metaErr = err?.response?.data?.error;
     console.error('[AD_PAUSE_META_ERROR]', {
@@ -7912,13 +7925,13 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/delete', async (req, res) =
     );
     if (rec) {
       rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-        c.metaAdId === adId ? { ...c, status: 'deleted' } : c
+        c.metaAdId === adId ? { ...c, status: 'deleted', uiStatus: 'ARCHIVED', lastAction: 'delete', lastActionAt: new Date().toISOString() } : c
       );
       await db.write();
     }
 
     console.log('[AD_PAUSE_SUCCESS]', { action: 'delete', adId, dbUpdated: !!rec });
-    return res.json({ ok: true, adId, status: 'deleted' });
+    return res.json({ ok: true, adId, action: 'delete', requestedStatus: 'ARCHIVED', status: 'deleted', uiStatus: 'ARCHIVED' });
   } catch (err) {
     const metaErr = err?.response?.data?.error;
     console.error('[AD_PAUSE_META_ERROR]', {

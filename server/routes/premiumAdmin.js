@@ -2664,21 +2664,36 @@ router.post('/admin/clients/:clientId/ad/:adId/:action', limitAdmin, requireAdmi
       { params: { access_token: userToken } }
     );
 
-    // ── Step 3: Re-fetch effective_status to confirm ─────────────────────────
-    let effectiveStatus = metaStatus;
+    // ── Step 3: Re-fetch to confirm Meta's view of the ad ────────────────────
+    // effectiveStatus may return "IN_PROCESS" immediately after a mutation.
+    // Use configuredStatus (what Meta was told) as the source of truth for UI.
+    const requestedStatus = metaStatus; // e.g. 'PAUSED', 'ACTIVE', 'ARCHIVED'
+    let effectiveStatus  = metaStatus;
+    let configuredStatus = metaStatus;
     try {
       const confirmRes = await axios.get(
         `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
         { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
       );
-      effectiveStatus = String(confirmRes.data?.effective_status || metaStatus).toUpperCase();
-      console.log('[AD_STATUS_SYNC]', { adId, action, effectiveStatus });
+      effectiveStatus  = String(confirmRes.data?.effective_status  || metaStatus).toUpperCase();
+      configuredStatus = String(confirmRes.data?.configured_status || metaStatus).toUpperCase();
+      console.log('[AD_STATUS_SYNC]', { adId, action, effectiveStatus, configuredStatus });
     } catch (confirmErr) {
       console.warn('[AD_STATUS_SYNC] post-action verify failed (non-fatal):', adId, confirmErr?.message);
     }
 
+    // uiStatus: what the frontend should display immediately.
+    // Do NOT use effectiveStatus — Meta returns "IN_PROCESS" during propagation.
+    // configuredStatus reflects what Meta was told; if that's also IN_PROCESS, fall back to requestedStatus.
+    const uiStatus = (configuredStatus && configuredStatus !== 'IN_PROCESS')
+      ? configuredStatus
+      : requestedStatus;
+
+    console.log('[AD_ACTION_STATUS_PAYLOAD]', { adId, action, requestedStatus, configuredStatus, effectiveStatus, uiStatus });
+
     // ── Step 4: Update DB launchedCreativeSet ─────────────────────────────────
-    const dbStatus = action === 'delete' ? 'deleted' : action === 'pause' ? 'paused' : 'active';
+    const dbStatus    = action === 'delete' ? 'deleted' : action === 'pause' ? 'paused' : 'active';
+    const lastActionAt = new Date().toISOString();
     try {
       await db.read();
       const rec = (db.data.campaign_creatives || []).find(
@@ -2688,16 +2703,34 @@ router.post('/admin/clients/:clientId/ad/:adId/:action', limitAdmin, requireAdmi
       );
       if (rec) {
         rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-          c.metaAdId === adId ? { ...c, status: dbStatus, effectiveStatus } : c
+          c.metaAdId === adId ? {
+            ...c,
+            status:          dbStatus,
+            configuredStatus,
+            effectiveStatus,
+            uiStatus,
+            lastAction:      action,
+            lastActionAt,
+          } : c
         );
         await db.write();
       }
-      console.log('[AD_ACTION_SUCCESS]', { adId, action, effectiveStatus, dbUpdated: !!rec, ownerKey });
+      console.log('[AD_ACTION_SUCCESS]', { adId, action, uiStatus, effectiveStatus, dbUpdated: !!rec, ownerKey });
     } catch (dbErr) {
       console.warn('[AD_ACTION_SUCCESS] DB update failed (non-fatal):', dbErr?.message);
     }
 
-    return res.json({ ok: true, adId, action, status: dbStatus, effectiveStatus });
+    return res.json({
+      ok:              true,
+      adId,
+      action,
+      requestedStatus,
+      status:          requestedStatus,
+      configuredStatus,
+      effectiveStatus,
+      uiStatus,
+      dbUpdated:       true,
+    });
 
   } catch (err) {
     const fbErr = err?.response?.data?.error || {};

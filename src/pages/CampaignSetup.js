@@ -6136,15 +6136,43 @@ const handlePerAdAction = async (metaAdId, action) => {
       return;
     }
 
-    // Use Meta-verified effectiveStatus if returned; otherwise fall back to optimistic local value.
-    const metaVerifiedStatus = j.effectiveStatus ? j.effectiveStatus.toLowerCase() : null;
-    const newStatus = metaVerifiedStatus || (action === "delete" ? "deleted" : action === "pause" ? "paused" : "active");
+    // Resolve the status to show in the UI.
+    // Priority: uiStatus > configuredStatus > status > requestedStatus > action-based fallback.
+    // Do NOT use effectiveStatus alone — Meta returns "IN_PROCESS" during propagation and
+    // that would make the card appear Active immediately after a successful pause.
+    const actionFallback = action === "delete" ? "deleted" : action === "pause" ? "paused" : "active";
+    const resolvedUiStatus = (
+      j.uiStatus                                           ? j.uiStatus.toLowerCase()          :
+      (j.configuredStatus && j.configuredStatus !== "IN_PROCESS") ? j.configuredStatus.toLowerCase() :
+      (j.status          && j.status          !== "IN_PROCESS") ? j.status.toLowerCase()          :
+      j.requestedStatus                                    ? j.requestedStatus.toLowerCase()    :
+      actionFallback
+    );
 
-    // 1. Update React state immediately (Creatives tab reflects change without reload)
+    console.log("[PER_AD_ACTION_UI_STATUS_RESOLVE]", {
+      action,
+      adId:               metaAdId,
+      requestedStatus:    j.requestedStatus,
+      status:             j.status,
+      configuredStatus:   j.configuredStatus,
+      effectiveStatus:    j.effectiveStatus,
+      uiStatus:           j.uiStatus,
+      finalFrontendStatus: resolvedUiStatus,
+    });
+
+    // 1. Update React state immediately — card flips to Paused/Active without reload.
     setCampaignCreativesMap((prev) => {
       const rec = prev[selectedCampaignId] || {};
       const updatedSet = (rec.launchedCreativeSet || []).map((c) =>
-        c.metaAdId === metaAdId ? { ...c, status: newStatus, effectiveStatus: j.effectiveStatus || newStatus.toUpperCase() } : c
+        c.metaAdId === metaAdId ? {
+          ...c,
+          status:          resolvedUiStatus,
+          configuredStatus: j.configuredStatus || c.configuredStatus,
+          effectiveStatus:  j.effectiveStatus  || c.effectiveStatus,
+          uiStatus:         j.uiStatus         || resolvedUiStatus.toUpperCase(),
+          lastAction:       action,
+          lastActionAt:     new Date().toISOString(),
+        } : c
       );
       return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet } };
     });
@@ -9312,11 +9340,21 @@ ${pendingTest ? `
                           </div>
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {visibleSet.map((c, idx) => {
-                              const isPaused  = c.status === "paused";
-                              const isDeleted = c.status === "deleted";
+                              // isPaused: use uiStatus > configuredStatus > lastAction > status.
+                              // effectiveStatus is intentionally NOT used for primary isPaused determination
+                              // because Meta returns "IN_PROCESS" during propagation after a pause action.
+                              const uiSt   = String(c.uiStatus          || "").toUpperCase();
+                              const cfgSt  = String(c.configuredStatus  || "").toUpperCase();
+                              const rawSt  = String(c.status            || "").toLowerCase();
+                              const effSt  = String(c.effectiveStatus   || "").toUpperCase();
+                              const isPaused = uiSt === "PAUSED" || cfgSt === "PAUSED" || rawSt === "paused" || c.lastAction === "pause";
+                              const isSyncing = effSt === "IN_PROCESS" && isPaused;
+                              const isDeleted = rawSt === "deleted";
                               const statusColor = isPaused ? "#b45309" : "#15803d";
                               const statusBg    = isPaused ? "#fef3c7" : "#dcfce7";
-                              const statusLabel = isPaused ? "Paused" : "Active";
+                              const statusLabel = isPaused
+                                ? (isSyncing ? "Paused · Meta syncing" : "Paused")
+                                : "Active";
                               return (
                                 <div
                                   key={c.id || c.metaAdId || idx}
