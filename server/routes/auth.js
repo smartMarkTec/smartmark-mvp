@@ -7028,40 +7028,97 @@ function isTerminalArchivedCreative(c) {
   return vals.some((v) => TERMINAL.has(v));
 }
 
-// Load the durable archived-ad map from the DB record.
-// archivedMetaAdIds is a separate field in campaign_creatives that persists archived ad IDs
-// even after the launchedCreativeSet is rebuilt from Meta (which omits archived ads).
-const archivedMetaAdIds = (rec && typeof rec.archivedMetaAdIds === 'object' && rec.archivedMetaAdIds !== null)
+// Load the durable archived-ad map — make a mutable copy so reconciliation can add to it.
+const archivedMetaAdIds = { ...((rec && typeof rec.archivedMetaAdIds === 'object' && rec.archivedMetaAdIds !== null)
   ? rec.archivedMetaAdIds
-  : {};
+  : {}) };
 
-// Build the final set.
-// Step 1: For any Meta-returned ad that is in archivedMetaAdIds, force it to archived.
+// ── Per-ad Meta reconciliation ──────────────────────────────────────────────
+// Meta's /ads list only returns ACTIVE and PAUSED ads — archived ads are omitted.
+// For every saved ad ID that Meta did not return, call /{adId} directly to get its
+// real status. This repairs cases where the DB was previously overwritten with
+// active-only data (status:"active") before our fix was deployed.
 const metaReturnedIds = new Set(rebuiltLaunchedCreativeSet.map((c) => c.metaAdId));
+
+const adsToVerify = dbLaunchedSet
+  .filter((c) => c.metaAdId && !metaReturnedIds.has(c.metaAdId))
+  .map((c) => c.metaAdId);
+
+const checkedAdIds = [...adsToVerify];
+const nowReconcile = new Date().toISOString();
+const TERMINAL_CHECK = new Set(['ARCHIVED', 'DELETED']);
+
+if (adsToVerify.length > 0) {
+  const verifyResults = await Promise.allSettled(
+    adsToVerify.map(async (adId) => {
+      try {
+        const vr = await axios.get(
+          `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+          { params: { access_token: userToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
+        );
+        const d = vr.data || {};
+        return {
+          adId,
+          effectiveStatus:  String(d.effective_status  || d.status || '').toUpperCase(),
+          configuredStatus: String(d.configured_status || d.status || '').toUpperCase(),
+        };
+      } catch (err) {
+        // Meta code 100 = object not found / no permission → treat as archived
+        const code = err?.response?.data?.error?.code;
+        const effSt = code === 100 ? 'ARCHIVED' : 'UNKNOWN';
+        console.warn('[ARCHIVE_RECONCILE_VERIFY_ERROR]', { adId, code, message: err?.response?.data?.error?.message || err?.message });
+        return { adId, effectiveStatus: effSt, configuredStatus: effSt };
+      }
+    })
+  );
+
+  for (const result of verifyResults) {
+    if (result.status !== 'fulfilled') continue;
+    const { adId, effectiveStatus, configuredStatus } = result.value;
+    if (TERMINAL_CHECK.has(effectiveStatus) || TERMINAL_CHECK.has(configuredStatus)) {
+      // Meta confirmed this ad is archived/deleted — write permanently into archivedMetaAdIds
+      // so it survives all future rebuilds.
+      const archiveData = {
+        status:           'archived',
+        uiStatus:         'ARCHIVED',
+        configuredStatus: 'ARCHIVED',
+        effectiveStatus:  effectiveStatus || 'ARCHIVED',
+        lastAction:       'meta_reconcile_archived',
+        lastActionAt:     nowReconcile,
+      };
+      archivedMetaAdIds[adId] = archiveData;
+      console.log('[ARCHIVE_RECONCILE_CONFIRMED]', { adId, effectiveStatus, configuredStatus });
+    }
+  }
+}
+// ── End reconciliation ───────────────────────────────────────────────────────
+
+// Step 1: For any Meta-returned ad that is in archivedMetaAdIds, force it to archived.
 const rebuiltWithForced = rebuiltLaunchedCreativeSet.map((c) => {
   const forced = archivedMetaAdIds[String(c.metaAdId || '')];
   if (!forced) return c;
-  // Meta returned this ad but our DB says it's archived — force archived status.
   return {
     ...c,
     status:           'archived',
     uiStatus:         'ARCHIVED',
     configuredStatus: 'ARCHIVED',
     effectiveStatus:  'ARCHIVED',
-    lastAction:       forced.lastAction     || 'archive_detected',
-    lastActionAt:     forced.lastActionAt   || new Date().toISOString(),
+    lastAction:       forced.lastAction || 'archive_detected',
+    lastActionAt:     forced.lastActionAt || nowReconcile,
   };
 });
 
-// Step 2: Append DB entries that Meta omitted AND that are terminal (archived/deleted).
-// Also include any archivedMetaAdIds entry not already in rebuiltWithForced.
+// Step 2: Append DB/reconciled entries that Meta omitted and are terminal.
 const rebuiltIds = new Set(rebuiltWithForced.map((c) => c.metaAdId));
 const archivedFromDB = [
-  // From dbLaunchedSet — any entry Meta omitted that is terminal
+  // From dbLaunchedSet — entry Meta omitted AND is terminal (all 5 fields checked)
   ...dbLaunchedSet.filter((c) =>
-    c.metaAdId && !rebuiltIds.has(c.metaAdId) && isTerminalArchivedCreative(c)
-  ),
-  // From archivedMetaAdIds — any entry not in dbLaunchedSet or Meta at all
+    c.metaAdId && !rebuiltIds.has(c.metaAdId) && (isTerminalArchivedCreative(c) || !!archivedMetaAdIds[c.metaAdId])
+  ).map((c) => {
+    const forced = archivedMetaAdIds[c.metaAdId];
+    return forced ? { ...c, ...forced } : c;
+  }),
+  // From archivedMetaAdIds — any entry not already in dbLaunchedSet or Meta at all
   ...Object.entries(archivedMetaAdIds)
     .filter(([adId]) => !rebuiltIds.has(adId) && !dbLaunchedSet.some((c) => c.metaAdId === adId))
     .map(([adId, data]) => ({
@@ -7074,18 +7131,19 @@ const archivedFromDB = [
       status:           'archived',
       uiStatus:         'ARCHIVED',
       configuredStatus: 'ARCHIVED',
-      effectiveStatus:  'ARCHIVED',
-      lastAction:       data.lastAction   || 'archive_detected',
-      lastActionAt:     data.lastActionAt || new Date().toISOString(),
+      effectiveStatus:  data.effectiveStatus || 'ARCHIVED',
+      lastAction:       data.lastAction      || 'archive_detected',
+      lastActionAt:     data.lastActionAt    || nowReconcile,
     })),
 ];
 
-// Full set = forced-archived Meta ads + archived DB entries
+// Full set = forced-archived Meta ads + archived DB/reconciled entries
 const fullLaunchedCreativeSet = [...rebuiltWithForced, ...archivedFromDB];
 
 console.log('[CREATIVE_RELOAD_STATUS]', {
   campaignId:          normalizedCampaignId,
   metaReturnedIds:     [...metaReturnedIds],
+  checkedAdIds,
   archivedMetaAdIds:   Object.keys(archivedMetaAdIds),
   previousLaunchedIds: dbLaunchedSet.map((c) => ({
     metaAdId:         c.metaAdId,
@@ -7096,6 +7154,20 @@ console.log('[CREATIVE_RELOAD_STATUS]', {
     lastAction:       c.lastAction,
   })),
   finalLaunchedSet:    fullLaunchedCreativeSet.map((c) => ({
+    metaAdId:         c.metaAdId,
+    status:           c.status,
+    uiStatus:         c.uiStatus,
+    configuredStatus: c.configuredStatus,
+    effectiveStatus:  c.effectiveStatus,
+    lastAction:       c.lastAction,
+  })),
+});
+
+console.log('[ARCHIVE_RECONCILE_RESULT]', {
+  campaignId:       normalizedCampaignId,
+  checkedAdIds,
+  archivedMetaAdIds,
+  finalLaunchedCreativeSet: fullLaunchedCreativeSet.map((c) => ({
     metaAdId:         c.metaAdId,
     status:           c.status,
     uiStatus:         c.uiStatus,
@@ -7198,11 +7270,12 @@ if (!finalImages.length) {
       );
     });
 
-    // Persist the full set (live Meta ads + preserved archived DB entries) so future loads
-    // still know about archived ads that Meta no longer returns in its default /ads list.
+    // Persist the full set + the reconciliation-augmented archivedMetaAdIds map.
+    // archivedMetaAdIds is the durable source of truth that survives future Meta rebuilds.
     const updatedRecord = {
       ...nextRecord,
       launchedCreativeSet: fullLaunchedCreativeSet.length > 0 ? fullLaunchedCreativeSet : (rec?.launchedCreativeSet || null),
+      archivedMetaAdIds,  // may have been augmented by per-ad reconciliation above
     };
 
     if (idx >= 0) {
