@@ -459,14 +459,17 @@ export default function AdAgent() {
                         <button
                           onClick={async () => {
                             const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-                            // POST /apply actually executes the action on Meta — not just marks approved
+                            const _adminClientId = (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+                            // POST /apply actually executes the action on Meta — not just marks approved.
+                            // adminClientId must be sent so the server can find proposals stored under the client's ownerKey.
                             const r = await fetch(`/api/ai-proposal/${m.proposalId}/apply`, {
                               method: "POST", credentials: "include",
                               headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+                              body: JSON.stringify({ ...(_adminClientId ? { adminClientId: _adminClientId } : {}) }),
                             }).catch(() => null);
                             const result = r ? await r.json().catch(() => ({})) : {};
                             const reply = result.ok
-                              ? `Done — the challenger ad has been created on Meta (status: ${result.actionStatus || "applied"}). Go to the A/B Test tab to review it.`
+                              ? (result.reply || `Done — action applied (status: ${result.actionStatus || "applied"}). Go to the Creatives tab to review.`)
                               : `Could not apply: ${result.error || "unknown error"}. Please try again.`;
                             const updated = messages.map((msg, j) => j === i ? { ...msg, proposalPending: false } : msg);
                             const final = [...updated, { role: "assistant", content: reply }];

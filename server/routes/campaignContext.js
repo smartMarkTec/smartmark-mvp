@@ -14,9 +14,11 @@
 
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const db = require('../db');
 const { nanoid } = require('nanoid');
 const { getFbUserToken } = require('../tokenStore');
+const { META_API_VERSION } = require('../metaConfig');
 const { executeAction } = require('../optimizerAction');
 const {
   findOptimizerCampaignStateByCampaignId,
@@ -582,6 +584,146 @@ router.patch('/ai-proposal/:id', async (req, res) => {
 // applied (or failed). This is what "Approve & Apply" calls — it actually
 // mutates Meta, not just marks the record approved.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// createChallengerAds — creates new Meta ads based on a control ad.
+// Only changes headline OR image per challenger. Returns real Meta ad IDs only.
+// Throws on any failure so the caller can surface the error cleanly.
+// ─────────────────────────────────────────────────────────────────────────────
+async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId }) {
+  const userToken = getFbUserToken(clientOwnerKey);
+  if (!userToken) throw new Error(`No Facebook token found for ${clientOwnerKey}. Please reconnect the client's Facebook account.`);
+
+  console.log('[CHALLENGER_CREATE_START]', { controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
+
+  // 1. Fetch control ad details from Meta
+  const controlRes = await axios.get(
+    `https://graph.facebook.com/${META_API_VERSION}/${controlAdId}`,
+    {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,adset_id,campaign_id,creative{id,name,object_story_spec,image_hash,thumbnail_url}',
+      },
+      timeout: 15000,
+    }
+  );
+  const controlAd  = controlRes.data || {};
+  const adsetId    = String(controlAd.adset_id || '').trim();
+  if (!adsetId) throw new Error('Could not read adset_id from control ad.');
+
+  const creative         = controlAd.creative || {};
+  const objectStorySpec  = creative.object_story_spec || {};
+  const pageId           = String(objectStorySpec.page_id || '').trim();
+  const linkData         = objectStorySpec.link_data || {};
+
+  if (!pageId) throw new Error('Could not read page_id from control ad creative.');
+
+  console.log('[CHALLENGER_CONTROL_AD_FETCHED]', {
+    adsetId, campaignId, creativeId: creative.id,
+    pageId, hasLinkData: !!Object.keys(linkData).length,
+  });
+
+  // 2. Create each challenger
+  const createdAds = [];
+  for (const challenger of challengers) {
+    const newLinkData = { ...linkData };
+
+    if (challenger.testType === 'headline') {
+      if (!challenger.headline) throw new Error(`Challenger "${challenger.name}" has no headline specified.`);
+      newLinkData.name = challenger.headline;  // headline lives in link_data.name
+
+    } else if (challenger.testType === 'image') {
+      if (!challenger.imageUrl && !challenger.imageHash) {
+        throw new Error(`Challenger "${challenger.name}" has no imageUrl or imageHash specified.`);
+      }
+      if (challenger.imageHash) {
+        newLinkData.image_hash = challenger.imageHash;
+      } else {
+        // Upload image URL to Meta ad account to get a hash
+        const uploadRes = await axios.post(
+          `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
+          null,
+          {
+            params: { access_token: userToken, 'url': challenger.imageUrl },
+            timeout: 30000,
+          }
+        );
+        const imgHash = Object.values(uploadRes.data?.images || {})[0]?.hash;
+        if (!imgHash) throw new Error(`Failed to upload image for challenger "${challenger.name}".`);
+        newLinkData.image_hash = imgHash;
+        delete newLinkData.image_url; // remove URL reference if present
+      }
+    } else {
+      throw new Error(`Unknown testType "${challenger.testType}" for challenger "${challenger.name}".`);
+    }
+
+    // 3. Create new ad creative
+    const creativeRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
+      {
+        name: challenger.name,
+        object_story_spec: { page_id: pageId, link_data: newLinkData },
+      },
+      { params: { access_token: userToken }, timeout: 15000 }
+    );
+    const newCreativeId = String(creativeRes.data?.id || '').trim();
+    if (!newCreativeId || !(/^\d+$/.test(newCreativeId))) {
+      throw new Error(`Meta did not return a real creative ID for "${challenger.name}". Got: ${creativeRes.data?.id}`);
+    }
+
+    // 4. Create new ad in same ad set
+    const adRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
+      {
+        name:     challenger.name,
+        adset_id: adsetId,
+        creative: { creative_id: newCreativeId },
+        status:   'ACTIVE',
+      },
+      { params: { access_token: userToken }, timeout: 15000 }
+    );
+    const newAdId = String(adRes.data?.id || '').trim();
+    if (!newAdId || !(/^\d+$/.test(newAdId))) {
+      throw new Error(`Meta did not return a real ad ID for "${challenger.name}". Got: ${adRes.data?.id}`);
+    }
+
+    createdAds.push({
+      id:             newAdId,
+      metaAdId:       newAdId,
+      metaCreativeId: newCreativeId,
+      angleLabel:     challenger.name,
+      headline:       newLinkData.name || linkData.name || '',
+      body:           linkData.message || '',
+      cta:            linkData.call_to_action?.type || 'LEARN_MORE',
+      imageUrl:       '',
+      link:           linkData.link || '',
+      status:         'active',
+      uiStatus:       'ACTIVE',
+      lastAction:     'challenger_created',
+      lastActionAt:   new Date().toISOString(),
+      angle:          challenger.testType,
+    });
+  }
+
+  console.log('[CHALLENGER_META_CREATE_RESULT]', { createdAds: createdAds.map(a => ({ name: a.angleLabel, metaAdId: a.metaAdId })) });
+
+  // 5. Persist new ads into campaign_creatives.launchedCreativeSet
+  await db.read();
+  const recIdx = (db.data.campaign_creatives || []).findIndex(
+    (r) => String(r.campaignId || '').trim() === String(campaignId || '').trim()
+  );
+  if (recIdx >= 0) {
+    const existing = db.data.campaign_creatives[recIdx].launchedCreativeSet || [];
+    db.data.campaign_creatives[recIdx].launchedCreativeSet = [...existing, ...createdAds];
+    await db.write();
+    console.log('[CHALLENGER_DB_PERSISTED]', {
+      campaignId,
+      launchedCreativeSetCount: db.data.campaign_creatives[recIdx].launchedCreativeSet.length,
+    });
+  }
+
+  return createdAds;
+}
+
 router.post('/ai-proposal/:id/apply', async (req, res) => {
   try {
     await ensureData();
@@ -589,9 +731,22 @@ router.post('/ai-proposal/:id/apply', async (req, res) => {
     if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
 
     const { id } = req.params;
-    const proposal = db.data.ai_action_proposals.find(
+    const adminClientIdFromBody = String(req.body?.adminClientId || '').trim();
+
+    // Primary lookup: proposal stored under the requester's own ownerKey
+    let proposal = db.data.ai_action_proposals.find(
       (p) => p.id === id && String(p.ownerKey || '') === ownerKey
     );
+
+    // Admin-client fallback: TheBoss applying a proposal that belongs to a client.
+    // The "Approve & Apply" button sends adminClientId in the request body.
+    if (!proposal && adminClientIdFromBody && isAdminOwnerKey(ownerKey)) {
+      const clientOwnerKey = `user:${adminClientIdFromBody}`;
+      proposal = db.data.ai_action_proposals.find(
+        (p) => p.id === id && String(p.ownerKey || '') === clientOwnerKey
+      );
+    }
+
     if (!proposal) return res.status(404).json({ ok: false, error: 'Proposal not found.' });
 
     if (!['pending', 'approved'].includes(proposal.status)) {
@@ -601,10 +756,73 @@ router.post('/ai-proposal/:id/apply', async (req, res) => {
       });
     }
 
+    // ── create_challenger_ads ─────────────────────────────────────────────────
+    if (proposal.actionType === 'create_challenger_ads') {
+      const pc = proposal.proposedChanges || {};
+      const clientOwnerKey = String(pc.ownerKey || proposal.ownerKey || '').trim();
+      const campaignId     = String(pc.campaignId     || proposal.campaignId || '').trim();
+      const controlAdId    = String(pc.controlAdId    || '').trim();
+      const accountId      = String(pc.accountId      || '').trim();
+      const challengers    = Array.isArray(pc.challengers) ? pc.challengers : [];
+
+      console.log('[AI_AGENT_APPROVAL_RECEIVED]', { actionType: 'create_challenger_ads', clientOwnerKey, campaignId });
+
+      if (!clientOwnerKey || !campaignId || !controlAdId || !accountId || challengers.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Proposal is missing required fields: ownerKey, campaignId, controlAdId, accountId, challengers.',
+        });
+      }
+
+      let createdAds;
+      try {
+        createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+      } catch (createErr) {
+        console.error('[CHALLENGER_CREATE_FAILED]', createErr?.message);
+        const now2 = new Date().toISOString();
+        proposal.status    = 'failed';
+        proposal.updatedAt = now2;
+        proposal.error     = String(createErr?.message || 'creation failed').slice(0, 500);
+        await db.write();
+        return res.status(500).json({
+          ok:             false,
+          error:          proposal.error,
+          proposalStatus: 'failed',
+        });
+      }
+
+      const adLines = createdAds.map((a) => `• **${a.angleLabel}** — Ad ID: \`${a.metaAdId}\``).join('\n');
+      await appendAiHistoryEntry(campaignId, {
+        type:       'action',
+        timestamp:  new Date().toISOString(),
+        title:      'Challenger ads created',
+        summary:    `Created ${createdAds.length} challenger ads via approved proposal.`,
+        reason:     `User approved proposal ${id}.`,
+        actionType: 'create_challenger_ads',
+        source:     'proposal_apply',
+      }).catch(() => {});
+
+      const now2 = new Date().toISOString();
+      proposal.status    = 'applied';
+      proposal.updatedAt = now2;
+      proposal.appliedAt = now2;
+      proposal.result    = { createdAdIds: createdAds.map((a) => a.metaAdId) };
+      await db.write();
+
+      return res.json({
+        ok:             true,
+        proposalStatus: 'applied',
+        actionType:     'create_challenger_ads',
+        actionStatus:   'success',
+        createdAds:     createdAds.map((a) => ({ name: a.angleLabel, metaAdId: a.metaAdId, testType: a.angle })),
+        reply:          `Challenger ads created on Meta:\n\n${adLines}\n\nThe Creatives tab will show them as active. Archived ads are unchanged.`,
+      });
+    }
+
     if (proposal.actionType !== 'generate_single_creative_variant') {
       return res.status(400).json({
         ok: false,
-        error: `Action type '${proposal.actionType}' cannot be automatically applied yet. Contact support.`,
+        error: `Action type '${proposal.actionType}' cannot be automatically applied yet.`,
       });
     }
 

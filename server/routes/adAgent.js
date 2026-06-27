@@ -80,6 +80,28 @@ function isGenerateChallengerIntent(message) {
   );
 }
 
+// ── Create 2 specific challenger ads (headline + image) intent ─────────────────
+// Fires when the user asks to create N specific challenger ads with stated test types.
+// Different from isGenerateChallengerIntent — that flow uses the AI optimizer;
+// this flow directly creates Meta ads from the control ad's creative.
+function isCreateSpecificChallengersIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    // "create 2 challenger ads" / "make 2 test ads"
+    /(create|make|build|launch|add|run).{0,30}(2|two|both).{0,30}(challenger|test).{0,20}(ad|ads)/i.test(s) ||
+    // "headline test and image test"
+    /(headline.{0,20}test|image.{0,20}test).{0,50}(and|plus|with|&).{0,50}(headline.{0,20}test|image.{0,20}test)/i.test(s) ||
+    // "create a headline challenger and an image challenger"
+    /(create|make|build).{0,30}(headline).{0,30}(challenger|test|ad).{0,30}(and|plus|with).{0,30}(image)/i.test(s) ||
+    /(create|make|build).{0,30}(image).{0,30}(challenger|test|ad).{0,30}(and|plus|with).{0,30}(headline)/i.test(s) ||
+    // "2 ad variations" / "two test variations"
+    /(2|two|both).{0,20}(ad|ads).{0,20}(variation|variant|test|challenger)/i.test(s) ||
+    // "headline test + image test"
+    /headline.*test.*image.*test/i.test(s) ||
+    /image.*test.*headline.*test/i.test(s)
+  );
+}
+
 // Extracts pendingCreativeTest patch from an executeAction result for creative generation.
 function buildCreativePatchFromResult(action) {
   const result = action?.actionResult || null;
@@ -1126,6 +1148,100 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           'Once removed, I can generate a replacement challenger using the correct campaign context. Just say **"generate a new challenger"** after removing this one.'
         : 'I can remove the AI challenger from your campaign. Please select a campaign first (use the campaign dropdown), then go to the **A/B Test** tab and click **"Remove Challenger"** to confirm. Your original ad will stay live and untouched.';
       return res.json({ ok: true, reply });
+    }
+
+    // ── Create 2 specific challengers (headline + image) ─────────────────────
+    // Handles "create 2 challenger ads" style prompts. Creates real Meta ads
+    // by cloning the control ad's creative and changing only headline or image.
+    if (isCreateSpecificChallengersIntent(trimmed)) {
+      if (!safeCampaignId) {
+        return res.json({ ok: true, reply: 'Select a campaign first, then ask me to create the challenger ads.' });
+      }
+
+      // Require Meta token
+      const challengerToken = getFbUserToken(effectiveOwnerKey);
+      if (!challengerToken) {
+        return res.json({ ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' });
+      }
+
+      // Find the control ad — the one active (non-archived) ad in the launchedCreativeSet
+      await db.read();
+      const creativeRec = (db.data.campaign_creatives || []).find(
+        (r) => String(r.campaignId || '').trim() === String(safeCampaignId || '').trim()
+      );
+      const launchedSet = Array.isArray(creativeRec?.launchedCreativeSet) ? creativeRec.launchedCreativeSet : [];
+      const DEAD = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+      const activeAds = launchedSet.filter((ad) => !DEAD.has(String(ad.status || '').toLowerCase()) && !DEAD.has(String(ad.uiStatus || '')));
+      const accountId = String(creativeRec?.accountId || '').replace(/^act_/, '').trim();
+
+      if (activeAds.length === 0) {
+        return res.json({ ok: true, reply: 'No active launched ads found for this campaign. Please select the campaign with the live ads and try again.' });
+      }
+      if (!accountId) {
+        return res.json({ ok: true, reply: 'Could not find the ad account ID for this campaign. Please re-select the campaign and try again.' });
+      }
+
+      const controlAd = activeAds[0];
+      const controlAdId = String(controlAd.metaAdId || '').trim();
+      if (!controlAdId) {
+        return res.json({ ok: true, reply: 'Could not identify a control ad ID. Please make sure the campaign has launched ads.' });
+      }
+
+      // Build the proposal payload
+      const challengersPayload = [
+        {
+          testType:         'headline',
+          name:             'Headline Test - $75 Tune-Up Heat',
+          headline:         '$75 AC Tune-Up Before Houston Heat Gets Worse',
+        },
+        {
+          testType:         'image',
+          name:             'Image Test - HVAC Visual Challenger',
+          imageUrl:         'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg',
+        },
+      ];
+
+      const proposalPayload = {
+        ownerKey:     effectiveOwnerKey,
+        campaignId:   safeCampaignId,
+        controlAdId,
+        accountId,
+        challengers:  challengersPayload,
+        safety: {
+          doNotCreateCampaign:     true,
+          doNotCreateAdSet:        true,
+          doNotChangeBudget:       true,
+          doNotChangeTargeting:    true,
+          doNotTouchArchivedAds:   true,
+        },
+      };
+
+      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', proposalPayload);
+
+      const proposal = await createActionProposal({
+        ownerKey:        effectiveOwnerKey,
+        campaignId:      safeCampaignId,
+        actionType:      'create_challenger_ads',
+        title:           'Create 2 challenger ads: Headline Test + Image Test',
+        reasoning:       `User requested 2 challenger ads based on control ad ${controlAdId}. Will create: (1) headline change only, (2) image change only. Same ad set, same budget, same targeting.`,
+        proposedChanges: proposalPayload,
+        riskLevel:       'medium',
+      }).catch((e) => {
+        console.error('[AdAgent] create_challenger_ads proposal error:', e?.message);
+        return null;
+      });
+
+      return res.json({
+        ok:               true,
+        proposalId:       proposal?.id || null,
+        proposalPending:  true,
+        proposalTitle:    'Create 2 challenger ads',
+        proposalSummary:  `Control ad: ${controlAdId}\n• Headline Test: "$75 AC Tune-Up Before Houston Heat Gets Worse"\n• Image Test: New HVAC visual (same headline, body, URL)`,
+        proposalAction:   'create_challenger_ads',
+        reply: proposal
+          ? `**Approval required.** Here\'s the proposed ad test:\n\n**Control ad:** \`${controlAdId}\`\n\n**Challenger 1 — Headline Test**\nNew headline: *$75 AC Tune-Up Before Houston Heat Gets Worse*\nEverything else identical to control.\n\n**Challenger 2 — Image Test**\nNew HVAC image. Same headline, body, CTA, and URL as control.\n\nBoth ads will run in the same ad set with the same budget and targeting. No new campaign or ad set will be created.\n\nClick **Approve & Apply** to create them on Meta.`
+          : 'I could not queue the proposal. Please try again.',
+      });
     }
 
     // Generate challenger intent — execute generate_single_creative_variant via optimizer pipeline
