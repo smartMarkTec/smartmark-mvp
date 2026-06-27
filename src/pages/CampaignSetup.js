@@ -6011,18 +6011,38 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
         if (!c.id) continue;
         if (c.metrics) newMetrics[c.id] = c.metrics;
         if (c.optimizerState) newOptStates[c.id] = c.optimizerState;
-        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body;
+        const hasCreative = (c.images?.length > 0) || c.meta?.headline || c.meta?.body || c.launchedCreativeSet?.length > 0;
         if (hasCreative) {
           newCreatives[c.id] = {
-            images: (c.images || []).filter(Boolean),
-            mediaSelection: c.mediaSelection || "image",
-            meta: { headline: c.meta?.headline || "", body: c.meta?.body || "", link: c.meta?.link || "" },
+            images:              (c.images || []).filter(Boolean),
+            mediaSelection:      c.mediaSelection || "image",
+            meta:                { headline: c.meta?.headline || "", body: c.meta?.body || "", link: c.meta?.link || "" },
+            // Include launchedCreativeSet from backend so per-ad status (uiStatus, configuredStatus,
+            // lastAction) survives page reloads. Non-empty array wins; otherwise preserved from existing state.
+            launchedCreativeSet: Array.isArray(c.launchedCreativeSet) && c.launchedCreativeSet.length > 0
+              ? c.launchedCreativeSet
+              : null, // null sentinel → merge step below preserves existing state entry
           };
         }
       }
       if (Object.keys(newMetrics).length) setMetricsMap((m) => ({ ...m, ...newMetrics }));
       if (Object.keys(newOptStates).length) setOptimizerStateMap((m) => ({ ...m, ...newOptStates }));
-      if (Object.keys(newCreatives).length) setCampaignCreativesMap((m) => ({ ...m, ...newCreatives }));
+      if (Object.keys(newCreatives).length) {
+        setCampaignCreativesMap((m) => {
+          const merged = { ...m };
+          for (const [id, incoming] of Object.entries(newCreatives)) {
+            const existing = m[id] || {};
+            merged[id] = {
+              ...existing,
+              ...incoming,
+              // Never let a null/empty launchedCreativeSet from the campaigns list overwrite
+              // a real one that was loaded by the creatives endpoint or set by a pause action.
+              launchedCreativeSet: incoming.launchedCreativeSet || existing.launchedCreativeSet || [],
+            };
+          }
+          return merged;
+        });
+      }
     })
     .catch(() => {});
 }
@@ -6308,6 +6328,18 @@ const handleAdDeliveryToggle = async (creative) => {
       error:            null,
     },
   }));
+  // Also write the optimistic status into campaignCreativesMap so it survives component re-mounts
+  // (adStatusById resets on unmount; campaignCreativesMap persists via the outer state setter).
+  const _patchCreativeMap = (statusFields) => {
+    setCampaignCreativesMap((prev) => {
+      const rec = prev[selectedCampaignId] || {};
+      const updated = (rec.launchedCreativeSet || []).map((e) =>
+        e.metaAdId === metaAdId ? { ...e, ...statusFields } : e
+      );
+      return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updated } };
+    });
+  };
+  _patchCreativeMap({ status: optimisticStatus.toLowerCase(), uiStatus: optimisticStatus, configuredStatus: optimisticStatus, effectiveStatus: "IN_PROCESS", lastAction: action, lastActionAt: new Date().toISOString() });
   console.log("[AD_DELIVERY_OPTIMISTIC_UPDATE]", { adId: metaAdId, optimisticStatus });
 
   const sid    = (localStorage.getItem("sm_sid_v1") || "").trim();
@@ -6330,36 +6362,37 @@ const handleAdDeliveryToggle = async (creative) => {
     if (!r.ok) {
       const errMsg = j.error || "unknown error";
       console.warn("[AD_DELIVERY_REVERT]", { adId: metaAdId, action, error: errMsg });
+      // Revert adStatusById and campaignCreativesMap
       setAdStatusById((prev) => ({
         ...prev,
-        [metaAdId]: {
-          ...previousEntry,
-          isSyncing: false,
-          error: `Could not update ad delivery: ${errMsg}${j.metaCode ? ` (Meta code ${j.metaCode})` : ""}`,
-        },
+        [metaAdId]: { ...previousEntry, isSyncing: false, error: `Could not update ad delivery: ${errMsg}${j.metaCode ? ` (Meta code ${j.metaCode})` : ""}` },
       }));
+      if (previousEntry.status) {
+        _patchCreativeMap({ status: previousEntry.status, uiStatus: previousEntry.uiStatus, configuredStatus: previousEntry.configuredStatus, effectiveStatus: previousEntry.effectiveStatus, lastAction: previousEntry.lastAction });
+      }
       return;
     }
 
     // Resolve final status — uiStatus > configuredStatus > status > requestedStatus > optimistic fallback.
-    const resp     = j;
-    const finalUi  = resp.uiStatus || resp.configuredStatus || resp.status || optimisticStatus;
+    const finalUi  = j.uiStatus || j.configuredStatus || j.status || optimisticStatus;
     const finalState = {
       uiStatus:         String(finalUi).toUpperCase(),
-      configuredStatus: String(resp.configuredStatus || finalUi).toUpperCase(),
-      status:           String(resp.status           || finalUi).toLowerCase(),
-      effectiveStatus:  String(resp.effectiveStatus  || "").toUpperCase() || undefined,
+      configuredStatus: String(j.configuredStatus || finalUi).toUpperCase(),
+      status:           String(j.status           || finalUi).toLowerCase(),
+      effectiveStatus:  String(j.effectiveStatus  || "").toUpperCase() || undefined,
       lastAction:       action,
       lastActionAt:     new Date().toISOString(),
-      isSyncing:        String(resp.effectiveStatus || "").toUpperCase() === "IN_PROCESS",
+      isSyncing:        String(j.effectiveStatus || "").toUpperCase() === "IN_PROCESS",
       error:            null,
     };
     setAdStatusById((prev) => ({ ...prev, [metaAdId]: finalState }));
+    // Write final status into campaignCreativesMap so a reload doesn't revert the card
+    _patchCreativeMap({ status: finalState.status, uiStatus: finalState.uiStatus, configuredStatus: finalState.configuredStatus, effectiveStatus: finalState.effectiveStatus, lastAction: action, lastActionAt: finalState.lastActionAt });
     console.log("[AD_DELIVERY_FINAL_STATE]", {
       adId: metaAdId, action,
-      responseUiStatus:         resp.uiStatus,
-      responseConfiguredStatus: resp.configuredStatus,
-      responseEffectiveStatus:  resp.effectiveStatus,
+      responseUiStatus:         j.uiStatus,
+      responseConfiguredStatus: j.configuredStatus,
+      responseEffectiveStatus:  j.effectiveStatus,
       finalStatus:              finalState.uiStatus,
     });
 
@@ -6369,6 +6402,9 @@ const handleAdDeliveryToggle = async (creative) => {
       ...prev,
       [metaAdId]: { ...previousEntry, isSyncing: false, error: "Could not update ad delivery. Try again." },
     }));
+    if (previousEntry.status) {
+      _patchCreativeMap({ status: previousEntry.status, uiStatus: previousEntry.uiStatus, configuredStatus: previousEntry.configuredStatus, effectiveStatus: previousEntry.effectiveStatus });
+    }
   }
 };
 
@@ -9515,47 +9551,70 @@ ${pendingTest ? `
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {visibleSet.map((c, idx) => {
                               const ds = resolveCreativeDeliveryStatus(c, adStatusById);
-                              const { isPaused, label, isSyncing, isUpdating, error } = ds;
-                              const isDeleted = String(c.status || "").toLowerCase() === "deleted";
+                              const { isPaused, label, isUpdating, error } = ds;
+                              const isDeleted  = String(c.status || "").toLowerCase() === "deleted";
+                              const isExpanded = expandedCreativeCardIdx === idx;
                               const statusColor = isPaused ? "#b45309" : "#15803d";
                               const statusBg    = isPaused ? "#fef3c7" : "#dcfce7";
                               return (
                                 <div
                                   key={c.id || c.metaAdId || idx}
+                                  onClick={() => setExpandedCreativeCardIdx(isExpanded ? null : idx)}
                                   style={{
                                     flex: "1 1 200px", minWidth: 160, maxWidth: 280,
-                                    background: "#fff",
-                                    border: "1px solid #dbe4ff",
+                                    background: "#fff", cursor: "pointer",
+                                    border: isExpanded ? "2px solid #5d59ea" : "1px solid #dbe4ff",
                                     borderRadius: 14, padding: "10px 12px",
-                                    boxShadow: "0 2px 8px rgba(93,89,234,0.08)",
+                                    boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
                                     display: "flex", flexDirection: "column", gap: 6,
                                     opacity: isDeleted ? 0.5 : 1,
                                   }}
                                 >
                                   {/* Header row: angle label + status badge */}
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                    <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
-                                      {c.angleLabel || `Ad ${idx + 1}`}
-                                    </span>
-                                    <span style={{ background: statusBg, color: statusColor, borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
-                                      {label}
-                                    </span>
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                        {c.angleLabel || `Ad ${idx + 1}`}
+                                      </span>
+                                      <span style={{ background: statusBg, color: statusColor, borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
+                                        {label}
+                                      </span>
+                                    </div>
+                                    <span style={{ fontSize: 10, color: "#94a3b8" }}>{isExpanded ? "▲" : "▼"}</span>
                                   </div>
+                                  {c.metaAdId && (
+                                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: -2 }}>
+                                      Ad ID: {c.metaAdId}
+                                    </div>
+                                  )}
 
-                                  {/* Creative preview */}
+                                  {/* Image */}
                                   {c.imageUrl && (
                                     <img src={toAbsoluteMedia(c.imageUrl)} alt="creative"
                                       style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover" }}
                                       onError={(e) => { e.target.style.display = "none"; }} />
                                   )}
+
+                                  {/* Headline */}
                                   <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", lineHeight: 1.3 }}>
                                     {c.headline || "(no headline)"}
                                   </div>
+
+                                  {/* Body preview */}
                                   <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5 }}>
-                                    {(c.body || "").slice(0, 70)}{(c.body || "").length > 70 ? "…" : ""}
+                                    {isExpanded
+                                      ? (c.body || "")
+                                      : `${(c.body || "").slice(0, 70)}${(c.body || "").length > 70 ? "…" : ""}`}
                                   </div>
 
-                                  {/* Ad Delivery toggle — always visible, never behind an expand click */}
+                                  {/* Expanded: CTA label */}
+                                  {isExpanded && c.cta && (
+                                    <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>
+                                      CTA: {c.cta}
+                                    </div>
+                                  )}
+
+                                  {/* Ad Delivery slider — always visible, stops card expand when interacting */}
                                   {c.metaAdId && !isDeleted && (
                                     <div
                                       style={{ borderTop: "1px solid #f1f5f9", paddingTop: 8, marginTop: 2 }}
@@ -9579,6 +9638,25 @@ ${pendingTest ? `
                                           {error}
                                         </div>
                                       )}
+                                    </div>
+                                  )}
+
+                                  {/* Expanded: Archive (destructive, behind expand+confirm) */}
+                                  {isExpanded && c.metaAdId && (
+                                    <div
+                                      style={{ display: "flex", justifyContent: "flex-end", marginTop: 2, paddingTop: 6, borderTop: "1px solid #f1f5f9" }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <button
+                                        onClick={() => {
+                                          if (window.confirm("Archive this ad on Meta?\n\nThe ad will stop running permanently. This cannot be easily undone.")) {
+                                            handlePerAdAction(c.metaAdId, "delete");
+                                          }
+                                        }}
+                                        style={{ fontSize: 10, padding: "2px 10px", borderRadius: 5, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}
+                                      >
+                                        Archive ad
+                                      </button>
                                     </div>
                                   )}
                                 </div>

@@ -735,10 +735,14 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         launchComplete:   !!c.launchComplete,
         createdAt:        c.createdAt || null,
         // Creative fields so CampaignSetup can show the correct creative per campaign
-        images:           Array.isArray(c.images) ? c.images : [],
-        meta:             { headline: String(c.meta?.headline || ''), body: String(c.meta?.body || ''), link: String(c.meta?.link || '') },
-        mediaSelection:   c.mediaSelection || 'image',
-        optimizerState:   opt ? sanitizeOptState(opt) : null,
+        images:              Array.isArray(c.images) ? c.images : [],
+        meta:                { headline: String(c.meta?.headline || ''), body: String(c.meta?.body || ''), link: String(c.meta?.link || '') },
+        mediaSelection:      c.mediaSelection || 'image',
+        // Per-ad status (uiStatus, configuredStatus, lastAction, etc.) is stored inside each
+        // launchedCreativeSet entry by the pause/resume routes. Return it so the frontend
+        // can read paused/active status after a reload without an extra Meta round-trip.
+        launchedCreativeSet: Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [],
+        optimizerState:      opt ? sanitizeOptState(opt) : null,
       });
     }
 
