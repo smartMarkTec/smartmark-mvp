@@ -6945,18 +6945,45 @@ const finalImages = perAdLocalImages.length >= adCount
 const needsRebuild = dbLaunchedSet.length < adCount;
 const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   const db = dbLaunchedSet.find((c) => c.metaAdId === r.adId) || dbLaunchedSet[i] || {};
+
+  // Determine the status to show.
+  // Meta may return IN_PROCESS while a pause/resume is propagating — in that case, trust
+  // the DB's stored uiStatus/configuredStatus/lastAction (written by the pause/resume routes)
+  // rather than overwriting with a transient Meta state.
+  const metaRawStatus    = String(r.adStatus || 'ACTIVE').toUpperCase();
+  const dbUiStatus       = String(db.uiStatus || '').toUpperCase();
+  const dbConfigured     = String(db.configuredStatus || '').toUpperCase();
+  const dbStoredStatus   = String(db.status || '').toLowerCase();
+
+  let resolvedStatus;
+  if (metaRawStatus === 'IN_PROCESS') {
+    // Meta is transitioning — trust DB's stored action result
+    resolvedStatus = dbUiStatus.toLowerCase() || dbConfigured.toLowerCase() || dbStoredStatus || 'in_process';
+  } else if (metaRawStatus === 'ACTIVE') {
+    resolvedStatus = 'active';
+  } else {
+    resolvedStatus = metaRawStatus.toLowerCase(); // 'paused', 'archived', 'deleted', etc.
+  }
+
   return {
-    id:             db.id            || `meta-${r.adId}`,
-    angle:          db.angle         || null,
-    angleLabel:     db.angleLabel    || r.adName || `Ad ${i + 1}`,
-    headline:       r.headline       || db.headline || '',
-    body:           r.body           || db.body     || '',
-    cta:            r.cta            || db.cta      || 'LEARN_MORE',
-    imageUrl:       r.imageUrl       || db.imageUrl || finalImages[i] || '',
-    link:           r.link           || db.link     || '',
-    metaAdId:       r.adId,
-    metaCreativeId: r.creativeId     || db.metaCreativeId || null,
-    status:         r.adStatus === 'ACTIVE' ? 'active' : r.adStatus.toLowerCase(),
+    id:               db.id             || `meta-${r.adId}`,
+    angle:            db.angle          || null,
+    angleLabel:       db.angleLabel     || r.adName || `Ad ${i + 1}`,
+    headline:         r.headline        || db.headline || '',
+    body:             r.body            || db.body     || '',
+    cta:              r.cta             || db.cta      || 'LEARN_MORE',
+    imageUrl:         r.imageUrl        || db.imageUrl || finalImages[i] || '',
+    link:             r.link            || db.link     || '',
+    metaAdId:         r.adId,
+    metaCreativeId:   r.creativeId      || db.metaCreativeId || null,
+    status:           resolvedStatus,
+    // Carry over rich status fields written by pause/resume routes so the frontend
+    // resolver (uiStatus > configuredStatus > status) works correctly after a reload.
+    uiStatus:         dbUiStatus        || (resolvedStatus === 'paused' ? 'PAUSED' : resolvedStatus === 'active' ? 'ACTIVE' : resolvedStatus.toUpperCase()),
+    configuredStatus: dbConfigured      || null,
+    effectiveStatus:  metaRawStatus,    // raw from Meta — only used as secondary sync label
+    lastAction:       db.lastAction     || null,
+    lastActionAt:     db.lastActionAt   || null,
     replacedMetaAdId: db.replacedMetaAdId || null,
   };
 });
