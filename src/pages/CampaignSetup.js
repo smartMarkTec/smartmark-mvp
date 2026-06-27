@@ -9649,6 +9649,7 @@ ${pendingTest ? `
                               // c already has adStatusById merged above — getCanonicalAdLifecycle is authoritative.
                               const lc         = getCanonicalAdLifecycle(c);
                               const isPaused   = lc.lifecycle === "PAUSED";
+                              const isDeleted  = lc.lifecycle === "ARCHIVED" || lc.lifecycle === "DELETED";
                               const label      = lc.label;
                               const isUpdating = !!(adStatusById[c.metaAdId]?.isSyncing);
                               const error      = adStatusById[c.metaAdId]?.error || null;
