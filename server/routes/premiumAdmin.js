@@ -697,6 +697,103 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
       activeTestType: String(s?.activeTestType || '').trim(),
     });
 
+    // ── Per-ad archive reconciliation ──────────────────────────────────────────
+    // This is the reload path that fires when TheBoss re-enters a client account.
+    // The raw DB launchedCreativeSet may contain stale "active" entries for ads
+    // that Meta has already archived (because a prior rebuild from Meta's /ads
+    // list omitted them and overwrote the DB before our fix was deployed).
+    // Verify every saved ad ID directly with Meta and repair the DB in place.
+    const clientToken = getFbUserToken(ownerKey);
+    let dbNeedsWrite  = false;
+    const nowRec = new Date().toISOString();
+    const TERMINAL_ST = new Set(['ARCHIVED', 'DELETED']);
+
+    if (clientToken) {
+      for (const c of creativeRecords) {
+        const launchedSet = Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [];
+        if (launchedSet.length === 0) continue;
+
+        if (!c.archivedMetaAdIds || typeof c.archivedMetaAdIds !== 'object') c.archivedMetaAdIds = {};
+        const archivedMap = c.archivedMetaAdIds;
+
+        // Only verify ad IDs not already confirmed archived — avoids redundant Meta calls.
+        const adsToCheck = launchedSet
+          .filter((ad) => ad.metaAdId && !archivedMap[ad.metaAdId])
+          .map((ad) => ad.metaAdId)
+          .slice(0, 10); // safety cap
+
+        if (adsToCheck.length === 0) continue;
+
+        const verifyResults = await Promise.allSettled(
+          adsToCheck.map(async (adId) => {
+            try {
+              const r = await axios.get(
+                `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+                { params: { access_token: clientToken, fields: 'id,status,effective_status,configured_status' }, timeout: 8000 }
+              );
+              const d = r.data || {};
+              return {
+                adId,
+                effectiveStatus:  String(d.effective_status  || d.status || '').toUpperCase(),
+                configuredStatus: String(d.configured_status || d.status || '').toUpperCase(),
+              };
+            } catch (err) {
+              const code = err?.response?.data?.error?.code;
+              // Code 100 = object not found → treat as archived
+              const st = code === 100 ? 'ARCHIVED' : 'UNKNOWN';
+              console.warn('[ADMIN_CAMPAIGNS_VERIFY_ERROR]', { adId, code, msg: err?.response?.data?.error?.message || err?.message });
+              return { adId, effectiveStatus: st, configuredStatus: st };
+            }
+          })
+        );
+
+        for (const result of verifyResults) {
+          if (result.status !== 'fulfilled') continue;
+          const { adId, effectiveStatus, configuredStatus } = result.value;
+          if (!TERMINAL_ST.has(effectiveStatus) && !TERMINAL_ST.has(configuredStatus)) continue;
+
+          const archiveEntry = {
+            status: 'archived', uiStatus: 'ARCHIVED', configuredStatus: 'ARCHIVED',
+            effectiveStatus: 'ARCHIVED', lastAction: 'admin_campaigns_reconcile_archived',
+            lastActionAt: nowRec,
+          };
+
+          // Update the launchedCreativeSet entry in-place
+          const adIdx = c.launchedCreativeSet
+            ? c.launchedCreativeSet.findIndex((ad) => ad.metaAdId === adId)
+            : -1;
+          if (adIdx >= 0) {
+            c.launchedCreativeSet[adIdx] = { ...c.launchedCreativeSet[adIdx], ...archiveEntry };
+          }
+
+          // Write to durable archivedMetaAdIds map
+          archivedMap[adId] = archiveEntry;
+          dbNeedsWrite = true;
+
+          console.log('[ADMIN_CAMPAIGNS_ARCHIVE_REPAIRED]', {
+            campaignId:         c.campaignId,
+            adId,
+            metaStatus:         effectiveStatus,
+            metaEffectiveStatus: effectiveStatus,
+          });
+        }
+      }
+
+      if (dbNeedsWrite) await db.write();
+    }
+
+    // Apply archivedMetaAdIds overrides to each launchedCreativeSet before building the
+    // campaign list — catches any entry the DB still has as "active" but the map says archived.
+    for (const c of creativeRecords) {
+      const archivedMap = c.archivedMetaAdIds || {};
+      if (!Array.isArray(c.launchedCreativeSet) || Object.keys(archivedMap).length === 0) continue;
+      c.launchedCreativeSet = c.launchedCreativeSet.map((ad) => {
+        if (!ad.metaAdId || !archivedMap[ad.metaAdId]) return ad;
+        return { ...ad, ...archivedMap[ad.metaAdId], uiStatus: 'ARCHIVED', status: 'archived' };
+      });
+    }
+    // ── End reconciliation ──────────────────────────────────────────────────────
+
     // Build campaign list from creative records, enriched with optimizer state.
     // Skip campaigns marked hiddenFromHistory — they are soft-deleted from the UI.
     const seen = new Set();
@@ -738,14 +835,24 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         images:              Array.isArray(c.images) ? c.images : [],
         meta:                { headline: String(c.meta?.headline || ''), body: String(c.meta?.body || ''), link: String(c.meta?.link || '') },
         mediaSelection:      c.mediaSelection || 'image',
-        // Per-ad status (uiStatus, configuredStatus, lastAction, etc.) is stored inside each
-        // launchedCreativeSet entry by the pause/resume routes. Return it so the frontend
-        // can read paused/active status after a reload without an extra Meta round-trip.
         launchedCreativeSet: Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [],
-        // Durable archived-ad map — survives launchedCreativeSet rebuilds.
-        // Keyed by metaAdId; values carry the archived status payload.
         archivedMetaAdIds:   (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === 'object') ? c.archivedMetaAdIds : {},
         optimizerState:      opt ? sanitizeOptState(opt) : null,
+      });
+
+      console.log('[ADMIN_CAMPAIGNS_CREATIVE_STATUS]', {
+        clientId:            username,
+        ownerKey,
+        campaignId:          cId,
+        launchedCreativeSet: (Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : []).map((x) => ({
+          metaAdId:         x.metaAdId,
+          status:           x.status,
+          uiStatus:         x.uiStatus,
+          configuredStatus: x.configuredStatus,
+          effectiveStatus:  x.effectiveStatus,
+          lastAction:       x.lastAction,
+        })),
+        archivedMetaAdIds: c.archivedMetaAdIds || {},
       });
     }
 
