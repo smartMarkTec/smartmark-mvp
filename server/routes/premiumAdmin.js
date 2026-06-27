@@ -742,6 +742,9 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         // launchedCreativeSet entry by the pause/resume routes. Return it so the frontend
         // can read paused/active status after a reload without an extra Meta round-trip.
         launchedCreativeSet: Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [],
+        // Durable archived-ad map — survives launchedCreativeSet rebuilds.
+        // Keyed by metaAdId; values carry the archived status payload.
+        archivedMetaAdIds:   (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === 'object') ? c.archivedMetaAdIds : {},
         optimizerState:      opt ? sanitizeOptState(opt) : null,
       });
     }
@@ -2740,17 +2743,19 @@ router.post('/admin/clients/:clientId/ad/:adId/:action', limitAdmin, requireAdmi
                r.ownerKey === ownerKey
       );
       if (rec) {
+        const adPatch = { status: dbStatus, configuredStatus, effectiveStatus, uiStatus, lastAction: action, lastActionAt };
         rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-          c.metaAdId === adId ? {
-            ...c,
-            status:          dbStatus,
-            configuredStatus,
-            effectiveStatus,
-            uiStatus,
-            lastAction:      action,
-            lastActionAt,
-          } : c
+          c.metaAdId === adId ? { ...c, ...adPatch } : c
         );
+        // For delete/archive: also write a durable archivedMetaAdIds entry so the
+        // creatives endpoint can force-archive this ad even after Meta stops returning it.
+        if (action === 'delete') {
+          if (!rec.archivedMetaAdIds || typeof rec.archivedMetaAdIds !== 'object') rec.archivedMetaAdIds = {};
+          rec.archivedMetaAdIds[adId] = {
+            status: 'archived', uiStatus: 'ARCHIVED', configuredStatus: 'ARCHIVED',
+            effectiveStatus: 'ARCHIVED', lastAction: 'delete', lastActionAt,
+          };
+        }
         await db.write();
       }
       console.log('[AD_ACTION_SUCCESS]', { adId, action, uiStatus, effectiveStatus, dbUpdated: !!rec, ownerKey });

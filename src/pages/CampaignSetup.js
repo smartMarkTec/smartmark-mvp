@@ -2843,11 +2843,16 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   // Merge adStatusById overrides before filtering so an immediate archive action
   // is reflected even before campaignCreatives prop has re-propagated.
   const TEN_MIN = 10 * 60 * 1000;
+  const _archivedMap = campaignCreatives?.archivedMetaAdIds || {};
   const _allLaunched = Array.isArray(campaignCreatives?.launchedCreativeSet)
     ? campaignCreatives.launchedCreativeSet
         .filter((c) => String(c.status || "").toLowerCase() !== "replaced")
         .map((c) => {
-          const ov = c.metaAdId ? adStatusById[c.metaAdId] : null;
+          const mid = c.metaAdId;
+          // archivedMetaAdIds is authoritative — force archived over any live-looking status
+          const forcedArchive = mid ? _archivedMap[mid] : null;
+          if (forcedArchive) return { ...c, ...forcedArchive, uiStatus: "ARCHIVED", status: "archived" };
+          const ov = mid ? adStatusById[mid] : null;
           const ovActive = ov && ov.lastActionAt && (Date.now() - new Date(ov.lastActionAt).getTime()) < TEN_MIN;
           return ovActive ? { ...c, ...ov } : c;
         })
@@ -3332,6 +3337,7 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
                       <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", background: "#f1f5f9", borderRadius: 4, padding: "1px 5px" }}>Archived</span>
                     </div>
                     {creative.metaAdId && <div style={{ fontSize: 9, color: "#cbd5e1" }}>ID: {creative.metaAdId}</div>}
+                    {creative.imageUrl && <a href={toAbsoluteMedia(creative.imageUrl)} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#94a3b8", textDecoration: "underline" }}>View image</a>}
                     {creative.headline && <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", lineHeight: 1.3 }}>{creative.headline}</div>}
                     {creative.body && <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>{(creative.body || "").slice(0, 60)}{creative.body.length > 60 ? "…" : ""}</div>}
                   </div>
@@ -6115,11 +6121,14 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
             images:              (c.images || []).filter(Boolean),
             mediaSelection:      c.mediaSelection || "image",
             meta:                { headline: c.meta?.headline || "", body: c.meta?.body || "", link: c.meta?.link || "" },
-            // Include launchedCreativeSet from backend so per-ad status (uiStatus, configuredStatus,
-            // lastAction) survives page reloads. Non-empty array wins; otherwise preserved from existing state.
             launchedCreativeSet: Array.isArray(c.launchedCreativeSet) && c.launchedCreativeSet.length > 0
               ? c.launchedCreativeSet
-              : null, // null sentinel → merge step below preserves existing state entry
+              : null,
+            // archivedMetaAdIds is a separate durable map keyed by metaAdId.
+            // It survives launchedCreativeSet rebuilds so archived ads stay archived after refresh.
+            archivedMetaAdIds: (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === "object")
+              ? c.archivedMetaAdIds
+              : null,
           };
         }
       }
@@ -6130,12 +6139,17 @@ function refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOp
           const merged = { ...m };
           for (const [id, incoming] of Object.entries(newCreatives)) {
             const existing = m[id] || {};
+            // Merge archivedMetaAdIds: union of existing and incoming so no archived ad is lost.
+            const mergedArchivedIds = Object.assign(
+              {},
+              existing.archivedMetaAdIds || {},
+              incoming.archivedMetaAdIds || {}
+            );
             merged[id] = {
               ...existing,
               ...incoming,
-              // Never let a null/empty launchedCreativeSet from the campaigns list overwrite
-              // a real one that was loaded by the creatives endpoint or set by a pause action.
               launchedCreativeSet: incoming.launchedCreativeSet || existing.launchedCreativeSet || [],
+              archivedMetaAdIds:   Object.keys(mergedArchivedIds).length > 0 ? mergedArchivedIds : (existing.archivedMetaAdIds || {}),
             };
           }
           return merged;
@@ -6353,7 +6367,12 @@ const handlePerAdAction = async (metaAdId, action) => {
       const updatedSet = (rec.launchedCreativeSet || []).map((c) =>
         c.metaAdId === metaAdId ? { ...c, ...patch } : c
       );
-      return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet } };
+      // For delete/archive: also write to archivedMetaAdIds so the durable map
+      // forces archived status after any reload, independent of launchedCreativeSet.
+      const updatedArchivedMap = action === "delete"
+        ? { ...(rec.archivedMetaAdIds || {}), [metaAdId]: patch }
+        : rec.archivedMetaAdIds || {};
+      return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updatedSet, archivedMetaAdIds: updatedArchivedMap } };
     });
 
     // 2. Update localStorage creative map so status persists on refresh (non-admin only — admin reads from DB)
@@ -9613,13 +9632,19 @@ ${pendingTest ? `
                           .map((c) => c.replacedMetaAdId).filter(Boolean)
                       );
                       const _TEN_MIN = 10 * 60 * 1000;
-                      // Merge adStatusById overrides so an immediate archive/pause action
-                      // is reflected before campaignCreativesMap has propagated.
+                      const _archivedMap = selectedCampaignCreatives?.archivedMetaAdIds || {};
+                      // Merge adStatusById + archivedMetaAdIds overrides so an immediate archive/pause
+                      // is reflected before campaignCreativesMap has propagated, and so
+                      // the durable archivedMetaAdIds map forces archived status after refresh.
                       const allSet = selectedCampaignCreatives.launchedCreativeSet
                         .filter((c) => !replacedIds.has(c.metaAdId))
                         .map((c) => {
-                          const ov = c.metaAdId ? adStatusById[c.metaAdId] : null;
+                          const mid = c.metaAdId;
+                          const ov = mid ? adStatusById[mid] : null;
                           const ovActive = ov && ov.lastActionAt && (Date.now() - new Date(ov.lastActionAt).getTime()) < _TEN_MIN;
+                          // archivedMetaAdIds always wins — never let a live-looking entry override it
+                          const forcedArchive = mid ? _archivedMap[mid] : null;
+                          if (forcedArchive) return { ...c, ...forcedArchive, uiStatus: "ARCHIVED", status: "archived" };
                           return ovActive ? { ...c, ...ov } : c;
                         });
                       const activeCreatives   = allSet.filter((c) => !isArchivedOrDeletedCreative(c));
@@ -9795,6 +9820,7 @@ ${pendingTest ? `
                                     <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", background: "#f1f5f9", borderRadius: 4, padding: "1px 5px" }}>Archived</span>
                                   </div>
                                   {c.metaAdId && <div style={{ fontSize: 9, color: "#cbd5e1" }}>ID: {c.metaAdId}</div>}
+                                  {c.imageUrl && <a href={toAbsoluteMedia(c.imageUrl)} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#94a3b8", textDecoration: "underline" }}>View image</a>}
                                   {c.headline && <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", lineHeight: 1.3 }}>{c.headline}</div>}
                                   {c.body && <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>{(c.body || "").slice(0, 60)}{c.body.length > 60 ? "…" : ""}</div>}
                                 </div>

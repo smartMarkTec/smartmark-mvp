@@ -7015,19 +7015,95 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   };
 });
 
-// Meta does not return ARCHIVED ads in its default /ads list.
-// Re-append any DB entries that are archived/deleted so they're not silently dropped
-// every time the creatives endpoint is called after an archive action.
-const metaReturnedIds = new Set(rebuiltLaunchedCreativeSet.map((c) => c.metaAdId));
-const DEAD_STATUSES   = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
-const archivedFromDB  = dbLaunchedSet.filter((c) =>
-  c.metaAdId &&
-  !metaReturnedIds.has(c.metaAdId) &&
-  (DEAD_STATUSES.has(String(c.status || '')) || DEAD_STATUSES.has(String(c.uiStatus || '')))
-);
+// Canonical check — must inspect ALL status fields, never short-circuit on the first truthy.
+// e.g. c.status="active" + c.uiStatus="ARCHIVED" must still return true.
+function isTerminalArchivedCreative(c) {
+  if (!c) return false;
+  const vals = [c.status, c.uiStatus, c.configuredStatus, c.effectiveStatus, c.lastAction]
+    .map((v) => String(v || '').trim().toUpperCase());
+  const TERMINAL = new Set([
+    'ARCHIVED','ARCHIVE','ARCHIVE_DETECTED',
+    'DELETED','DELETE','DELETE_DETECTED',
+  ]);
+  return vals.some((v) => TERMINAL.has(v));
+}
 
-// Full set = live Meta ads + archived entries the DB remembers
-const fullLaunchedCreativeSet = [...rebuiltLaunchedCreativeSet, ...archivedFromDB];
+// Load the durable archived-ad map from the DB record.
+// archivedMetaAdIds is a separate field in campaign_creatives that persists archived ad IDs
+// even after the launchedCreativeSet is rebuilt from Meta (which omits archived ads).
+const archivedMetaAdIds = (rec && typeof rec.archivedMetaAdIds === 'object' && rec.archivedMetaAdIds !== null)
+  ? rec.archivedMetaAdIds
+  : {};
+
+// Build the final set.
+// Step 1: For any Meta-returned ad that is in archivedMetaAdIds, force it to archived.
+const metaReturnedIds = new Set(rebuiltLaunchedCreativeSet.map((c) => c.metaAdId));
+const rebuiltWithForced = rebuiltLaunchedCreativeSet.map((c) => {
+  const forced = archivedMetaAdIds[String(c.metaAdId || '')];
+  if (!forced) return c;
+  // Meta returned this ad but our DB says it's archived — force archived status.
+  return {
+    ...c,
+    status:           'archived',
+    uiStatus:         'ARCHIVED',
+    configuredStatus: 'ARCHIVED',
+    effectiveStatus:  'ARCHIVED',
+    lastAction:       forced.lastAction     || 'archive_detected',
+    lastActionAt:     forced.lastActionAt   || new Date().toISOString(),
+  };
+});
+
+// Step 2: Append DB entries that Meta omitted AND that are terminal (archived/deleted).
+// Also include any archivedMetaAdIds entry not already in rebuiltWithForced.
+const rebuiltIds = new Set(rebuiltWithForced.map((c) => c.metaAdId));
+const archivedFromDB = [
+  // From dbLaunchedSet — any entry Meta omitted that is terminal
+  ...dbLaunchedSet.filter((c) =>
+    c.metaAdId && !rebuiltIds.has(c.metaAdId) && isTerminalArchivedCreative(c)
+  ),
+  // From archivedMetaAdIds — any entry not in dbLaunchedSet or Meta at all
+  ...Object.entries(archivedMetaAdIds)
+    .filter(([adId]) => !rebuiltIds.has(adId) && !dbLaunchedSet.some((c) => c.metaAdId === adId))
+    .map(([adId, data]) => ({
+      id:               `archived-${adId}`,
+      metaAdId:         adId,
+      angleLabel:       data.angleLabel || null,
+      headline:         data.headline   || '',
+      body:             data.body       || '',
+      imageUrl:         data.imageUrl   || '',
+      status:           'archived',
+      uiStatus:         'ARCHIVED',
+      configuredStatus: 'ARCHIVED',
+      effectiveStatus:  'ARCHIVED',
+      lastAction:       data.lastAction   || 'archive_detected',
+      lastActionAt:     data.lastActionAt || new Date().toISOString(),
+    })),
+];
+
+// Full set = forced-archived Meta ads + archived DB entries
+const fullLaunchedCreativeSet = [...rebuiltWithForced, ...archivedFromDB];
+
+console.log('[CREATIVE_RELOAD_STATUS]', {
+  campaignId:          normalizedCampaignId,
+  metaReturnedIds:     [...metaReturnedIds],
+  archivedMetaAdIds:   Object.keys(archivedMetaAdIds),
+  previousLaunchedIds: dbLaunchedSet.map((c) => ({
+    metaAdId:         c.metaAdId,
+    status:           c.status,
+    uiStatus:         c.uiStatus,
+    configuredStatus: c.configuredStatus,
+    effectiveStatus:  c.effectiveStatus,
+    lastAction:       c.lastAction,
+  })),
+  finalLaunchedSet:    fullLaunchedCreativeSet.map((c) => ({
+    metaAdId:         c.metaAdId,
+    status:           c.status,
+    uiStatus:         c.uiStatus,
+    configuredStatus: c.configuredStatus,
+    effectiveStatus:  c.effectiveStatus,
+    lastAction:       c.lastAction,
+  })),
+});
 
 // Build set of IDs that have been replaced (their "replacedMetaAdId" field points to them)
 const replacedMetaAdIds = new Set(
@@ -8035,14 +8111,21 @@ router.post('/facebook/adaccount/:accountId/ad/:adId/delete', async (req, res) =
       { params: { access_token: userToken } }
     );
 
+    const nowDel = new Date().toISOString();
+    const archiveEntry = { status: 'archived', uiStatus: 'ARCHIVED', configuredStatus: 'ARCHIVED', effectiveStatus: 'ARCHIVED', lastAction: 'delete', lastActionAt: nowDel };
     await db.read();
     const rec = (db.data.campaign_creatives || []).find(
       (r) => Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId) && r.ownerKey === ownerKey
     );
     if (rec) {
+      // Update launchedCreativeSet entry
       rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
-        c.metaAdId === adId ? { ...c, status: 'deleted', uiStatus: 'ARCHIVED', lastAction: 'delete', lastActionAt: new Date().toISOString() } : c
+        c.metaAdId === adId ? { ...c, ...archiveEntry } : c
       );
+      // Also write to archivedMetaAdIds — a separate durable map so the creatives
+      // endpoint can force-archive this ad even after Meta stops returning it.
+      if (!rec.archivedMetaAdIds || typeof rec.archivedMetaAdIds !== 'object') rec.archivedMetaAdIds = {};
+      rec.archivedMetaAdIds[adId] = archiveEntry;
       await db.write();
     }
 
