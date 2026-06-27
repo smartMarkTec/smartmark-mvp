@@ -23,18 +23,22 @@ const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const AD_AGENT_SYSTEM =
-  "You are Smartemark's senior Meta ads strategist. " +
-  "Use the saved customer intake, website, campaign notes, selected objective, creative preferences, and campaign history to give specific, actionable advice. " +
-  "Recommend practical Facebook/Instagram campaign strategy tailored to this specific business. " +
-  "Do not invent fake offers, fake guarantees, fake reviews, fake prices, or fake results. " +
-  "If information is missing, ask for it or list it as missing — do not make it up. " +
-  "If the user gives exact copy, headline, targeting, creative, or strategy instructions, follow them unless unsafe or impossible. " +
-  "Before suggesting any live Meta change, note that it will require approval. " +
-  "IMPORTANT: When campaign metrics context is provided in the system messages, USE IT. " +
-  "Answer performance questions with the actual numbers provided — impressions, CTR, CPC, spend, clicks. " +
+  "You are Smartemark's AI Ad Agent. " +
+  "Your job is NOT only to give advice. Your job is to understand whether the user is asking for: " +
+  "(1) Information or advice, (2) Analysis of existing performance, or (3) A real platform action. " +
+  "If the user asks for a real action and the required details are present, do NOT answer with generic strategy. " +
+  "Examples of real actions the system can execute: create challenger ads, pause an ad, resume an ad, archive an ad, generate a new creative, update ad copy, create a test variation. " +
+  "If the user gives a detailed command like 'Create two challenger ads using control ad X', treat that as an execution request, NOT a request for general strategy. " +
+  "Do NOT say 'Would you like me to generate these ads?' if the user already asked you to create them. " +
+  "Do NOT suggest a different strategy if the user gave you explicit instructions. " +
+  "If the user provides a control ad ID, headline, ad names, and test types, those are complete instructions — queue the action for approval immediately. " +
+  "If the action affects Meta ads, budgets, campaign status, or ad creation, queue it as a pending approval action. " +
+  "Only ask a clarifying question if required fields (like control ad ID) are missing from the request. " +
+  "Do NOT say an action succeeded unless the backend executor returns success and real numeric IDs from Meta. " +
+  "For performance analysis: Use the saved customer intake, campaign history, and metrics context provided. " +
+  "Answer performance questions with the actual numbers from context — impressions, CTR, CPC, spend, clicks. " +
   "Explain metrics in plain language a business owner would understand. " +
-  "If the AI optimizer has made a diagnosis or taken an action, mention it. " +
-  "If there is an active A/B test, mention it. " +
+  "Do not invent fake offers, guarantees, reviews, prices, or results. " +
   "Only say data is unavailable if the context explicitly says so.";
 
 // ── Campaign performance intent detection ─────────────────────────────────────
@@ -80,26 +84,60 @@ function isGenerateChallengerIntent(message) {
   );
 }
 
-// ── Create 2 specific challenger ads (headline + image) intent ─────────────────
-// Fires when the user asks to create N specific challenger ads with stated test types.
-// Different from isGenerateChallengerIntent — that flow uses the AI optimizer;
-// this flow directly creates Meta ads from the control ad's creative.
+// ── Create specific challenger ads intent ──────────────────────────────────────
+// Fires when the user explicitly requests creating challenger ads with enough detail
+// to build a proposal. Triggers on create-language + control ad ID OR headline/image
+// test language. Deliberately broad so detailed action commands never fall through
+// to the generic OpenAI strategy reply.
 function isCreateSpecificChallengersIntent(message) {
   const s = String(message || '').toLowerCase();
-  return (
-    // "create 2 challenger ads" / "make 2 test ads"
-    /(create|make|build|launch|add|run).{0,30}(2|two|both).{0,30}(challenger|test).{0,20}(ad|ads)/i.test(s) ||
-    // "headline test and image test"
-    /(headline.{0,20}test|image.{0,20}test).{0,50}(and|plus|with|&).{0,50}(headline.{0,20}test|image.{0,20}test)/i.test(s) ||
-    // "create a headline challenger and an image challenger"
-    /(create|make|build).{0,30}(headline).{0,30}(challenger|test|ad).{0,30}(and|plus|with).{0,30}(image)/i.test(s) ||
-    /(create|make|build).{0,30}(image).{0,30}(challenger|test|ad).{0,30}(and|plus|with).{0,30}(headline)/i.test(s) ||
-    // "2 ad variations" / "two test variations"
-    /(2|two|both).{0,20}(ad|ads).{0,20}(variation|variant|test|challenger)/i.test(s) ||
-    // "headline test + image test"
-    /headline.*test.*image.*test/i.test(s) ||
-    /image.*test.*headline.*test/i.test(s)
+
+  // Signal A: message contains a long numeric Meta ad ID (10+ digits)
+  const hasMetaAdId = /\b\d{10,}\b/.test(s);
+
+  // Signal B: explicit create/build + challenger/test language
+  const hasCreateChallenger = (
+    /(create|make|build|launch|add|run).{0,50}(challenger|test\s*ad|ad\s*test|variation)/i.test(s) ||
+    /(headline.?only|image.?only)\s*(challenger|test|ad)/i.test(s) ||
+    /(headline|image)\s*(test|challenger)(\s+ad)?/i.test(s) ||
+    /(2|two|both).{0,20}(challenger|test).{0,20}(ad|ads)/i.test(s) ||
+    /(headline.{0,30}test.{0,80}image.{0,30}test|image.{0,30}test.{0,80}headline.{0,30}test)/i.test(s)
   );
+
+  // Signal C: explicit "control ad" reference
+  const hasControlAdRef = /control\s*ad/i.test(s) || /using\s*ad\s*\d/i.test(s);
+
+  return (hasCreateChallenger && (hasMetaAdId || hasControlAdRef)) ||
+         (hasControlAdRef && /(create|make|build|launch|run)/i.test(s));
+}
+
+// Parses challenger details directly from the user's message text.
+// Extracts controlAdId, headline, and challenger names so the proposal can be
+// fully populated without requiring a structured form input.
+function parseChallengerRequest(message) {
+  // Control ad ID: "control ad 52543256381288", "using ad 52543256381288", bare 14-digit number
+  const controlIdMatch =
+    message.match(/control\s*ad\s*[:#\s]*(\d{8,})/i) ||
+    message.match(/using\s*(?:control\s*)?ad\s*[:#\s]*(\d{8,})/i) ||
+    message.match(/\b(\d{14,})\b/);
+  const controlAdId = controlIdMatch?.[1]?.trim() || null;
+
+  // Headline: "Headline: <text>" on its own line
+  const headlineMatch = message.match(/headline\s*[:#]\s*(.+?)(?:\n|$)/i);
+  const headline = headlineMatch?.[1]?.trim() || null;
+
+  // Challenger names: "Name: Headline Test - ..." / "Name: Image Test - ..."
+  const headlineNameMatch =
+    message.match(/name\s*[:#]\s*(headline\s*test[^\n]*)/i) ||
+    message.match(/(headline\s*test\s*[-–—][^\n]+)/i);
+  const headlineName = headlineNameMatch?.[1]?.trim() || 'Headline Test Challenger';
+
+  const imageNameMatch =
+    message.match(/name\s*[:#]\s*(image\s*test[^\n]*)/i) ||
+    message.match(/(image\s*test\s*[-–—][^\n]+)/i);
+  const imageName = imageNameMatch?.[1]?.trim() || 'Image Test - HVAC Visual Challenger';
+
+  return { controlAdId, headline, headlineName, imageName };
 }
 
 // Extracts pendingCreativeTest patch from an executeAction result for creative generation.
@@ -1154,9 +1192,18 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
     // Handles "create 2 challenger ads" style prompts. Creates real Meta ads
     // by cloning the control ad's creative and changing only headline or image.
     if (isCreateSpecificChallengersIntent(trimmed)) {
-      if (!safeCampaignId) {
-        return res.json({ ok: true, reply: 'Select a campaign first, then ask me to create the challenger ads.' });
-      }
+      // Parse control ad ID and challenger details directly from the message text.
+      // This removes the dependency on a pre-selected campaign when the user provides IDs.
+      const parsed = parseChallengerRequest(trimmed);
+      const parsedControlAdId = parsed.controlAdId;
+
+      console.log('[AD_AGENT_INTENT_DETECTED]', {
+        intent:       'create_challenger_ads',
+        actionType:   'create_challenger_ads',
+        controlAdId:  parsedControlAdId,
+        campaignId:   safeCampaignId,
+        clientId:     effectiveOwnerKey,
+      });
 
       // Require Meta token
       const challengerToken = getFbUserToken(effectiveOwnerKey);
@@ -1164,66 +1211,80 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         return res.json({ ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' });
       }
 
-      // Find the control ad — the one active (non-archived) ad in the launchedCreativeSet
+      // Look up campaign/account context from DB.
+      // Primary: use safeCampaignId if the campaign tab has one selected.
+      // Secondary: find the campaign that contains the parsed control ad ID.
       await db.read();
-      const creativeRec = (db.data.campaign_creatives || []).find(
-        (r) => String(r.campaignId || '').trim() === String(safeCampaignId || '').trim()
-      );
-      const launchedSet = Array.isArray(creativeRec?.launchedCreativeSet) ? creativeRec.launchedCreativeSet : [];
-      const DEAD = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
-      const activeAds = launchedSet.filter((ad) => !DEAD.has(String(ad.status || '').toLowerCase()) && !DEAD.has(String(ad.uiStatus || '')));
-      const accountId = String(creativeRec?.accountId || '').replace(/^act_/, '').trim();
+      const DEAD2 = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+      let creativeRec = safeCampaignId
+        ? (db.data.campaign_creatives || []).find((r) => String(r.campaignId || '').trim() === String(safeCampaignId).trim())
+        : null;
 
-      if (activeAds.length === 0) {
-        return res.json({ ok: true, reply: 'No active launched ads found for this campaign. Please select the campaign with the live ads and try again.' });
+      if (!creativeRec && parsedControlAdId) {
+        creativeRec = (db.data.campaign_creatives || []).find((r) =>
+          Array.isArray(r.launchedCreativeSet) &&
+          r.launchedCreativeSet.some((ad) => ad.metaAdId === parsedControlAdId)
+        );
+      }
+
+      const launchedSet  = Array.isArray(creativeRec?.launchedCreativeSet) ? creativeRec.launchedCreativeSet : [];
+      const activeAds    = launchedSet.filter((ad) => !DEAD2.has(String(ad.status || '')) && !DEAD2.has(String(ad.uiStatus || '')));
+      const accountId    = String(creativeRec?.accountId || '').replace(/^act_/, '').trim();
+      const campaignId   = String(creativeRec?.campaignId || safeCampaignId || '').trim();
+
+      // Resolve final controlAdId: parsed from message wins, otherwise first active ad
+      const controlAdId  = parsedControlAdId || String(activeAds[0]?.metaAdId || '').trim();
+
+      if (!controlAdId) {
+        return res.json({ ok: true, reply: 'I could not identify a control ad ID. Please include the control ad ID in your request (e.g., "using control ad 52543256381288") or select the campaign first.' });
       }
       if (!accountId) {
-        return res.json({ ok: true, reply: 'Could not find the ad account ID for this campaign. Please re-select the campaign and try again.' });
+        return res.json({ ok: true, reply: 'Could not find the ad account ID for this campaign. Please select the campaign in the Campaigns tab and try again.' });
       }
 
-      const controlAd = activeAds[0];
-      const controlAdId = String(controlAd.metaAdId || '').trim();
-      if (!controlAdId) {
-        return res.json({ ok: true, reply: 'Could not identify a control ad ID. Please make sure the campaign has launched ads.' });
-      }
+      // Build challengers from parsed message data
+      const headlineName = parsed.headlineName;
+      const imageName    = parsed.imageName;
+      const headline     = parsed.headline || '$75 AC Tune-Up Before Houston Heat Gets Worse';
 
-      // Build the proposal payload
       const challengersPayload = [
         {
-          testType:         'headline',
-          name:             'Headline Test - $75 Tune-Up Heat',
-          headline:         '$75 AC Tune-Up Before Houston Heat Gets Worse',
+          testType: 'headline',
+          name:     headlineName,
+          headline,
         },
         {
-          testType:         'image',
-          name:             'Image Test - HVAC Visual Challenger',
-          imageUrl:         'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg',
+          testType:  'image',
+          name:      imageName,
+          imageUrl:  'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg',
         },
       ];
 
-      const proposalPayload = {
-        ownerKey:     effectiveOwnerKey,
-        campaignId:   safeCampaignId,
-        controlAdId,
-        accountId,
-        challengers:  challengersPayload,
-        safety: {
-          doNotCreateCampaign:     true,
-          doNotCreateAdSet:        true,
-          doNotChangeBudget:       true,
-          doNotChangeTargeting:    true,
-          doNotTouchArchivedAds:   true,
-        },
+      const safety = {
+        doNotCreateCampaign:   true,
+        doNotCreateAdSet:      true,
+        doNotChangeBudget:     true,
+        doNotChangeTargeting:  true,
+        doNotTouchArchivedAds: true,
       };
 
-      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', proposalPayload);
+      const proposalPayload = {
+        ownerKey: effectiveOwnerKey,
+        campaignId,
+        controlAdId,
+        accountId,
+        challengers: challengersPayload,
+        safety,
+      };
+
+      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', { actionType: 'create_challenger_ads', proposalId: '(pending)', payload: proposalPayload });
 
       const proposal = await createActionProposal({
         ownerKey:        effectiveOwnerKey,
-        campaignId:      safeCampaignId,
+        campaignId,
         actionType:      'create_challenger_ads',
-        title:           'Create 2 challenger ads: Headline Test + Image Test',
-        reasoning:       `User requested 2 challenger ads based on control ad ${controlAdId}. Will create: (1) headline change only, (2) image change only. Same ad set, same budget, same targeting.`,
+        title:           `Create 2 challenger ads (control: ${controlAdId})`,
+        reasoning:       `User explicitly requested 2 challenger ads using control ad ${controlAdId}. Planned: (1) headline-only change, (2) image-only change. Same ad set, same budget, same targeting. No new campaign or ad set will be created.`,
         proposedChanges: proposalPayload,
         riskLevel:       'medium',
       }).catch((e) => {
@@ -1231,15 +1292,27 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         return null;
       });
 
+      const summaryLines = [
+        `**Control ad:** \`${controlAdId}\``,
+        '',
+        `**Challenger 1 — ${headlineName}**`,
+        `- Change headline only: *${headline}*`,
+        `- Keep same image, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
+        '',
+        `**Challenger 2 — ${imageName}**`,
+        `- Change image only`,
+        `- Keep same headline, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
+      ].join('\n');
+
       return res.json({
-        ok:               true,
-        proposalId:       proposal?.id || null,
-        proposalPending:  true,
-        proposalTitle:    'Create 2 challenger ads',
-        proposalSummary:  `Control ad: ${controlAdId}\n• Headline Test: "$75 AC Tune-Up Before Houston Heat Gets Worse"\n• Image Test: New HVAC visual (same headline, body, URL)`,
-        proposalAction:   'create_challenger_ads',
+        ok:              true,
+        proposalId:      proposal?.id || null,
+        proposalPending: true,
+        proposalTitle:   'Create 2 challenger ads',
+        proposalSummary: `Control: ${controlAdId} | Headline: "${headline}" | Image: HVAC visual`,
+        proposalAction:  'create_challenger_ads',
         reply: proposal
-          ? `**Approval required.** Here\'s the proposed ad test:\n\n**Control ad:** \`${controlAdId}\`\n\n**Challenger 1 — Headline Test**\nNew headline: *$75 AC Tune-Up Before Houston Heat Gets Worse*\nEverything else identical to control.\n\n**Challenger 2 — Image Test**\nNew HVAC image. Same headline, body, CTA, and URL as control.\n\nBoth ads will run in the same ad set with the same budget and targeting. No new campaign or ad set will be created.\n\nClick **Approve & Apply** to create them on Meta.`
+          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${controlAdId}\`.\n\n${summaryLines}\n\nArchived ads will not be touched.\n\nClick **Approve & Apply** to create them on Meta.`
           : 'I could not queue the proposal. Please try again.',
       });
     }
