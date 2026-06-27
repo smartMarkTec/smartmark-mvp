@@ -7015,13 +7015,27 @@ const rebuiltLaunchedCreativeSet = metaAdRecords.map((r, i) => {
   };
 });
 
+// Meta does not return ARCHIVED ads in its default /ads list.
+// Re-append any DB entries that are archived/deleted so they're not silently dropped
+// every time the creatives endpoint is called after an archive action.
+const metaReturnedIds = new Set(rebuiltLaunchedCreativeSet.map((c) => c.metaAdId));
+const DEAD_STATUSES   = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+const archivedFromDB  = dbLaunchedSet.filter((c) =>
+  c.metaAdId &&
+  !metaReturnedIds.has(c.metaAdId) &&
+  (DEAD_STATUSES.has(String(c.status || '')) || DEAD_STATUSES.has(String(c.uiStatus || '')))
+);
+
+// Full set = live Meta ads + archived entries the DB remembers
+const fullLaunchedCreativeSet = [...rebuiltLaunchedCreativeSet, ...archivedFromDB];
+
 // Build set of IDs that have been replaced (their "replacedMetaAdId" field points to them)
 const replacedMetaAdIds = new Set(
-  rebuiltLaunchedCreativeSet.map((c) => c.replacedMetaAdId).filter(Boolean)
+  fullLaunchedCreativeSet.map((c) => c.replacedMetaAdId).filter(Boolean)
 );
 
 // Visible set: exclude deleted, archived, and replaced originals
-const visibleLaunchedCreativeSet = rebuiltLaunchedCreativeSet.filter((c) =>
+const visibleLaunchedCreativeSet = fullLaunchedCreativeSet.filter((c) =>
   c.status !== 'deleted' &&
   c.status !== 'archived' &&
   c.status !== 'DELETED' &&
@@ -7108,11 +7122,11 @@ if (!finalImages.length) {
       );
     });
 
-    // Always persist the rebuilt launchedCreativeSet so future loads have all N creatives.
+    // Persist the full set (live Meta ads + preserved archived DB entries) so future loads
+    // still know about archived ads that Meta no longer returns in its default /ads list.
     const updatedRecord = {
       ...nextRecord,
-      // Store full set (including replaced/archived) for audit trail
-      launchedCreativeSet: rebuiltLaunchedCreativeSet.length > 0 ? rebuiltLaunchedCreativeSet : (rec?.launchedCreativeSet || null),
+      launchedCreativeSet: fullLaunchedCreativeSet.length > 0 ? fullLaunchedCreativeSet : (rec?.launchedCreativeSet || null),
     };
 
     if (idx >= 0) {
@@ -7158,9 +7172,9 @@ if (!finalImages.length) {
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,
-      // Return only the visible (non-deleted, non-replaced) creatives to the frontend.
-      // The full set (including replaced/archived) is stored in DB for audit purposes.
-      launchedCreativeSet: visibleLaunchedCreativeSet.length > 0 ? visibleLaunchedCreativeSet : (updatedRecord.launchedCreativeSet || null),
+      // Return the full set (live + archived) so the frontend can place archived ads in
+      // the Archived Ads section rather than having them silently disappear after refresh.
+      launchedCreativeSet: fullLaunchedCreativeSet.length > 0 ? fullLaunchedCreativeSet : (updatedRecord.launchedCreativeSet || null),
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
       source: 'facebook_cached_locally',

@@ -2825,6 +2825,7 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
   const [adMetricsMap, setAdMetricsMap] = useState({});   // { [metaAdId]: metricsObj }
   const [adMetricsLoading, setAdMetricsLoading] = useState(false);
   const [adMetricsError, setAdMetricsError] = useState(null);
+  const [showPanelArchived, setShowPanelArchived] = useState(false);
 
   const pending = optimizerState?.pendingCreativeTest || null;
   const pendingStatus = String(pending?.status || "").trim().toLowerCase();
@@ -3299,56 +3300,45 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
         </div>
       )}
 
-      {/* ── Archived Ads section (read-only, no controls) ── */}
+      {/* ── Archived Ads — collapsed by default ── */}
       {archivedLaunchedSet.length > 0 && (
-        <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#94a3b8" }}>Archived Ads</div>
-            <span style={{ background: "#f1f5f9", color: "#94a3b8", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
-              {archivedLaunchedSet.length}
+        <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
+          <button
+            type="button"
+            onClick={() => setShowPanelArchived((v) => !v)}
+            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: 0 }}
+          >
+            <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+              {showPanelArchived ? "▲" : "▼"} {archivedLaunchedSet.length} archived ad{archivedLaunchedSet.length !== 1 ? "s" : ""}
             </span>
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {archivedLaunchedSet.map((creative, aidx) => {
-              const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
-              const label  = creative.angleLabel || creative.angle || `Ad ${aidx + 1}`;
-              return (
-                <div
-                  key={creative.id || creative.metaAdId || `arch-${aidx}`}
-                  style={{
-                    background: "#f8fafc", border: "1px solid #e2e8f0",
-                    borderRadius: 14, padding: 14,
-                    flex: "1 1 160px", minWidth: 0,
-                    display: "flex", flexDirection: "column", gap: 8,
-                    opacity: 0.7,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                    <span style={{ fontWeight: 800, fontSize: 13, color: "#64748b" }}>{label}</span>
-                    <span style={{ background: "#f1f5f9", color: "#94a3b8", border: "1px solid #e2e8f0", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
-                      Archived
-                    </span>
-                  </div>
-                  {creative.metaAdId && (
-                    <div style={{ fontSize: 10, color: "#94a3b8" }}>Ad ID: {creative.metaAdId}</div>
-                  )}
-                  {imgUrl ? (
-                    <img src={imgUrl} alt={label} style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0", filter: "grayscale(40%)" }} />
-                  ) : (
-                    <div style={{ height: 60, background: "#f1f5f9", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 11 }}>
-                      No image
+          </button>
+          {showPanelArchived && (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+              {archivedLaunchedSet.map((creative, aidx) => {
+                const label = creative.angleLabel || creative.angle || `Ad ${aidx + 1}`;
+                return (
+                  <div
+                    key={creative.id || creative.metaAdId || `arch-${aidx}`}
+                    style={{
+                      background: "#f8fafc", border: "1px solid #e2e8f0",
+                      borderRadius: 12, padding: "10px 14px",
+                      flex: "1 1 160px", minWidth: 0,
+                      display: "flex", flexDirection: "column", gap: 4,
+                      opacity: 0.7,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontWeight: 800, fontSize: 12, color: "#94a3b8" }}>{label}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", background: "#f1f5f9", borderRadius: 4, padding: "1px 5px" }}>Archived</span>
                     </div>
-                  )}
-                  {creative.headline && (
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", lineHeight: 1.4 }}>{creative.headline}</div>
-                  )}
-                  {creative.body && (
-                    <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5, maxHeight: 48, overflow: "hidden" }}>{creative.body}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {creative.metaAdId && <div style={{ fontSize: 9, color: "#cbd5e1" }}>ID: {creative.metaAdId}</div>}
+                    {creative.headline && <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", lineHeight: 1.3 }}>{creative.headline}</div>}
+                    {creative.body && <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>{(creative.body || "").slice(0, 60)}{creative.body.length > 60 ? "…" : ""}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -4150,6 +4140,8 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   // Single source of truth for per-ad delivery status overrides.
   // Wins over launchedCreativeSet data for 10 minutes after an action.
   const [adStatusById, setAdStatusById] = useState({});
+  // Archived Ads section visibility for the Creatives tab (collapsed by default)
+  const [showCreativesArchived, setShowCreativesArchived] = useState(false);
 
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
@@ -9773,50 +9765,42 @@ ${pendingTest ? `
                           </div>
                         </div>
 
-                      {/* ── Archived Ads section ── */}
+                      {/* ── Archived Ads — collapsed by default, toggled by a small link ── */}
                       {archivedCreatives.length > 0 && (
-                        <div style={{ marginTop: 20 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                            <div style={{ fontWeight: 800, fontSize: 13, color: "#94a3b8" }}>Archived Ads</div>
-                            <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
-                              {archivedCreatives.length}
+                        <div style={{ marginTop: 12 }}>
+                          <button
+                            type="button"
+                            onClick={() => setShowCreativesArchived((v) => !v)}
+                            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, padding: 0 }}
+                          >
+                            <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>
+                              {showCreativesArchived ? "▲" : "▼"} {archivedCreatives.length} archived ad{archivedCreatives.length !== 1 ? "s" : ""}
                             </span>
-                          </div>
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            {archivedCreatives.map((c, aidx) => (
-                              <div
-                                key={c.id || c.metaAdId || `arch-${aidx}`}
-                                style={{
-                                  flex: "1 1 200px", minWidth: 160, maxWidth: 280,
-                                  background: "#f8fafc", border: "1px solid #e2e8f0",
-                                  borderRadius: 14, padding: "10px 12px",
-                                  display: "flex", flexDirection: "column", gap: 5,
-                                  opacity: 0.75,
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                  <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
-                                    {c.angleLabel || `Ad ${aidx + 1}`}
-                                  </span>
-                                  <span style={{ background: "#f1f5f9", color: "#64748b", borderRadius: 4, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
-                                    Archived
-                                  </span>
+                          </button>
+                          {showCreativesArchived && (
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                              {archivedCreatives.map((c, aidx) => (
+                                <div
+                                  key={c.id || c.metaAdId || `arch-${aidx}`}
+                                  style={{
+                                    flex: "1 1 180px", minWidth: 150, maxWidth: 260,
+                                    background: "#f8fafc", border: "1px solid #e2e8f0",
+                                    borderRadius: 12, padding: "10px 12px",
+                                    display: "flex", flexDirection: "column", gap: 4,
+                                    opacity: 0.7,
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8" }}>{c.angleLabel || `Ad ${aidx + 1}`}</span>
+                                    <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", background: "#f1f5f9", borderRadius: 4, padding: "1px 5px" }}>Archived</span>
+                                  </div>
+                                  {c.metaAdId && <div style={{ fontSize: 9, color: "#cbd5e1" }}>ID: {c.metaAdId}</div>}
+                                  {c.headline && <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", lineHeight: 1.3 }}>{c.headline}</div>}
+                                  {c.body && <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.4 }}>{(c.body || "").slice(0, 60)}{c.body.length > 60 ? "…" : ""}</div>}
                                 </div>
-                                {c.metaAdId && <div style={{ fontSize: 10, color: "#94a3b8" }}>Ad ID: {c.metaAdId}</div>}
-                                {c.imageUrl && (
-                                  <img src={toAbsoluteMedia(c.imageUrl)} alt="archived creative"
-                                    style={{ width: "100%", borderRadius: 8, aspectRatio: "1/1", objectFit: "cover", filter: "grayscale(40%)" }}
-                                    onError={(e) => { e.target.style.display = "none"; }} />
-                                )}
-                                <div style={{ fontWeight: 700, fontSize: 12, color: "#64748b", lineHeight: 1.3 }}>
-                                  {c.headline || "(no headline)"}
-                                </div>
-                                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
-                                  {(c.body || "").slice(0, 80)}{(c.body || "").length > 80 ? "…" : ""}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                       </>
