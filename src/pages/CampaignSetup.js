@@ -3128,31 +3128,12 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
       {adCount > 0 && (
         <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 12, flexWrap: "wrap" }}>
           {launchedSet.map((creative, idx) => {
-            // Use the same priority chain as resolveCreativeDeliveryStatus:
-            // uiStatus > configuredStatus > status > lastAction > effectiveStatus
-            // effectiveStatus "IN_PROCESS" must never drive isPaused.
-            const uiSt    = String(creative.uiStatus         || "").toUpperCase();
-            const cfgSt   = String(creative.configuredStatus || "").toUpperCase();
-            const rawSt   = String(creative.status           || "").toUpperCase();
-            const lastAct = String(creative.lastAction        || "").toLowerCase();
-            const effSt   = String(creative.effectiveStatus  || "").toUpperCase();
-            let isPaused = false;
-            if      (uiSt  === "PAUSED") isPaused = true;
-            else if (uiSt  === "ACTIVE") isPaused = false;
-            else if (cfgSt === "PAUSED") isPaused = true;
-            else if (cfgSt === "ACTIVE") isPaused = false;
-            else if (rawSt === "PAUSED") isPaused = true;
-            else if (rawSt === "ACTIVE") isPaused = false;
-            else if (lastAct === "pause")  isPaused = true;
-            else if (lastAct === "resume") isPaused = false;
-            else if (effSt === "PAUSED")   isPaused = true;
-            const isSyncing  = effSt === "IN_PROCESS";
+            const lc         = getCanonicalAdLifecycle(creative);
+            const isPaused   = lc.lifecycle === "PAUSED";
+            const badgeLabel = lc.label;
             const badgeBg    = isPaused ? "#fef9c3" : "#dcfce7";
             const badgeFg    = isPaused ? "#854d0e" : "#15803d";
             const badgeBd    = isPaused ? "#fde68a" : "#bbf7d0";
-            const badgeLabel = isPaused
-              ? (isSyncing ? "Paused · Syncing" : "Paused")
-              : (isSyncing ? "Active · Syncing" : "Active");
             const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
             const label  = creative.angleLabel || creative.angle || `Ad ${idx + 1}`;
             return (
@@ -3499,17 +3480,44 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
 // ─── Archived/deleted creative detector ─────────────────────────────────────
 // Returns true when an ad should not be shown in the active creative section.
 // Checks every field that could signal the ad is no longer manageable.
+// ─── Single canonical ad lifecycle resolver ──────────────────────────────────
+// All ad status display, filtering, and badge logic flows through this one function.
+// IN_PROCESS is never authoritative — it only adds a "Syncing" label suffix.
+function getCanonicalAdLifecycle(ad) {
+  if (!ad) return { lifecycle: "ACTIVE", activeSection: true, archivedSection: false, canPauseResume: true, label: "Active" };
+
+  const values = [
+    ad.uiStatus,
+    ad.configuredStatus,
+    ad.status,
+    ad.effectiveStatus,
+    ad.lastAction,
+  ].map((v) => String(v || "").trim().toUpperCase());
+
+  const has = (...xs) => values.some((v) => xs.includes(v));
+
+  if (has("ARCHIVED", "ARCHIVE", "ARCHIVE_DETECTED")) {
+    return { lifecycle: "ARCHIVED", activeSection: false, archivedSection: true, canPauseResume: false, label: "Archived" };
+  }
+  if (has("DELETED", "DELETE", "DELETE_DETECTED")) {
+    return { lifecycle: "DELETED", activeSection: false, archivedSection: true, canPauseResume: false, label: "Deleted" };
+  }
+  if (has("PAUSED", "PAUSE")) {
+    return {
+      lifecycle: "PAUSED", activeSection: true, archivedSection: false, canPauseResume: true,
+      label: has("IN_PROCESS") ? "Paused · Syncing" : "Paused",
+    };
+  }
+  return {
+    lifecycle: "ACTIVE", activeSection: true, archivedSection: false, canPauseResume: true,
+    label: has("IN_PROCESS") ? "Active · Syncing" : "Active",
+  };
+}
+
+// Thin wrapper so existing filter calls don't need changing.
 function isArchivedOrDeletedCreative(c) {
-  if (!c) return false;
-  const DEAD = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
-  const DEAD_ACTIONS = new Set(['delete', 'archive', 'archive_detected', 'delete_detected']);
-  return (
-    DEAD.has(String(c.status          || '')) ||
-    DEAD.has(String(c.uiStatus        || '')) ||
-    DEAD.has(String(c.configuredStatus || '')) ||
-    DEAD.has(String(c.effectiveStatus  || '')) ||
-    DEAD_ACTIONS.has(String(c.lastAction || ''))
-  );
+  const { archivedSection } = getCanonicalAdLifecycle(c);
+  return archivedSection;
 }
 
 // ─── Per-ad delivery status resolver ────────────────────────────────────────
@@ -6331,42 +6339,17 @@ const handlePerAdAction = async (metaAdId, action) => {
       return;
     }
 
-    // Resolve the status to show in the UI.
-    // Priority: uiStatus > configuredStatus > status > requestedStatus > action-based fallback.
-    // Do NOT use effectiveStatus alone — Meta returns "IN_PROCESS" during propagation and
-    // that would make the card appear Active immediately after a successful pause.
-    const actionFallback = action === "delete" ? "deleted" : action === "pause" ? "paused" : "active";
-    const resolvedUiStatus = (
-      j.uiStatus                                           ? j.uiStatus.toLowerCase()          :
-      (j.configuredStatus && j.configuredStatus !== "IN_PROCESS") ? j.configuredStatus.toLowerCase() :
-      (j.status          && j.status          !== "IN_PROCESS") ? j.status.toLowerCase()          :
-      j.requestedStatus                                    ? j.requestedStatus.toLowerCase()    :
-      actionFallback
-    );
+    // Canonical status contract — action drives the patch, not the response fields.
+    // This ensures the UI is immediately correct even if Meta returns IN_PROCESS or
+    // the response has unexpected field combinations.
+    const nowTs = new Date().toISOString();
+    const patch = action === "pause"
+      ? { status: "paused",   uiStatus: "PAUSED",   configuredStatus: "PAUSED",   effectiveStatus: j.effectiveStatus || "IN_PROCESS", lastAction: "pause",  lastActionAt: nowTs, isSyncing: false, error: null }
+      : action === "resume"
+      ? { status: "active",   uiStatus: "ACTIVE",   configuredStatus: "ACTIVE",   effectiveStatus: j.effectiveStatus || "IN_PROCESS", lastAction: "resume", lastActionAt: nowTs, isSyncing: false, error: null }
+      : { status: "archived", uiStatus: "ARCHIVED",  configuredStatus: "ARCHIVED",  effectiveStatus: "ARCHIVED",                        lastAction: "delete", lastActionAt: nowTs, isSyncing: false, error: null };
 
-    console.log("[PER_AD_ACTION_UI_STATUS_RESOLVE]", {
-      action,
-      adId:               metaAdId,
-      requestedStatus:    j.requestedStatus,
-      status:             j.status,
-      configuredStatus:   j.configuredStatus,
-      effectiveStatus:    j.effectiveStatus,
-      uiStatus:           j.uiStatus,
-      finalFrontendStatus: resolvedUiStatus,
-    });
-
-    // Build the canonical status patch for this ad.
-    const nowTs  = new Date().toISOString();
-    const patch  = {
-      status:           resolvedUiStatus,
-      configuredStatus: j.configuredStatus || resolvedUiStatus.toUpperCase(),
-      effectiveStatus:  j.effectiveStatus  || resolvedUiStatus.toUpperCase(),
-      uiStatus:         j.uiStatus         || resolvedUiStatus.toUpperCase(),
-      lastAction:       action,
-      lastActionAt:     nowTs,
-      isSyncing:        false,
-      error:            null,
-    };
+    console.log("[PER_AD_ACTION_UI_STATUS_RESOLVE]", { action, adId: metaAdId, patch });
 
     // 1a. Update adStatusById immediately — this is read by isArchivedOrDeletedCreative via
     // the merged-override path in both render sections (Creatives tab + CreativeABTestPanel).
@@ -6480,18 +6463,13 @@ const handleAdDeliveryToggle = async (creative) => {
       return;
     }
 
-    // Resolve final status — uiStatus > configuredStatus > status > requestedStatus > optimistic fallback.
-    const finalUi  = j.uiStatus || j.configuredStatus || j.status || optimisticStatus;
-    const finalState = {
-      uiStatus:         String(finalUi).toUpperCase(),
-      configuredStatus: String(j.configuredStatus || finalUi).toUpperCase(),
-      status:           String(j.status           || finalUi).toLowerCase(),
-      effectiveStatus:  String(j.effectiveStatus  || "").toUpperCase() || undefined,
-      lastAction:       action,
-      lastActionAt:     new Date().toISOString(),
-      isSyncing:        String(j.effectiveStatus || "").toUpperCase() === "IN_PROCESS",
-      error:            null,
-    };
+    // Apply canonical status contract for each action — never guess from effectiveStatus.
+    const nowTs2 = new Date().toISOString();
+    const finalState = action === "pause"
+      ? { status: "paused",   uiStatus: "PAUSED",  configuredStatus: "PAUSED",  effectiveStatus: j.effectiveStatus || "IN_PROCESS", lastAction: "pause",  lastActionAt: nowTs2, isSyncing: (j.effectiveStatus || "").toUpperCase() === "IN_PROCESS", error: null }
+      : action === "resume"
+      ? { status: "active",   uiStatus: "ACTIVE",  configuredStatus: "ACTIVE",  effectiveStatus: j.effectiveStatus || "IN_PROCESS", lastAction: "resume", lastActionAt: nowTs2, isSyncing: (j.effectiveStatus || "").toUpperCase() === "IN_PROCESS", error: null }
+      : { status: "archived", uiStatus: "ARCHIVED", configuredStatus: "ARCHIVED", effectiveStatus: "ARCHIVED",                       lastAction: "delete", lastActionAt: nowTs2, isSyncing: false, error: null };
     setAdStatusById((prev) => ({ ...prev, [metaAdId]: finalState }));
     // Write final status into campaignCreativesMap so a reload doesn't revert the card
     _patchCreativeMap({ status: finalState.status, uiStatus: finalState.uiStatus, configuredStatus: finalState.configuredStatus, effectiveStatus: finalState.effectiveStatus, lastAction: action, lastActionAt: finalState.lastActionAt });
@@ -9668,9 +9646,12 @@ ${pendingTest ? `
                           )}
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {visibleSet.map((c, idx) => {
-                              const ds = resolveCreativeDeliveryStatus(c, adStatusById);
-                              const { isPaused, label, isUpdating, error } = ds;
-                              const isDeleted  = String(c.status || "").toLowerCase() === "deleted";
+                              // c already has adStatusById merged above — getCanonicalAdLifecycle is authoritative.
+                              const lc         = getCanonicalAdLifecycle(c);
+                              const isPaused   = lc.lifecycle === "PAUSED";
+                              const label      = lc.label;
+                              const isUpdating = !!(adStatusById[c.metaAdId]?.isSyncing);
+                              const error      = adStatusById[c.metaAdId]?.error || null;
                               const isExpanded = expandedCreativeCardIdx === idx;
                               const statusColor = isPaused ? "#b45309" : "#15803d";
                               const statusBg    = isPaused ? "#fef3c7" : "#dcfce7";
