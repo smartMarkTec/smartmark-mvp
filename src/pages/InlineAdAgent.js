@@ -272,6 +272,7 @@ export default function InlineAdAgent({
   onSetBudget,
   onSetCampaignName,
   onRefreshCampaigns,
+  onChallengerDraftsCreated,
 }) {
   const clientRef = useRef(adminClientInfo);
   useEffect(() => { clientRef.current = adminClientInfo; }, [adminClientInfo]);
@@ -834,17 +835,20 @@ export default function InlineAdAgent({
         ...(j?.proposalAction  && { proposalAction:  j.proposalAction }),
       });
 
-      // After draft creation: refresh campaigns so Creatives tab picks up pendingChallengerDrafts
-      if (j?.eventType === "challenger_drafts_created" && j?.draftCount > 0) {
+      // After draft creation: immediately inject drafts into parent state so the
+      // Creatives tab shows them without waiting for a refresh round-trip.
+      if (j?.eventType === "challenger_drafts_created" && Array.isArray(j?.drafts) && j.drafts.length > 0) {
         console.log("[DRAFTS_REFRESH_AFTER_CREATE]", {
-          campaignId:      j.campaignId,
-          draftCount:      j.draftCount,
+          campaignId:       j.campaignId,
+          draftCount:       j.draftCount,
           hasPendingDrafts: true,
         });
-        // Refresh parent campaign data after a brief delay so the DB write completes
-        setTimeout(() => {
-          if (onRefreshCampaigns) onRefreshCampaigns();
-        }, 800);
+        if (onChallengerDraftsCreated) {
+          onChallengerDraftsCreated(j.campaignId, j.drafts);
+        } else if (onRefreshCampaigns) {
+          // Fallback: refresh if the direct injection prop isn't wired yet
+          setTimeout(() => onRefreshCampaigns(), 800);
+        }
       }
 
       // Only auto-switch to Creatives when explicitly requested

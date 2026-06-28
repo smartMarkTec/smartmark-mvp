@@ -1272,14 +1272,20 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
       if (draftResult2?.ok && Array.isArray(draftResult2.drafts)) {
         const d = draftResult2.drafts;
+        console.log('[CHALLENGER_DRAFTS_RESPONSE_TO_FRONTEND]', {
+          campaignId:  cmpId2,
+          draftCount:  d.length,
+          drafts:      d.map((dr) => ({ id: dr.id, name: dr.name, testType: dr.testType, hasImage: !!dr.imageUrl })),
+        });
         return res.json({
           ok:             true,
           eventType:      'challenger_drafts_created',
           draftsCreated:  true,
           draftCount:     d.length,
           campaignId:     cmpId2,
+          drafts:         d,  // required for immediate frontend state injection
           openCreativesTab: false,
-          reply: `I created ${d.length} draft ad${d.length !== 1 ? 's' : ''} for review.\nYou can view them in this campaign's Creatives tab under **Drafts pending review**.`,
+          reply:          `I created ${d.length} draft ad${d.length !== 1 ? 's' : ''} for review.`,
         });
       }
 

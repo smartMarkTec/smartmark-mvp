@@ -9708,68 +9708,68 @@ ${pendingTest ? `
                     )}
                     {/* ── AI Agent Challenger Drafts pending review ── */}
                     {!isDraftView && (() => {
-                      const _draftList = Array.isArray(selectedCampaignCreatives?.pendingChallengerDrafts) ? selectedCampaignCreatives.pendingChallengerDrafts : [];
-                      console.log("[DRAFTS_UI_RENDER_CHECK]", {
-                        selectedCampaignId,
-                        draftCount: _draftList.length,
-                        pendingChallengerDrafts: _draftList,
-                      });
+                      const _dl = Array.isArray(selectedCampaignCreatives?.pendingChallengerDrafts) ? selectedCampaignCreatives.pendingChallengerDrafts : [];
+                      console.log("[DRAFTS_RENDERING_IN_CREATIVES]", { selectedCampaignId, draftCount: _dl.length });
                       return null;
                     })()}
                     {!isDraftView && Array.isArray(selectedCampaignCreatives?.pendingChallengerDrafts) && selectedCampaignCreatives.pendingChallengerDrafts.length > 0 && (
                       <div style={{ width: "100%", marginTop: 16 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                          <div style={{ fontWeight: 800, fontSize: 13, color: "#7c3aed" }}>
-                            Drafts pending review
-                          </div>
+                          <div style={{ fontWeight: 800, fontSize: 13, color: "#7c3aed" }}>Drafts pending review</div>
                           <span style={{ background: "#ede9fe", color: "#7c3aed", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "2px 8px" }}>
                             {selectedCampaignCreatives.pendingChallengerDrafts.length}
                           </span>
-                          <span style={{ fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>
-                            Not yet on Meta · review before publishing
-                          </span>
+                          <span style={{ fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>Not yet on Meta · review before publishing</span>
                         </div>
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          {selectedCampaignCreatives.pendingChallengerDrafts.map((draft, di) => (
-                            <div
-                              key={draft.id || `draft-${di}`}
-                              style={{
-                                flex: "1 1 200px", minWidth: 180, maxWidth: 300,
-                                background: "#faf5ff", border: "1.5px solid #c4b5fd",
-                                borderRadius: 14, padding: "12px 14px",
-                                display: "flex", flexDirection: "column", gap: 6,
-                              }}
-                            >
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                <span style={{ background: "#ede9fe", color: "#7c3aed", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
-                                  {draft.name}
-                                </span>
-                                <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: 4, padding: "1px 6px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>
-                                  Draft
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                                Test: <strong>{draft.testType}</strong> · Changes: <strong>{(draft.changes || []).join(", ")}</strong>
-                              </div>
-                              {draft.imageUrl && (
-                                <a href={toAbsoluteMedia(draft.imageUrl)} target="_blank" rel="noreferrer"
-                                  style={{ fontSize: 10, color: "#7c3aed", textDecoration: "underline" }}>
-                                  View image ↗
-                                </a>
-                              )}
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>
-                                {draft.headline}
-                              </div>
-                              {draft.body && (
-                                <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
-                                  {(draft.body || "").slice(0, 80)}{draft.body.length > 80 ? "…" : ""}
+                          {selectedCampaignCreatives.pendingChallengerDrafts.map((draft, di) => {
+                            const imgSrc = draft.imageUrl ? toAbsoluteMedia(draft.imageUrl) : null;
+                            return (
+                              <div
+                                key={draft.id || `draft-${di}`}
+                                style={{
+                                  flex: "1 1 200px", minWidth: 180, maxWidth: 300,
+                                  background: "#faf5ff", border: "1.5px solid #c4b5fd",
+                                  borderRadius: 14, padding: "12px 14px",
+                                  display: "flex", flexDirection: "column", gap: 6,
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ background: "#ede9fe", color: "#7c3aed", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                                    {draft.name}
+                                  </span>
+                                  <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: 4, padding: "1px 6px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>
+                                    Draft
+                                  </span>
                                 </div>
-                              )}
-                              <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                                CTA: {draft.cta || "—"} · <a href={draft.link} target="_blank" rel="noreferrer" style={{ color: "#7c3aed" }}>Landing page ↗</a>
+                                <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                                  Test: <strong>{draft.testType}</strong> · Changes: <strong>{(draft.changes || []).join(", ")}</strong>
+                                </div>
+                                {imgSrc ? (
+                                  <img
+                                    src={imgSrc}
+                                    alt={draft.name}
+                                    style={{ width: "100%", borderRadius: 8, aspectRatio: "1.9/1", objectFit: "cover", border: "1px solid #e9d5ff" }}
+                                    onError={(e) => { e.target.style.display = "none"; e.target.nextSibling && (e.target.nextSibling.style.display = "block"); }}
+                                  />
+                                ) : (
+                                  <div style={{ fontSize: 10, color: "#b91c1c", background: "#fef2f2", borderRadius: 6, padding: "6px 8px" }}>
+                                    Image missing — regenerate required before publishing
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>{draft.headline}</div>
+                                {draft.body && (
+                                  <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+                                    {(draft.body || "").slice(0, 100)}{(draft.body || "").length > 100 ? "…" : ""}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                                  CTA: {draft.cta || "—"}
+                                  {draft.link && <> · <a href={draft.link} target="_blank" rel="noreferrer" style={{ color: "#7c3aed" }}>Landing page ↗</a></>}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                         <div style={{ marginTop: 10, fontSize: 11, color: "#7c3aed", fontStyle: "italic" }}>
                           Tell the AI Agent "approve the drafts" to publish them to Meta.
@@ -12197,6 +12197,25 @@ ${pendingTest ? `
           setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId
         );
       }
+    }}
+    onChallengerDraftsCreated={(campaignId, drafts) => {
+      console.log("[CHALLENGER_DRAFTS_INJECTED_FRONTEND]", {
+        campaignId,
+        draftCount: drafts?.length || 0,
+      });
+      // Immediately inject drafts into campaignCreativesMap so the Creatives tab
+      // shows them without waiting for a refresh round-trip.
+      setCampaignCreativesMap((prev) => ({
+        ...prev,
+        [campaignId]: {
+          ...(prev[campaignId] || {}),
+          pendingChallengerDrafts: Array.isArray(drafts) ? drafts : [],
+        },
+      }));
+      // Ensure the correct campaign is selected and switch to Creatives tab
+      setSelectedCampaignId(campaignId);
+      setExpandedId(campaignId);
+      setSetupTab("creatives");
     }}
   />
 )}
