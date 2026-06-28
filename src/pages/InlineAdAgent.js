@@ -806,6 +806,16 @@ export default function InlineAdAgent({
     setSending(true);
     try {
       const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      // Show "Generating…" interim message for A/B test creation — user sees progress
+      const _looksLikeABTest =
+        /\b(create|make|build|generate)\b/i.test(txt) &&
+        /\b(a\/b|ab\s*test|challenger)\b/i.test(txt) &&
+        /\b\d{10,}\b/.test(txt);
+      if (_looksLikeABTest) {
+        push({ role: "assistant", content: "Generating A/B test previews…", _generating: true });
+        scroll();
+      }
+
       // Always send selectedCampaignId — use prop value if valid, otherwise null
       const activeCampaignId = selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? selectedCampaignId : null;
       const payload = {
@@ -843,23 +853,28 @@ export default function InlineAdAgent({
           controlAdId:  j.controlAdId,
           previewCount: j.previews.length,
         });
-        // Replace the plain text message with a preview-card message
+        // Replace the "Generating…" interim message (or last assistant msg) with the preview card
         setMsgs((prev) => {
           const updated = [...prev];
-          // The last message is the plain assistant text — upgrade it to a preview card
-          if (updated.length > 0 && updated[updated.length - 1].role === "assistant") {
-            updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              type:       "ab_test_preview",
-              campaignId: j.campaignId,
-              controlAdId: j.controlAdId,
-              previews:   j.previews,
-            };
+          // Find the most recent generating/assistant message and upgrade it
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === "assistant") {
+              updated[i] = {
+                ...updated[i],
+                content:     j.reply || `I generated ${j.previews.length} A/B test preview${j.previews.length !== 1 ? "s" : ""}.`,
+                type:        "ab_test_preview",
+                campaignId:  j.campaignId,
+                controlAdId: j.controlAdId,
+                previews:    j.previews,
+                _generating: false,
+              };
+              break;
+            }
           }
           return updated;
         });
-        // DO NOT call onChallengerDraftsCreated — user must approve previews first
-        // DO NOT switch tab
+        // DO NOT call onChallengerDraftsCreated — user must approve first
+        // DO NOT switch tab — stay in AI Agent for review
         scroll();
         return;
       }
@@ -882,25 +897,49 @@ export default function InlineAdAgent({
 
   const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
-  /* ─── A/B preview card approve helper ──────────────────────────────── */
+  /* ─── A/B preview card approve + publish helper ─────────────────────── */
+  // Clicking "Approve & Publish" immediately creates the real Meta ads.
   async function handleApproveAbPreviews(campaignId, previews, msgKey) {
     const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
     const _adminClientId = adminClientId || (localStorage.getItem("sm_admin_target_client_id") || "").trim();
-    const r = await fetch("/api/campaign-context/approve-challenger-previews", {
+
+    // Validate no image-failed previews before attempting
+    const hasFailedImage = previews.some((p) => p.imageFailed || (!p.imageUrl && p.testType === "image"));
+    if (hasFailedImage) {
+      push({ role: "assistant", content: "Cannot publish — one or more challengers has a missing image. Please regenerate before publishing." });
+      scroll();
+      return;
+    }
+
+    // Mark as publishing (disable button)
+    setMsgs((prev) => prev.map((msg) => msg._k === msgKey ? { ...msg, publishing: true } : msg));
+    push({ role: "assistant", content: "Publishing A/B test ads to Meta…" });
+    scroll();
+
+    console.log("[AB_TEST_APPROVED_BY_USER]", { campaignId, previewCount: previews.length });
+
+    const r = await fetch("/api/campaign-context/publish-ab-previews", {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
       body: JSON.stringify({ campaignId, previews, adminClientId: _adminClientId }),
     }).catch(() => null);
     const result = r ? await r.json().catch(() => ({})) : {};
-    console.log("[AB_TEST_PREVIEWS_APPROVED_AS_DRAFTS]", { campaignId, draftCount: previews.length, ok: result.ok });
-    if (result.ok) {
-      // Mark the preview message as approved (hide approve button)
-      setMsgs((prev) => prev.map((msg) => msg._k === msgKey ? { ...msg, approved: true } : msg));
-      // Inject into parent so Creatives tab can show them
-      if (onChallengerDraftsCreated) onChallengerDraftsCreated(campaignId, previews);
-      push({ role: "assistant", content: `Great — these A/B test drafts are saved and ready for launch.\nTell me **"publish the drafts"** when you want to create the real ads on Meta.` });
+
+    if (result.ok && Array.isArray(result.createdAds) && result.createdAds.length > 0) {
+      console.log("[AB_TEST_META_ADS_CREATED]", { campaignId, adIds: result.createdAds.map((a) => a.metaAdId) });
+      // Mark preview message as done
+      setMsgs((prev) => prev.map((msg) => msg._k === msgKey ? { ...msg, approved: true, publishing: false } : msg));
+      // Inject new active ads into parent campaignCreativesMap
+      if (onChallengerDraftsCreated) {
+        onChallengerDraftsCreated(campaignId, result.createdAds);
+        console.log("[AB_TEST_CREATIVES_UPDATED_ACTIVE]", { campaignId, adCount: result.createdAds.length });
+      }
+      push({ role: "assistant", content: result.reply || `Approved. I created ${result.createdAds.length} active A/B test ads.` });
+      // Switch to Creatives tab so the user can see the new active ads
+      if (onGoToCreatives) setTimeout(() => onGoToCreatives(), 800);
     } else {
-      push({ role: "assistant", content: `Could not save drafts: ${result.error || "unknown error"}` });
+      setMsgs((prev) => prev.map((msg) => msg._k === msgKey ? { ...msg, publishing: false } : msg));
+      push({ role: "assistant", content: `Could not publish: ${result.error || "unknown error"}` });
     }
     scroll();
   }
@@ -977,20 +1016,23 @@ export default function InlineAdAgent({
           {!m.approved && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button
+                disabled={!!m.publishing}
                 onClick={() => handleApproveAbPreviews(m.campaignId, m.previews, m._k)}
                 style={{
-                  background: "#7c3aed", color: "#fff", border: "none",
+                  background: m.publishing ? "#a78bfa" : "#7c3aed", color: "#fff", border: "none",
                   borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700,
-                  cursor: "pointer",
+                  cursor: m.publishing ? "not-allowed" : "pointer", opacity: m.publishing ? 0.7 : 1,
                 }}
               >
-                Approve &amp; Save as Drafts
+                {m.publishing ? "Publishing to Meta…" : "Approve & Publish to Meta"}
               </button>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>or type "publish the drafts" to send to Meta</span>
+              {!m.publishing && (
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>Creates real ads in the existing ad set</span>
+              )}
             </div>
           )}
           {m.approved && (
-            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>✓ Saved as drafts — ready for launch</div>
+            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>✓ Published — new ads are now active on Meta</div>
           )}
         </div>
       );

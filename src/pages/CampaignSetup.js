@@ -12198,21 +12198,25 @@ ${pendingTest ? `
         );
       }
     }}
-    onChallengerDraftsCreated={(campaignId, drafts) => {
-      console.log("[CHALLENGER_DRAFTS_INJECTED_FRONTEND]", {
+    onChallengerDraftsCreated={(campaignId, newAds) => {
+      console.log("[AB_TEST_CREATIVES_UPDATED_ACTIVE]", {
         campaignId,
-        draftCount: drafts?.length || 0,
+        adCount: newAds?.length || 0,
       });
-      // Inject drafts into campaignCreativesMap so Creatives tab shows them.
-      // Do NOT auto-switch to Creatives — user stays in AI Agent to review.
-      setCampaignCreativesMap((prev) => ({
-        ...prev,
-        [campaignId]: {
-          ...(prev[campaignId] || {}),
-          pendingChallengerDrafts: Array.isArray(drafts) ? drafts : [],
-        },
-      }));
-      // Set the correct campaign without switching tab
+      // Inject the newly published ads into launchedCreativeSet as active ads
+      setCampaignCreativesMap((prev) => {
+        const existing = prev[campaignId] || {};
+        const existingSet = Array.isArray(existing.launchedCreativeSet) ? existing.launchedCreativeSet : [];
+        return {
+          ...prev,
+          [campaignId]: {
+            ...existing,
+            launchedCreativeSet:     [...existingSet, ...(Array.isArray(newAds) ? newAds : [])],
+            pendingChallengerDrafts: [], // clear pending drafts — they're now live
+          },
+        };
+      });
+      // Ensure correct campaign is selected
       setSelectedCampaignId(campaignId);
       setExpandedId(campaignId);
     }}

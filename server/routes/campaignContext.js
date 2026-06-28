@@ -594,9 +594,9 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const userToken = getFbUserToken(clientOwnerKey);
   if (!userToken) throw new Error(`No Facebook token found for ${clientOwnerKey}. Please reconnect the client's Facebook account.`);
 
-  console.log('[CHALLENGER_DRAFT_START]', { controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
+  console.log('[AB_TEST_PREVIEW_GENERATING]', { controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
 
-  // Fetch control ad details from Meta (read-only GET — no side effects)
+  // Fetch control ad from Meta (read-only)
   const controlRes = await axios.get(
     `https://graph.facebook.com/${META_API_VERSION}/${controlAdId}`,
     {
@@ -622,19 +622,61 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const controlLink     = String(linkData.link    || '').trim();
   const controlImageUrl = String(creative.thumbnail_url || '').trim();
 
-  console.log('[CHALLENGER_CONTROL_FETCHED_READONLY]', {
-    adsetId, campaignId, creativeId: creative.id, pageId,
-    headline: controlHeadline.slice(0, 60),
-  });
+  // Set up storage for generated images
+  const fs   = require('fs');
+  const path = require('path');
+  const generatedDir = process.env.GENERATED_DIR ||
+    (process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated'));
+  const renderBase = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  try { fs.mkdirSync(generatedDir, { recursive: true }); } catch {}
 
-  // Build draft preview objects — no Meta API writes happen here
   const nowIso = new Date().toISOString();
-  const drafts = challengers.map((challenger, i) => {
+  const drafts = [];
+
+  for (let i = 0; i < challengers.length; i++) {
+    const challenger = challengers[i];
     const isHeadline = challenger.testType === 'headline';
-    return {
-      id:             `draft-${Date.now()}-${i}`,
+    let imageUrl       = controlImageUrl; // relative URL for frontend display
+    let imagePublicUrl = controlImageUrl; // absolute URL for Meta upload
+    let imageFailed    = false;
+
+    if (!isHeadline) {
+      // Image challenger: generate with OpenAI — never use Pexels or hardcoded stock
+      const imagePrompt =
+        'Photorealistic HVAC air conditioning service photograph. Outdoor residential AC ' +
+        'condenser unit on a bright sunny day. Clean suburban home exterior in background. ' +
+        'Professional, trustworthy, local service feel. No people visible. ' +
+        'No text overlay, no logos, no branding, no fake phone numbers. High quality photo.';
+      try {
+        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name });
+        const openaiKey = process.env.OPENAI_API_KEY;
+        if (!openaiKey) throw new Error('OPENAI_API_KEY not configured');
+        const openaiRes = await axios.post(
+          'https://api.openai.com/v1/images/generations',
+          { model: 'gpt-image-1.5', prompt: imagePrompt, size: '1024x1024', quality: 'standard', output_format: 'png', n: 1 },
+          { headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
+        );
+        const b64 = openaiRes.data?.data?.[0]?.b64_json;
+        if (!b64) throw new Error('OpenAI returned no image data');
+        const buf      = Buffer.from(b64, 'base64');
+        const fname    = `ab-img-${nanoid(10)}.png`;
+        const fpath    = path.join(generatedDir, fname);
+        fs.writeFileSync(fpath, buf);
+        imageUrl       = `/api/media/${fname}`;
+        imagePublicUrl = renderBase ? `${renderBase}/api/media/${fname}` : imageUrl;
+        console.log('[OPENAI_IMAGE_GENERATION_SUCCESS]', { filename: fname, bytes: buf.length });
+      } catch (imgErr) {
+        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', imgErr?.message);
+        imageFailed    = true;
+        imageUrl       = ''; // signals frontend: image generation failed
+        imagePublicUrl = '';
+      }
+    }
+
+    drafts.push({
+      id:             `preview-${Date.now()}-${i}`,
       status:         'draft',
-      publishStatus:  'needs_review',
+      publishStatus:  imageFailed ? 'image_generation_failed' : 'needs_review',
       source:         'ai_agent',
       controlAdId,
       campaignId,
@@ -647,15 +689,18 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
       body:           controlBody,
       cta:            controlCta,
       link:           controlLink,
-      imageUrl:       isHeadline ? controlImageUrl : (challenger.imageUrl || controlImageUrl),
+      imageUrl,
+      imagePublicUrl,
+      imageFailed,
       changes:        isHeadline ? ['headline'] : ['image'],
       controlHeadline,
       controlImageUrl,
+      linkDataJson:   JSON.stringify(linkData), // stored for direct Meta creation
       createdAt:      nowIso,
-    };
-  });
+    });
+  }
 
-  // Save drafts to DB under campaign_creatives.pendingChallengerDrafts
+  // Save previews to DB
   await db.read();
   const recIdx = (db.data.campaign_creatives || []).findIndex(
     (r) => String(r.campaignId || '').trim() === String(campaignId || '').trim()
@@ -665,7 +710,7 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
     await db.write();
   }
 
-  console.log('[CHALLENGER_DRAFTS_SAVED]', { campaignId, draftCount: drafts.length });
+  console.log('[AB_TEST_PREVIEWS_READY]', { campaignId, draftCount: drafts.length });
   return { drafts, adsetId, pageId, controlHeadline, controlBody, controlCta, controlLink, controlImageUrl };
 }
 
@@ -1297,6 +1342,87 @@ router.post('/campaign-context/publish-challenger-drafts', async (req, res) => {
   } catch (err) {
     console.error('[publish-challenger-drafts]', err?.message);
     return res.status(500).json({ ok: false, error: err?.message || 'Failed to publish challenger drafts.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/publish-ab-previews
+// Step 3: user approved the AI Agent preview cards. Create real Meta ads now.
+// Takes preview objects directly — no extra DB round-trip needed.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/publish-ab-previews', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId, previews, adminClientId: adminClientIdFromBody } = req.body || {};
+    if (!campaignId || !Array.isArray(previews) || previews.length === 0) {
+      return res.status(400).json({ ok: false, error: 'campaignId and previews[] are required.' });
+    }
+
+    const clientOwnerKey = adminClientIdFromBody && isAdminOwnerKey(ownerKey)
+      ? `user:${adminClientIdFromBody}`
+      : ownerKey;
+
+    // Validate no image-failed drafts are being published
+    const failedImages = previews.filter((p) => p.imageFailed || (!p.imageUrl && p.testType === 'image'));
+    if (failedImages.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: `Cannot publish: ${failedImages.map((p) => p.name).join(', ')} has missing image. Regenerate before publishing.`,
+      });
+    }
+
+    const { controlAdId, accountId } = previews[0] || {};
+    if (!controlAdId || !accountId) {
+      return res.status(400).json({ ok: false, error: 'Preview is missing controlAdId or accountId.' });
+    }
+
+    // Build challengers from preview data for createChallengerAds
+    const challengers = previews.map((p) => ({
+      testType:  p.testType,
+      name:      p.name,
+      headline:  p.headline,
+      // For image test: use the publicly accessible URL so Meta can fetch it
+      imageUrl:  p.testType === 'image' ? (p.imagePublicUrl || p.imageUrl) : undefined,
+    }));
+
+    console.log('[AB_TEST_APPROVED_BY_USER]', { campaignId, clientOwnerKey, challengerCount: challengers.length });
+
+    let createdAds;
+    try {
+      createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+    } catch (createErr) {
+      console.error('[AB_TEST_META_CREATE_FAILED]', createErr?.message);
+      return res.status(500).json({
+        ok: false,
+        error: createErr?.message || 'Ad creation failed before Meta returned real ad IDs.',
+      });
+    }
+
+    // Clear pending drafts and confirm active ads in DB
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === campaignId
+    );
+    if (recIdx >= 0) {
+      db.data.campaign_creatives[recIdx].pendingChallengerDrafts = [];
+      await db.write();
+    }
+
+    console.log('[AB_TEST_META_ADS_CREATED]', { campaignId, createdAds: createdAds.map((a) => ({ name: a.angleLabel, metaAdId: a.metaAdId })) });
+
+    const adList = createdAds.map((a) => `\`${a.metaAdId}\``).join(', ');
+    return res.json({
+      ok:          true,
+      createdAds:  createdAds.map((a) => ({ ...a, status: 'active', uiStatus: 'ACTIVE' })),
+      campaignId,
+      reply:       `Approved. I created ${createdAds.length} active A/B test ads.\nAd IDs: ${adList}`,
+    });
+  } catch (err) {
+    console.error('[publish-ab-previews]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to publish A/B test ads.' });
   }
 });
 
