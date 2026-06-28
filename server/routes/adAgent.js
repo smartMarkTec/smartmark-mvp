@@ -111,6 +111,25 @@ function isCreateSpecificChallengersIntent(message) {
          (hasControlAdRef && /(create|make|build|launch|run)/i.test(s));
 }
 
+// ── Hard action router — runs BEFORE any performance/strategy/OpenAI logic ────
+// Detects explicit execution commands so they never fall through to OpenAI.
+function detectAdAgentActionIntent(message) {
+  const s = String(message || '');
+
+  const hasCreateVerb    = /\b(create|make|build|generate|launch|add)\b/i.test(s);
+  const hasChallenger    = /\b(challenger|test\s*ad|ad\s*variation|variant|headline-only|image-only|a\/b|ab\s*test)\b/i.test(s);
+  const hasControlAd     = /\bcontrol\s*ad\b/i.test(s) || /\busing\s*ad\b/i.test(s) || /\bad\s*id\b/i.test(s);
+  const hasMetaAdId      = /\b\d{10,}\b/.test(s);
+  const hasHeadlineOnly  = /headline-only|headline\s*only|change\s*only\s*the\s*headline|change\s*headline\s*only/i.test(s);
+  const hasImageOnly     = /image-only|image\s*only|change\s*only\s*the\s*image|change\s*image\s*only/i.test(s);
+
+  if (hasCreateVerb && hasChallenger && (hasControlAd || hasMetaAdId || hasHeadlineOnly || hasImageOnly)) {
+    return { intent: 'execute_action', actionType: 'create_challenger_ads' };
+  }
+
+  return { intent: 'chat' };
+}
+
 // Parses challenger details directly from the user's message text.
 // Extracts controlAdId, headline, and challenger names so the proposal can be
 // fully populated without requiring a structured form input.
@@ -1113,6 +1132,123 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       ? String(selectedCampaignId).trim()
       : null;
 
+    // ── HARD ACTION ROUTER — runs before EVERY other branch ─────────────────
+    // detectAdAgentActionIntent must run first so explicit execution commands
+    // never fall through to performance context injection or the OpenAI call.
+    const routedIntent = detectAdAgentActionIntent(trimmed);
+
+    console.log('[AD_AGENT_ROUTE_TRACE_START]', {
+      selectedCampaignId,
+      adminClientId: req.body?.adminClientId || req.query?.adminClientId || null,
+      effectiveOwnerKey,
+      intent:     routedIntent.intent,
+      actionType: routedIntent.actionType || null,
+      message:    trimmed.slice(0, 300),
+    });
+
+    if (routedIntent.actionType === 'create_challenger_ads') {
+      // Do not call OpenAI. Do not return performance advice. Create proposal and return approval.
+      const parsed2        = parseChallengerRequest(trimmed);
+      const parsedCtrlId   = parsed2.controlAdId;
+
+      console.log('[AD_AGENT_INTENT_DETECTED]', {
+        intent:       routedIntent.intent,
+        actionType:   routedIntent.actionType,
+        controlAdId:  parsedCtrlId,
+        campaignId:   safeCampaignId,
+        clientId:     effectiveOwnerKey,
+      });
+
+      const challengerToken2 = getFbUserToken(effectiveOwnerKey);
+      if (!challengerToken2) {
+        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_token', message: trimmed.slice(0, 300) });
+        return res.json({ ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' });
+      }
+
+      await db.read();
+      const DEAD3 = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+      let cRec2 = safeCampaignId
+        ? (db.data.campaign_creatives || []).find((r) => String(r.campaignId || '').trim() === safeCampaignId)
+        : null;
+      if (!cRec2 && parsedCtrlId) {
+        cRec2 = (db.data.campaign_creatives || []).find((r) =>
+          Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((a) => a.metaAdId === parsedCtrlId)
+        );
+      }
+
+      const acctId2  = String(cRec2?.accountId || '').replace(/^act_/, '').trim();
+      const cmpId2   = String(cRec2?.campaignId || safeCampaignId || '').trim();
+      const ctrlId2  = parsedCtrlId || String(
+        (cRec2?.launchedCreativeSet || []).find((a) => !DEAD3.has(String(a.status || '')))?.metaAdId || ''
+      ).trim();
+
+      if (!ctrlId2) {
+        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_control_id', message: trimmed.slice(0, 300) });
+        return res.json({ ok: true, reply: 'I could not identify a control ad ID. Please include it in your request (e.g., "using control ad 52543256381288") or select the campaign first.' });
+      }
+      if (!acctId2) {
+        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_account_id', message: trimmed.slice(0, 300) });
+        return res.json({ ok: true, reply: 'Could not find the ad account ID. Please select the campaign in the Campaigns tab and try again.' });
+      }
+
+      const hlName2  = parsed2.headlineName;
+      const imgName2 = parsed2.imageName;
+      const hl2      = parsed2.headline || '$75 AC Tune-Up Before Houston Heat Gets Worse';
+
+      const challengers2 = [
+        { testType: 'headline', name: hlName2, headline: hl2 },
+        { testType: 'image',   name: imgName2, imageUrl: 'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg' },
+      ];
+
+      const payload2 = {
+        ownerKey:    effectiveOwnerKey,
+        campaignId:  cmpId2,
+        controlAdId: ctrlId2,
+        accountId:   acctId2,
+        challengers: challengers2,
+        safety: { doNotCreateCampaign: true, doNotCreateAdSet: true, doNotChangeBudget: true, doNotChangeTargeting: true, doNotTouchArchivedAds: true },
+      };
+
+      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', { actionType: 'create_challenger_ads', payload: payload2 });
+
+      const prop2 = await createActionProposal({
+        ownerKey:        effectiveOwnerKey,
+        campaignId:      cmpId2,
+        actionType:      'create_challenger_ads',
+        title:           `Create 2 challenger ads (control: ${ctrlId2})`,
+        reasoning:       `User explicitly requested 2 challenger ads using control ad ${ctrlId2}. No new campaign or ad set. Same budget and targeting.`,
+        proposedChanges: payload2,
+        riskLevel:       'medium',
+      }).catch((e) => { console.error('[AdAgent] proposal create error:', e?.message); return null; });
+
+      const summaryLines2 = [
+        `**Control ad:** \`${ctrlId2}\``,
+        '',
+        `**1. ${hlName2}**`,
+        `   - Change headline only to: *${hl2}*`,
+        `   - Keep same image, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
+        '',
+        `**2. ${imgName2}**`,
+        `   - Change image only`,
+        `   - Keep same headline, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
+      ].join('\n');
+
+      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/proposal_created', proposalId: prop2?.id, message: trimmed.slice(0, 300) });
+
+      return res.json({
+        ok:              true,
+        proposalId:      prop2?.id || null,
+        proposalPending: true,
+        proposalTitle:   'Create 2 challenger ads',
+        proposalSummary: `Control: ${ctrlId2} | Headline: "${hl2}" | Image: HVAC visual`,
+        proposalAction:  'create_challenger_ads',
+        reply: prop2
+          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${ctrlId2}\`.\n\n${summaryLines2}\n\nArchived ads will not be touched.\n\nClick **Approve & Apply** to create them on Meta.`
+          : 'I could not queue the proposal. Please try again.',
+      });
+    }
+    // ── End hard action router ────────────────────────────────────────────────
+
     // Pixel CREATE intent — must be checked before general pixel intent
     if (isPixelCreateIntent(trimmed)) {
       if (access !== 'pixel') {
@@ -1462,6 +1598,8 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
           .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
           .slice(-8)
       : [];
+
+    console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'openai_generic', message: trimmed.slice(0, 300) });
 
     const campaignContext = await getCampaignContext(effectiveOwnerKey, safeCampaignId);
 
