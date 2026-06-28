@@ -475,6 +475,22 @@ export default function InlineAdAgent({
   /* ─── Intent detection ───────────────────────────────────────────────── */
   function detectIntent(txt) {
     const t = txt.toLowerCase().trim();
+
+    // ── Hard bypass for explicit action commands ───────────────────────────
+    // If the message contains a Meta ad ID (10+ digits), "control ad" reference,
+    // or explicit test-type language, it must NEVER be routed to respondWithStrategy().
+    // respondWithStrategy() replaces the user's text with a system prompt — wrong.
+    // These messages must fall through to the LLM path that sends message: txt directly.
+    if (
+      /\b\d{10,}\b/.test(t) ||          // long numeric Meta ad ID
+      /control\s*ad/i.test(t) ||         // "control ad"
+      /headline-only|image-only/i.test(t) ||  // "headline-only challenger"
+      /create.{0,50}challenger.*ad/i.test(t)  // "create ... challenger ads"
+    ) {
+      return { type: "llm" };
+    }
+    // ── End action command bypass ──────────────────────────────────────────
+
     const nm = t.match(/\b([1-4])\b/);
     const n  = nm ? parseInt(nm[1]) : null;
 
@@ -781,23 +797,41 @@ export default function InlineAdAgent({
       setPhase("done"); scroll(); return;
     }
 
-    // LLM fallback
+    // LLM fallback — sends the user's EXACT typed text to the backend.
+    // selectedCampaignId and adminClientId are included so the backend can
+    // route action commands (like create_challenger_ads) correctly.
     setSending(true);
     try {
       const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const payload = {
+        message: txt,
+        history: msgs.slice(-8).map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
+        ...(adminClientId ? { adminClientId } : {}),
+        ...(selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? { selectedCampaignId } : {}),
+      };
+      console.log("[AD_AGENT_FRONTEND_SEND]", {
+        userMessage:       txt,
+        messageBeingSent:  payload.message,
+        selectedCampaignId: payload.selectedCampaignId || null,
+        adminClientId:     payload.adminClientId || null,
+        historyCount:      payload.history?.length || 0,
+      });
       const r = await fetch("/api/ad-agent/chat", {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
-        body: JSON.stringify({
-          message: txt,
-          history: msgs.slice(-8).map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
-          ...(adminClientId ? { adminClientId } : {}),
-          ...(selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? { selectedCampaignId } : {}),
-        }),
+        body: JSON.stringify(payload),
       });
       const j = await r.json().catch(() => ({}));
-      push({ role: "assistant", content: j?.reply || "Something went wrong. Try again." });
-    } catch {
+      console.log("[AD_AGENT_FRONTEND_RESPONSE]", j);
+      push({ role: "assistant", content: j?.reply || "Something went wrong. Try again.",
+        ...(j?.proposalId      && { proposalId:      j.proposalId }),
+        ...(j?.proposalPending && { proposalPending: true }),
+        ...(j?.proposalTitle   && { proposalTitle:   j.proposalTitle }),
+        ...(j?.proposalSummary && { proposalSummary: j.proposalSummary }),
+        ...(j?.proposalAction  && { proposalAction:  j.proposalAction }),
+      });
+    } catch (e) {
+      console.error("[AD_AGENT_FRONTEND_ERROR]", e?.message);
       push({ role: "assistant", content: "Something went wrong. Try again." });
     } finally { setSending(false); scroll(); }
   }
