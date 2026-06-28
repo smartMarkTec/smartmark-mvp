@@ -158,30 +158,45 @@ function detectAdAgentActionIntent(message) {
 }
 
 // Parses challenger details directly from the user's message text.
-// Extracts controlAdId, headline, and challenger names so the proposal can be
-// fully populated without requiring a structured form input.
+// Uses strict line-by-line parsing to avoid capturing multi-line prompt text as a name.
 function parseChallengerRequest(message) {
-  // Control ad ID: "control ad 52543256381288", "using ad 52543256381288", bare 14-digit number
+  const raw   = String(message || '');
+  const lines = raw.split(/\r?\n/);
+
+  // Control ad ID: "control ad 52543256381288" or bare 14-digit number
   const controlIdMatch =
-    message.match(/control\s*ad\s*[:#\s]*(\d{8,})/i) ||
-    message.match(/using\s*(?:control\s*)?ad\s*[:#\s]*(\d{8,})/i) ||
-    message.match(/\b(\d{14,})\b/);
+    raw.match(/control\s*ad\s*[:#\s]*(\d{8,})/i) ||
+    raw.match(/using\s*(?:control\s*)?ad\s*[:#\s]*(\d{8,})/i) ||
+    raw.match(/\b(\d{14,})\b/);
   const controlAdId = controlIdMatch?.[1]?.trim() || null;
 
-  // Headline: "Headline: <text>" on its own line
-  const headlineMatch = message.match(/headline\s*[:#]\s*(.+?)(?:\n|$)/i);
-  const headline = headlineMatch?.[1]?.trim() || null;
+  // Headline: first line matching "Headline: <text>" — strictly single-line
+  let headline = null;
+  for (const line of lines) {
+    // Stop at end of line — never cross into next field
+    const m = line.match(/^\s*(?:new\s+)?headline\s*[:#–—]\s*(.{5,150})\s*$/i);
+    if (m) { headline = m[1].trim(); break; }
+  }
 
-  // Challenger names: "Name: Headline Test - ..." / "Name: Image Test - ..."
-  const headlineNameMatch =
-    message.match(/name\s*[:#]\s*(headline\s*test[^\n]*)/i) ||
-    message.match(/(headline\s*test\s*[-–—][^\n]+)/i);
-  const headlineName = headlineNameMatch?.[1]?.trim() || 'Headline Test Challenger';
-
-  const imageNameMatch =
-    message.match(/name\s*[:#]\s*(image\s*test[^\n]*)/i) ||
-    message.match(/(image\s*test\s*[-–—][^\n]+)/i);
-  const imageName = imageNameMatch?.[1]?.trim() || 'Image Test - HVAC Visual Challenger';
+  // Names: parse line-by-line with strict 80-char cap so stray prompt text can't bleed in
+  let headlineName = 'Headline Test Challenger';
+  let imageName    = 'Image Test - HVAC Visual Challenger';
+  for (const line of lines) {
+    // "Name: Headline Test - $75 Tune-Up Heat"  (stops at end-of-line)
+    const nameMatch = line.match(/^\s*name\s*[:#]\s*(.{3,80})\s*$/i);
+    if (nameMatch) {
+      const n = nameMatch[1].trim().slice(0, 80);
+      if (/\bheadline\b/i.test(n)) { headlineName = n; continue; }
+      if (/\bimage\b/i.test(n))    { imageName    = n; continue; }
+    }
+    // "1. Headline test — $75 AC Tune-Up Before Houston Heat Gets Worse"
+    const numMatch = line.match(/^\s*\d+[.)]\s*((?:headline|image)\s*test\s*[-–—][^,\n\r]{3,70})/i);
+    if (numMatch) {
+      const n = numMatch[1].trim().slice(0, 80);
+      if (/^headline/i.test(n)) headlineName = n;
+      else if (/^image/i.test(n)) imageName = n;
+    }
+  }
 
   return { controlAdId, headline, headlineName, imageName };
 }
@@ -1272,20 +1287,19 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
       if (draftResult2?.ok && Array.isArray(draftResult2.drafts)) {
         const d = draftResult2.drafts;
-        console.log('[CHALLENGER_DRAFTS_RESPONSE_TO_FRONTEND]', {
+        console.log('[AB_TEST_PREVIEWS_GENERATED]', {
           campaignId:  cmpId2,
-          draftCount:  d.length,
-          drafts:      d.map((dr) => ({ id: dr.id, name: dr.name, testType: dr.testType, hasImage: !!dr.imageUrl })),
+          controlAdId: ctrlId2,
+          previewCount: d.length,
+          previews:    d.map((dr) => ({ id: dr.id, name: dr.name, testType: dr.testType, hasImage: !!dr.imageUrl })),
         });
         return res.json({
-          ok:             true,
-          eventType:      'challenger_drafts_created',
-          draftsCreated:  true,
-          draftCount:     d.length,
-          campaignId:     cmpId2,
-          drafts:         d,  // required for immediate frontend state injection
-          openCreativesTab: false,
-          reply:          `I created ${d.length} draft ad${d.length !== 1 ? 's' : ''} for review.`,
+          ok:          true,
+          eventType:   'ab_test_previews_generated',
+          campaignId:  cmpId2,
+          controlAdId: ctrlId2,
+          previews:    d,
+          reply:       `I generated ${d.length} A/B test preview${d.length !== 1 ? 's' : ''}.`,
         });
       }
 

@@ -12203,8 +12203,8 @@ ${pendingTest ? `
         campaignId,
         draftCount: drafts?.length || 0,
       });
-      // Immediately inject drafts into campaignCreativesMap so the Creatives tab
-      // shows them without waiting for a refresh round-trip.
+      // Inject drafts into campaignCreativesMap so Creatives tab shows them.
+      // Do NOT auto-switch to Creatives — user stays in AI Agent to review.
       setCampaignCreativesMap((prev) => ({
         ...prev,
         [campaignId]: {
@@ -12212,10 +12212,9 @@ ${pendingTest ? `
           pendingChallengerDrafts: Array.isArray(drafts) ? drafts : [],
         },
       }));
-      // Ensure the correct campaign is selected and switch to Creatives tab
+      // Set the correct campaign without switching tab
       setSelectedCampaignId(campaignId);
       setExpandedId(campaignId);
-      setSetupTab("creatives");
     }}
   />
 )}

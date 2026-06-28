@@ -1148,6 +1148,47 @@ router.delete('/campaign-context/creative-draft', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/approve-challenger-previews
+// Step 2 of the 3-step flow: user reviewed previews in AI Agent and clicked approve.
+// Saves the previews to DB as pendingChallengerDrafts without creating Meta ads.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/approve-challenger-previews', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId, previews, adminClientId: adminClientIdFromBody } = req.body || {};
+    if (!campaignId || !Array.isArray(previews) || previews.length === 0) {
+      return res.status(400).json({ ok: false, error: 'campaignId and previews[] are required.' });
+    }
+
+    const now = new Date().toISOString();
+    const drafts = previews.map((p) => ({
+      ...p,
+      status:        'draft',
+      publishStatus: 'ready_for_launch',
+      approvedAt:    now,
+    }));
+
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId || '').trim()
+    );
+    if (recIdx >= 0) {
+      db.data.campaign_creatives[recIdx].pendingChallengerDrafts = drafts;
+      await db.write();
+    }
+
+    console.log('[AB_TEST_PREVIEWS_APPROVED_AS_DRAFTS]', { campaignId, draftCount: drafts.length });
+    return res.json({ ok: true, draftCount: drafts.length });
+  } catch (err) {
+    console.error('[approve-challenger-previews]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to approve previews.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/campaign-context/create-challenger-drafts
 // Creates staged draft previews immediately — no Meta ad creation, no proposal.
 // Draft creation is safe (read-only Meta fetch) so no approval gate is needed.

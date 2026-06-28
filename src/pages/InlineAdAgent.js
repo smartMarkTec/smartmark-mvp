@@ -286,9 +286,10 @@ export default function InlineAdAgent({
   const [pendingN,   setPendingN]  = useState(null);
   const [creatives,  setCreatives] = useState([]);
   const [ctx,        setCtx]       = useState(null);
-  const [regenning,  setRegenning] = useState(null); // index of creative being regenerated
+  const [regenning,  setRegenning] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [historyList, setHistoryList] = useState([]); // saved sessions for drawer
+  const [historyList, setHistoryList] = useState([]);
+  const [abLightbox, setAbLightbox]  = useState(null); // { src, title } for fullscreen
 
   const bottomRef = useRef(null);
   const timerRef  = useRef(null);
@@ -835,20 +836,38 @@ export default function InlineAdAgent({
         ...(j?.proposalAction  && { proposalAction:  j.proposalAction }),
       });
 
-      // After draft creation: immediately inject drafts into parent state so the
-      // Creatives tab shows them without waiting for a refresh round-trip.
-      if (j?.eventType === "challenger_drafts_created" && Array.isArray(j?.drafts) && j.drafts.length > 0) {
-        console.log("[DRAFTS_REFRESH_AFTER_CREATE]", {
-          campaignId:       j.campaignId,
-          draftCount:       j.draftCount,
-          hasPendingDrafts: true,
+      // A/B test preview cards — stay on AI Agent tab, show visual cards
+      if (j?.eventType === "ab_test_previews_generated" && Array.isArray(j?.previews) && j.previews.length > 0) {
+        console.log("[AB_TEST_PREVIEW_RENDERED_FRONTEND]", {
+          campaignId:   j.campaignId,
+          controlAdId:  j.controlAdId,
+          previewCount: j.previews.length,
         });
-        if (onChallengerDraftsCreated) {
-          onChallengerDraftsCreated(j.campaignId, j.drafts);
-        } else if (onRefreshCampaigns) {
-          // Fallback: refresh if the direct injection prop isn't wired yet
-          setTimeout(() => onRefreshCampaigns(), 800);
-        }
+        // Replace the plain text message with a preview-card message
+        setMsgs((prev) => {
+          const updated = [...prev];
+          // The last message is the plain assistant text — upgrade it to a preview card
+          if (updated.length > 0 && updated[updated.length - 1].role === "assistant") {
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              type:       "ab_test_preview",
+              campaignId: j.campaignId,
+              controlAdId: j.controlAdId,
+              previews:   j.previews,
+            };
+          }
+          return updated;
+        });
+        // DO NOT call onChallengerDraftsCreated — user must approve previews first
+        // DO NOT switch tab
+        scroll();
+        return;
+      }
+
+      // Legacy: challenger_drafts_created (keep for backward compat)
+      if (j?.eventType === "challenger_drafts_created" && Array.isArray(j?.drafts) && j.drafts.length > 0) {
+        if (onChallengerDraftsCreated) onChallengerDraftsCreated(j.campaignId, j.drafts);
+        else if (onRefreshCampaigns) setTimeout(() => onRefreshCampaigns(), 800);
       }
 
       // Only auto-switch to Creatives when explicitly requested
@@ -863,9 +882,120 @@ export default function InlineAdAgent({
 
   const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
+  /* ─── A/B preview card approve helper ──────────────────────────────── */
+  async function handleApproveAbPreviews(campaignId, previews, msgKey) {
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const _adminClientId = adminClientId || (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+    const r = await fetch("/api/campaign-context/approve-challenger-previews", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+      body: JSON.stringify({ campaignId, previews, adminClientId: _adminClientId }),
+    }).catch(() => null);
+    const result = r ? await r.json().catch(() => ({})) : {};
+    console.log("[AB_TEST_PREVIEWS_APPROVED_AS_DRAFTS]", { campaignId, draftCount: previews.length, ok: result.ok });
+    if (result.ok) {
+      // Mark the preview message as approved (hide approve button)
+      setMsgs((prev) => prev.map((msg) => msg._k === msgKey ? { ...msg, approved: true } : msg));
+      // Inject into parent so Creatives tab can show them
+      if (onChallengerDraftsCreated) onChallengerDraftsCreated(campaignId, previews);
+      push({ role: "assistant", content: `Great — these A/B test drafts are saved and ready for launch.\nTell me **"publish the drafts"** when you want to create the real ads on Meta.` });
+    } else {
+      push({ role: "assistant", content: `Could not save drafts: ${result.error || "unknown error"}` });
+    }
+    scroll();
+  }
+
   /* ─── Render helpers ─────────────────────────────────────────────────── */
   function renderMsg(m) {
     const isAI = m.role === "assistant";
+
+    // ── A/B test preview cards ─────────────────────────────────────────
+    if (m.type === "ab_test_preview" && Array.isArray(m.previews) && m.previews.length > 0) {
+      return (
+        <div key={m._k} style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, width: "100%" }}>
+          {m.content && (
+            <div style={{ background: AI_BG, borderRadius: "18px 18px 18px 4px", padding: "10px 14px", color: TEXT, fontSize: 14, lineHeight: 1.6, alignSelf: "flex-start", maxWidth: "80%" }}>
+              <Md text={m.content} />
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", width: "100%" }}>
+            {m.previews.map((preview, pi) => {
+              const imgSrc = preview.imageUrl || null;
+              return (
+                <div key={pi} style={{
+                  flex: "1 1 220px", minWidth: 200, maxWidth: 300,
+                  background: "#faf5ff", border: "1.5px solid #a78bfa",
+                  borderRadius: 14, padding: "12px 14px",
+                  display: "flex", flexDirection: "column", gap: 7,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ background: "#ede9fe", color: "#7c3aed", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
+                      {preview.name}
+                    </span>
+                    <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: 4, padding: "1px 6px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>
+                      {preview.testType} test
+                    </span>
+                  </div>
+                  {imgSrc ? (
+                    <div
+                      style={{ position: "relative", cursor: "zoom-in" }}
+                      onClick={() => setAbLightbox({ src: imgSrc, title: preview.name })}
+                    >
+                      <img
+                        src={imgSrc}
+                        alt={preview.name}
+                        style={{ width: "100%", borderRadius: 8, aspectRatio: "1.9/1", objectFit: "cover", border: "1px solid #ddd6fe" }}
+                      />
+                      <span style={{
+                        position: "absolute", bottom: 6, right: 6,
+                        background: "rgba(0,0,0,0.5)", color: "#fff",
+                        fontSize: 10, borderRadius: 4, padding: "2px 6px",
+                      }}>⤢ Enlarge</span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 10, color: "#b91c1c", background: "#fef2f2", borderRadius: 6, padding: "6px 8px" }}>
+                      Image missing — regenerate required before publishing
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>{preview.headline}</div>
+                  {preview.body && (
+                    <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+                      {preview.body.slice(0, 100)}{preview.body.length > 100 ? "…" : ""}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                    CTA: {preview.cta || "—"}
+                    {preview.link && <> · <a href={preview.link} target="_blank" rel="noreferrer" style={{ color: "#7c3aed" }}>Landing page ↗</a></>}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#7c3aed", fontStyle: "italic" }}>
+                    Changes: {(preview.changes || []).join(", ")}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {!m.approved && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                onClick={() => handleApproveAbPreviews(m.campaignId, m.previews, m._k)}
+                style={{
+                  background: "#7c3aed", color: "#fff", border: "none",
+                  borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Approve &amp; Save as Drafts
+              </button>
+              <span style={{ fontSize: 11, color: "#94a3b8" }}>or type "publish the drafts" to send to Meta</span>
+            </div>
+          )}
+          {m.approved && (
+            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>✓ Saved as drafts — ready for launch</div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div key={m._k} style={{ display: "flex", justifyContent: isAI ? "flex-start" : "flex-end", marginBottom: 14 }}>
         <div style={{ maxWidth: m.type === "creatives" ? "100%" : "80%", display: "flex", flexDirection: "column", alignItems: isAI ? "flex-start" : "flex-end", gap: 7 }}>
@@ -1080,6 +1210,28 @@ export default function InlineAdAgent({
             <InputBox value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} onSubmit={() => send()} disabled={inputDisabled} large={false} />
           </div>
         </>
+      )}
+
+      {/* A/B preview lightbox / fullscreen */}
+      {abLightbox && (
+        <div
+          onClick={() => setAbLightbox(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9000,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div style={{ color: "#fff", fontWeight: 700, fontSize: 14, marginBottom: 12 }}>{abLightbox.title}</div>
+          <img
+            src={abLightbox.src}
+            alt={abLightbox.title}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "90vw", maxHeight: "80vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }}
+          />
+          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, marginTop: 12 }}>Click anywhere to close</div>
+        </div>
       )}
     </div>
   );
