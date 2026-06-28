@@ -271,6 +271,7 @@ export default function InlineAdAgent({
   onGoToSettings,
   onSetBudget,
   onSetCampaignName,
+  onRefreshCampaigns,
 }) {
   const clientRef = useRef(adminClientInfo);
   useEffect(() => { clientRef.current = adminClientInfo; }, [adminClientInfo]);
@@ -803,18 +804,20 @@ export default function InlineAdAgent({
     setSending(true);
     try {
       const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      // Always send selectedCampaignId — use prop value if valid, otherwise null
+      const activeCampaignId = selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? selectedCampaignId : null;
       const payload = {
         message: txt,
         history: msgs.slice(-8).map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
-        ...(adminClientId ? { adminClientId } : {}),
-        ...(selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? { selectedCampaignId } : {}),
+        ...(adminClientId      ? { adminClientId }                    : {}),
+        ...(activeCampaignId   ? { selectedCampaignId: activeCampaignId } : {}),
       };
       console.log("[AD_AGENT_FRONTEND_SEND]", {
-        userMessage:       txt,
-        messageBeingSent:  payload.message,
+        userMessage:        txt,
+        messageBeingSent:   payload.message,
         selectedCampaignId: payload.selectedCampaignId || null,
-        adminClientId:     payload.adminClientId || null,
-        historyCount:      payload.history?.length || 0,
+        adminClientId:      payload.adminClientId || null,
+        historyCount:       payload.history?.length || 0,
       });
       const r = await fetch("/api/ad-agent/chat", {
         method: "POST", credentials: "include",
@@ -830,7 +833,21 @@ export default function InlineAdAgent({
         ...(j?.proposalSummary && { proposalSummary: j.proposalSummary }),
         ...(j?.proposalAction  && { proposalAction:  j.proposalAction }),
       });
-      // If the agent built drafts or points to Creatives tab, auto-switch there
+
+      // After draft creation: refresh campaigns so Creatives tab picks up pendingChallengerDrafts
+      if (j?.eventType === "challenger_drafts_created" && j?.draftCount > 0) {
+        console.log("[DRAFTS_REFRESH_AFTER_CREATE]", {
+          campaignId:      j.campaignId,
+          draftCount:      j.draftCount,
+          hasPendingDrafts: true,
+        });
+        // Refresh parent campaign data after a brief delay so the DB write completes
+        setTimeout(() => {
+          if (onRefreshCampaigns) onRefreshCampaigns();
+        }, 800);
+      }
+
+      // Only auto-switch to Creatives when explicitly requested
       if (j?.openCreativesTab && onGoToCreatives) {
         setTimeout(() => onGoToCreatives(), 600);
       }

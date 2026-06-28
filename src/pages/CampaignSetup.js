@@ -9707,6 +9707,15 @@ ${pendingTest ? `
                       </div>
                     )}
                     {/* ── AI Agent Challenger Drafts pending review ── */}
+                    {!isDraftView && (() => {
+                      const _draftList = Array.isArray(selectedCampaignCreatives?.pendingChallengerDrafts) ? selectedCampaignCreatives.pendingChallengerDrafts : [];
+                      console.log("[DRAFTS_UI_RENDER_CHECK]", {
+                        selectedCampaignId,
+                        draftCount: _draftList.length,
+                        pendingChallengerDrafts: _draftList,
+                      });
+                      return null;
+                    })()}
                     {!isDraftView && Array.isArray(selectedCampaignCreatives?.pendingChallengerDrafts) && selectedCampaignCreatives.pendingChallengerDrafts.length > 0 && (
                       <div style={{ width: "100%", marginTop: 16 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -12180,6 +12189,14 @@ ${pendingTest ? `
     }}
     onSetCampaignName={(n) => {
       if (n) setForm((prev) => ({ ...prev, campaignName: String(n).trim().slice(0, 80) }));
+    }}
+    onRefreshCampaigns={() => {
+      if (adminClientId) {
+        refreshAdminCampaigns(
+          adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap,
+          setCampaignCreativesMap, recentStatusOverridesRef.current, selectedCampaignId
+        );
+      }
     }}
   />
 )}

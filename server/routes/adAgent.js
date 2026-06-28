@@ -1273,21 +1273,13 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       if (draftResult2?.ok && Array.isArray(draftResult2.drafts)) {
         const d = draftResult2.drafts;
         return res.json({
-          ok:                  true,
-          draftsCreated:       true,
-          drafts:              d,
-          campaignId:          cmpId2,
-          openCreativesTab:    true,
-          reply:               `I created **${d.length} challenger draft preview${d.length !== 1 ? 's' : ''}** for you to review before anything goes live on Meta.\n\n` +
-            d.map((dr, di) =>
-              `**Draft ${di + 1}: ${dr.name}** (${dr.testType} test)\n` +
-              `- Headline: ${dr.headline}\n` +
-              `- Body: ${String(dr.body || '').slice(0, 80)}${(dr.body || '').length > 80 ? '…' : ''}\n` +
-              `- CTA: ${dr.cta} · URL: ${dr.link}\n` +
-              (dr.imageUrl ? `- [View image ↗](${dr.imageUrl})\n` : '') +
-              `- Changes: ${(dr.changes || []).join(', ')}`
-            ).join('\n\n') +
-            `\n\nThe drafts are saved in this campaign's **Creatives tab** under **"Drafts pending review."** Review them there, then tell me **"approve the drafts"** when you want me to publish them to Meta.`,
+          ok:             true,
+          eventType:      'challenger_drafts_created',
+          draftsCreated:  true,
+          draftCount:     d.length,
+          campaignId:     cmpId2,
+          openCreativesTab: false,
+          reply: `I created ${d.length} draft ad${d.length !== 1 ? 's' : ''} for review.\nYou can view them in this campaign's Creatives tab under **Drafts pending review**.`,
         });
       }
 
