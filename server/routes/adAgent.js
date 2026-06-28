@@ -1243,7 +1243,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         proposalSummary: `Control: ${ctrlId2} | Headline: "${hl2}" | Image: HVAC visual`,
         proposalAction:  'create_challenger_ads',
         reply: prop2
-          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${ctrlId2}\`.\n\n${summaryLines2}\n\nArchived ads will not be touched.\n\nClick **Approve & Apply** to create them on Meta.`
+          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${ctrlId2}\`.\n\n${summaryLines2}\n\nArchived ads will not be touched.\n\nClick **Approve & Review Drafts** — I'll fetch the control ad details and build previews for you to review before anything goes live on Meta.`
           : 'I could not queue the proposal. Please try again.',
       });
     }
@@ -1448,7 +1448,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         proposalSummary: `Control: ${controlAdId} | Headline: "${headline}" | Image: HVAC visual`,
         proposalAction:  'create_challenger_ads',
         reply: proposal
-          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${controlAdId}\`.\n\n${summaryLines}\n\nArchived ads will not be touched.\n\nClick **Approve & Apply** to create them on Meta.`
+          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${controlAdId}\`.\n\n${summaryLines}\n\nArchived ads will not be touched.\n\nClick **Approve & Review Drafts** — I'll fetch the control ad details and build previews for you to review before anything goes live on Meta.`
           : 'I could not queue the proposal. Please try again.',
       });
     }

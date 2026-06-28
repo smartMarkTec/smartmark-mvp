@@ -432,6 +432,108 @@ export default function AdAgent() {
             }}
           >
             {messages.map((m, i) => {
+              // Draft review card: shown after Step 1 (drafts created, not yet on Meta)
+              if (m.role === "assistant" && m.isDraftReview && Array.isArray(m.drafts)) {
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <div style={{ maxWidth: "95%", width: "100%" }}>
+                      <div style={{
+                        background: "#f0fdf4", border: "1px solid #86efac",
+                        borderRadius: 12, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14,
+                      }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: "#15803d" }}>
+                          {m.drafts.length} Challenger Draft{m.drafts.length !== 1 ? "s" : ""} Ready for Review
+                        </div>
+                        <div style={{ fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
+                          {m.content}
+                        </div>
+
+                        {/* Draft preview cards */}
+                        {m.drafts.map((draft, di) => (
+                          <div key={di} style={{
+                            background: "#fff", border: "1px solid #d1fae5", borderRadius: 10,
+                            padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6,
+                          }}>
+                            <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>
+                              Draft {di + 1}: {draft.name}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#64748b" }}>
+                              Test type: <strong>{draft.testType}</strong> · Changes: <strong>{(draft.changes || []).join(", ")}</strong>
+                            </div>
+                            <div style={{ fontSize: 12, color: "#1e293b" }}>
+                              <strong>Headline:</strong> {draft.headline}
+                            </div>
+                            {draft.body && (
+                              <div style={{ fontSize: 11, color: "#475569" }}>
+                                <strong>Body:</strong> {draft.body.slice(0, 120)}{draft.body.length > 120 ? "…" : ""}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: "#64748b" }}>
+                              <strong>CTA:</strong> {draft.cta} · <strong>URL:</strong> {draft.link ? draft.link.slice(0, 50) + (draft.link.length > 50 ? "…" : "") : "—"}
+                            </div>
+                            {draft.imageUrl && (
+                              <div style={{ fontSize: 11 }}>
+                                <a href={draft.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>
+                                  View image ↗
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Publish to Meta button */}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={async () => {
+                              const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+                              const _adminClientId = m.adminClientId || (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+                              const r = await fetch("/api/campaign-context/publish-challenger-drafts", {
+                                method: "POST", credentials: "include",
+                                headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+                                body: JSON.stringify({
+                                  campaignId: m.campaignId,
+                                  ...(_adminClientId ? { adminClientId: _adminClientId } : {}),
+                                }),
+                              }).catch(() => null);
+                              const result = r ? await r.json().catch(() => ({})) : {};
+                              const reply = result.ok
+                                ? (result.reply || "Challenger ads are now live on Meta.")
+                                : `Publish failed: ${result.error || "unknown error"}`;
+                              const updated = messages.map((msg, j) => j === i ? { ...msg, isDraftReview: false } : msg);
+                              const final = [...updated, { role: "assistant", content: reply }];
+                              setMessages(final);
+                              saveHistory(final);
+                            }}
+                            style={{
+                              padding: "8px 18px", borderRadius: 8, border: "none",
+                              background: "#15803d", color: "#fff", fontSize: 12,
+                              fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                            }}
+                          >
+                            Publish to Meta
+                          </button>
+                          <button
+                            onClick={() => {
+                              const updated = messages.map((msg, j) => j === i ? { ...msg, isDraftReview: false } : msg);
+                              const final = [...updated, { role: "assistant", content: "Drafts cancelled. No ads were created." }];
+                              setMessages(final);
+                              saveHistory(final);
+                            }}
+                            style={{
+                              padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb",
+                              background: "#fff", color: "#374151", fontSize: 12,
+                              fontWeight: 700, cursor: "pointer", fontFamily: FONT,
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
               // Proposal card: assistant messages that carry a pending proposal
               if (m.role === "assistant" && m.proposalId && m.proposalPending) {
                 return (
@@ -468,6 +570,24 @@ export default function AdAgent() {
                               body: JSON.stringify({ ...(_adminClientId ? { adminClientId: _adminClientId } : {}) }),
                             }).catch(() => null);
                             const result = r ? await r.json().catch(() => ({})) : {};
+
+                            // Step 1 complete: drafts created for review — show a review card, not a success message
+                            if (result.ok && result.reviewRequired && Array.isArray(result.drafts)) {
+                              const updated = messages.map((msg, j) => j === i ? { ...msg, proposalPending: false } : msg);
+                              const reviewCard = {
+                                role:            "assistant",
+                                content:         result.reply || "Draft previews ready. Review and publish.",
+                                isDraftReview:   true,
+                                drafts:          result.drafts,
+                                campaignId:      result.campaignId,
+                                adminClientId:   _adminClientId,
+                              };
+                              const final = [...updated, reviewCard];
+                              setMessages(final);
+                              saveHistory(final);
+                              return;
+                            }
+
                             const reply = result.ok
                               ? (result.reply || `Done — action applied (status: ${result.actionStatus || "applied"}). Go to the Creatives tab to review.`)
                               : `Could not apply: ${result.error || "unknown error"}. Please try again.`;

@@ -585,7 +585,92 @@ router.patch('/ai-proposal/:id', async (req, res) => {
 // mutates Meta, not just marks the record approved.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// createChallengerAds — creates new Meta ads based on a control ad.
+// buildChallengerDraftPreviews — Step 1 of the two-step flow.
+// Fetches the control ad from Meta (read-only), builds draft preview objects
+// showing what each challenger will look like, and saves them to the DB.
+// Does NOT create any Meta ads. Returns draft objects for user review.
+// ─────────────────────────────────────────────────────────────────────────────
+async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, controlAdId, challengers, accountId }) {
+  const userToken = getFbUserToken(clientOwnerKey);
+  if (!userToken) throw new Error(`No Facebook token found for ${clientOwnerKey}. Please reconnect the client's Facebook account.`);
+
+  console.log('[CHALLENGER_DRAFT_START]', { controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
+
+  // Fetch control ad details from Meta (read-only GET — no side effects)
+  const controlRes = await axios.get(
+    `https://graph.facebook.com/${META_API_VERSION}/${controlAdId}`,
+    {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,adset_id,campaign_id,creative{id,name,object_story_spec,image_hash,thumbnail_url}',
+      },
+      timeout: 15000,
+    }
+  );
+  const controlAd       = controlRes.data || {};
+  const adsetId         = String(controlAd.adset_id || '').trim();
+  if (!adsetId) throw new Error('Could not read adset_id from control ad.');
+  const creative        = controlAd.creative || {};
+  const objectStorySpec = creative.object_story_spec || {};
+  const pageId          = String(objectStorySpec.page_id || '').trim();
+  const linkData        = objectStorySpec.link_data || {};
+  if (!pageId) throw new Error('Could not read page_id from control ad creative.');
+
+  const controlHeadline = String(linkData.name    || '').trim();
+  const controlBody     = String(linkData.message || '').trim();
+  const controlCta      = String(linkData.call_to_action?.type || 'LEARN_MORE').trim();
+  const controlLink     = String(linkData.link    || '').trim();
+  const controlImageUrl = String(creative.thumbnail_url || '').trim();
+
+  console.log('[CHALLENGER_CONTROL_FETCHED_READONLY]', {
+    adsetId, campaignId, creativeId: creative.id, pageId,
+    headline: controlHeadline.slice(0, 60),
+  });
+
+  // Build draft preview objects — no Meta API writes happen here
+  const nowIso = new Date().toISOString();
+  const drafts = challengers.map((challenger, i) => {
+    const isHeadline = challenger.testType === 'headline';
+    return {
+      id:             `draft-${Date.now()}-${i}`,
+      status:         'draft',
+      publishStatus:  'needs_review',
+      source:         'ai_agent',
+      controlAdId,
+      campaignId,
+      adsetId,
+      pageId,
+      accountId,
+      testType:       challenger.testType,
+      name:           challenger.name,
+      headline:       isHeadline ? (challenger.headline || controlHeadline) : controlHeadline,
+      body:           controlBody,
+      cta:            controlCta,
+      link:           controlLink,
+      imageUrl:       isHeadline ? controlImageUrl : (challenger.imageUrl || controlImageUrl),
+      changes:        isHeadline ? ['headline'] : ['image'],
+      controlHeadline,
+      controlImageUrl,
+      createdAt:      nowIso,
+    };
+  });
+
+  // Save drafts to DB under campaign_creatives.pendingChallengerDrafts
+  await db.read();
+  const recIdx = (db.data.campaign_creatives || []).findIndex(
+    (r) => String(r.campaignId || '').trim() === String(campaignId || '').trim()
+  );
+  if (recIdx >= 0) {
+    db.data.campaign_creatives[recIdx].pendingChallengerDrafts = drafts;
+    await db.write();
+  }
+
+  console.log('[CHALLENGER_DRAFTS_SAVED]', { campaignId, draftCount: drafts.length });
+  return { drafts, adsetId, pageId, controlHeadline, controlBody, controlCta, controlLink, controlImageUrl };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// createChallengerAds — Step 2: creates new Meta ads from approved draft previews.
 // Only changes headline OR image per challenger. Returns real Meta ad IDs only.
 // Throws on any failure so the caller can surface the error cleanly.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -756,7 +841,7 @@ router.post('/ai-proposal/:id/apply', async (req, res) => {
       });
     }
 
-    // ── create_challenger_ads ─────────────────────────────────────────────────
+    // ── create_challenger_ads — Step 1: build draft previews, do NOT publish to Meta ──
     if (proposal.actionType === 'create_challenger_ads') {
       const pc = proposal.proposedChanges || {};
       const clientOwnerKey = String(pc.ownerKey || proposal.ownerKey || '').trim();
@@ -774,48 +859,51 @@ router.post('/ai-proposal/:id/apply', async (req, res) => {
         });
       }
 
-      let createdAds;
+      // Build draft previews — read-only Meta fetch, no ad creation yet
+      let draftResult;
       try {
-        createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
-      } catch (createErr) {
-        console.error('[CHALLENGER_CREATE_FAILED]', createErr?.message);
-        const now2 = new Date().toISOString();
+        draftResult = await buildChallengerDraftPreviews({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+      } catch (draftErr) {
+        console.error('[CHALLENGER_DRAFT_FAILED]', draftErr?.message);
         proposal.status    = 'failed';
-        proposal.updatedAt = now2;
-        proposal.error     = String(createErr?.message || 'creation failed').slice(0, 500);
+        proposal.updatedAt = new Date().toISOString();
+        proposal.error     = String(draftErr?.message || 'draft creation failed').slice(0, 500);
         await db.write();
-        return res.status(500).json({
-          ok:             false,
-          error:          proposal.error,
-          proposalStatus: 'failed',
-        });
+        return res.status(500).json({ ok: false, error: proposal.error, proposalStatus: 'failed' });
       }
 
-      const adLines = createdAds.map((a) => `• **${a.angleLabel}** — Ad ID: \`${a.metaAdId}\``).join('\n');
+      // Mark proposal as "drafts_ready" — not yet applied to Meta
+      proposal.status    = 'drafts_ready';
+      proposal.updatedAt = new Date().toISOString();
+      proposal.result    = { draftCount: draftResult.drafts.length };
+      await db.write();
+
       await appendAiHistoryEntry(campaignId, {
         type:       'action',
         timestamp:  new Date().toISOString(),
-        title:      'Challenger ads created',
-        summary:    `Created ${createdAds.length} challenger ads via approved proposal.`,
-        reason:     `User approved proposal ${id}.`,
+        title:      'Challenger draft previews created',
+        summary:    `Created ${draftResult.drafts.length} draft previews for review (not yet on Meta).`,
         actionType: 'create_challenger_ads',
         source:     'proposal_apply',
       }).catch(() => {});
 
-      const now2 = new Date().toISOString();
-      proposal.status    = 'applied';
-      proposal.updatedAt = now2;
-      proposal.appliedAt = now2;
-      proposal.result    = { createdAdIds: createdAds.map((a) => a.metaAdId) };
-      await db.write();
+      const draftLines = draftResult.drafts.map((d, i) =>
+        `**Draft ${i + 1} — ${d.name}**\n` +
+        `Test type: ${d.testType}\n` +
+        `Headline: ${d.headline}\n` +
+        `Body: ${String(d.body || '').slice(0, 80)}${d.body?.length > 80 ? '…' : ''}\n` +
+        `CTA: ${d.cta} · URL: ${d.link}\n` +
+        `Changes: ${d.changes.join(', ')}`
+      ).join('\n\n');
 
       return res.json({
         ok:             true,
-        proposalStatus: 'applied',
+        proposalStatus: 'drafts_ready',
         actionType:     'create_challenger_ads',
-        actionStatus:   'success',
-        createdAds:     createdAds.map((a) => ({ name: a.angleLabel, metaAdId: a.metaAdId, testType: a.angle })),
-        reply:          `Challenger ads created on Meta:\n\n${adLines}\n\nThe Creatives tab will show them as active. Archived ads are unchanged.`,
+        reviewRequired: true,
+        campaignId,
+        drafts:         draftResult.drafts,
+        reply:          `I created **${draftResult.drafts.length} challenger draft previews** so you can review them before anything goes live on Meta.\n\n${draftLines}\n\nReview the details above, then click **Publish to Meta** to create the real ads.`,
       });
     }
 
@@ -1056,6 +1144,89 @@ router.delete('/campaign-context/creative-draft', async (req, res) => {
   } catch (err) {
     console.error('[delete-creative-draft]', err?.message);
     return res.status(500).json({ ok: false, error: 'Failed to delete creative draft.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/publish-challenger-drafts
+// Step 2 of the two-step flow: reads staged draft previews from DB and creates
+// real Meta ads. Only called after the user reviews the drafts and clicks
+// "Publish to Meta". Returns real numeric Meta ad IDs or a clear error.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/publish-challenger-drafts', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const adminClientIdFromBody = String(req.body?.adminClientId || '').trim();
+    const clientOwnerKey = adminClientIdFromBody && isAdminOwnerKey(ownerKey)
+      ? `user:${adminClientIdFromBody}`
+      : ownerKey;
+
+    const { campaignId } = req.body || {};
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId is required.' });
+
+    // Load the pending drafts from DB
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId || '').trim()
+    );
+    if (recIdx < 0) return res.status(404).json({ ok: false, error: 'Campaign creative record not found.' });
+
+    const drafts = db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [];
+    if (drafts.length === 0) return res.status(400).json({ ok: false, error: 'No pending challenger drafts found. Generate drafts first.' });
+
+    const { controlAdId, accountId } = drafts[0] || {};
+    if (!controlAdId || !accountId) return res.status(400).json({ ok: false, error: 'Draft is missing controlAdId or accountId.' });
+
+    // Build challengers from drafts to pass to createChallengerAds
+    const challengers = drafts.map((d) => ({
+      testType:  d.testType,
+      name:      d.name,
+      headline:  d.headline,
+      imageUrl:  d.testType === 'image' ? d.imageUrl : undefined,
+    }));
+
+    console.log('[CHALLENGER_PUBLISH_START]', { campaignId, clientOwnerKey, draftCount: drafts.length });
+
+    let createdAds;
+    try {
+      createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+    } catch (createErr) {
+      console.error('[CHALLENGER_PUBLISH_FAILED]', createErr?.message);
+      return res.status(500).json({
+        ok:    false,
+        error: createErr?.message || 'Approval received, but ad creation failed before Meta returned real ad IDs.',
+      });
+    }
+
+    // Clear the pending drafts now that real ads exist
+    db.data.campaign_creatives[recIdx].pendingChallengerDrafts = [];
+    await db.write();
+
+    await appendAiHistoryEntry(campaignId, {
+      type:       'action',
+      timestamp:  new Date().toISOString(),
+      title:      'Challenger ads published to Meta',
+      summary:    `Published ${createdAds.length} challenger ads after user review.`,
+      actionType: 'publish_challenger_drafts',
+      source:     'manual_publish',
+    }).catch(() => {});
+
+    const adLines = createdAds.map((a) => `• **${a.angleLabel}** — Ad ID: \`${a.metaAdId}\``).join('\n');
+    console.log('[CHALLENGER_PUBLISH_SUCCESS]', { campaignId, createdAds: createdAds.map((a) => ({ name: a.angleLabel, metaAdId: a.metaAdId })) });
+
+    return res.json({
+      ok:          true,
+      actionType:  'publish_challenger_drafts',
+      actionStatus: 'success',
+      createdAds:  createdAds.map((a) => ({ name: a.angleLabel, metaAdId: a.metaAdId, testType: a.angle })),
+      reply:       `Challenger ads are now live on Meta:\n\n${adLines}\n\nThe Creatives tab will show them as active. Archived ads are unchanged.`,
+    });
+  } catch (err) {
+    console.error('[publish-challenger-drafts]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to publish challenger drafts.' });
   }
 });
 
