@@ -1148,6 +1148,35 @@ router.delete('/campaign-context/creative-draft', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/create-challenger-drafts
+// Creates staged draft previews immediately — no Meta ad creation, no proposal.
+// Draft creation is safe (read-only Meta fetch) so no approval gate is needed.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/create-challenger-drafts', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const adminClientIdFromBody = String(req.body?.adminClientId || '').trim();
+    const clientOwnerKey = adminClientIdFromBody && isAdminOwnerKey(ownerKey)
+      ? `user:${adminClientIdFromBody}`
+      : ownerKey;
+
+    const { campaignId, controlAdId, accountId, challengers } = req.body || {};
+    if (!campaignId || !controlAdId || !accountId || !Array.isArray(challengers) || challengers.length === 0) {
+      return res.status(400).json({ ok: false, error: 'campaignId, controlAdId, accountId, and challengers are required.' });
+    }
+
+    const result = await buildChallengerDraftPreviews({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[create-challenger-drafts]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to create challenger drafts.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/campaign-context/publish-challenger-drafts
 // Step 2 of the two-step flow: reads staged draft previews from DB and creates
 // real Meta ads. Only called after the user reviews the drafts and clicks

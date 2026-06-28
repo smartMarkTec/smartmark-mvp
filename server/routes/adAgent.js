@@ -111,6 +111,33 @@ function isCreateSpecificChallengersIntent(message) {
          (hasControlAdRef && /(create|make|build|launch|run)/i.test(s));
 }
 
+// ── "Show me drafts" intent ────────────────────────────────────────────────────
+function isShowDraftsIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /show\s*(me\s*)?(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /where\s*(are\s*)?(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /see\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /view\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /look\s*at\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /check\s*(the\s*)?(challenger\s*)?drafts?/i.test(s)
+  );
+}
+
+// ── "Publish / approve drafts" intent ─────────────────────────────────────────
+function isPublishDraftsIntent(message) {
+  const s = String(message || '').toLowerCase();
+  return (
+    /approve\s*(and\s*)?(publish\s*)?the\s*(challenger\s*)?drafts?/i.test(s) ||
+    /publish\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /send\s*(them|the\s*drafts?)\s*to\s*meta/i.test(s) ||
+    /go\s*live\s*(with\s*)?(the\s*)?drafts?/i.test(s) ||
+    /launch\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
+    /create\s*(the\s*)?ads?\s*(now|from\s*draft)/i.test(s) ||
+    /publish\s*(these|those|them|the\s*challengers?)/i.test(s)
+  );
+}
+
 // ── Hard action router — runs BEFORE any performance/strategy/OpenAI logic ────
 // Detects explicit execution commands so they never fall through to OpenAI.
 function detectAdAgentActionIntent(message) {
@@ -1124,6 +1151,7 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
     // In admin-client mode the effective target is the selected client, not TheBoss
     const effectiveOwnerKey = resolveEffectiveOwnerKey(req, user, ownerKey);
+    const adminClientId2 = String(req.body?.adminClientId || req.query?.adminClientId || '').trim();
 
     const trimmed = message.trim().slice(0, 2000);
 
@@ -1209,45 +1237,112 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
         safety: { doNotCreateCampaign: true, doNotCreateAdSet: true, doNotChangeBudget: true, doNotChangeTargeting: true, doNotTouchArchivedAds: true },
       };
 
-      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', { actionType: 'create_challenger_ads', payload: payload2 });
+      // Draft creation is safe (read-only Meta fetch) — no approval needed.
+      // Call the create-challenger-drafts endpoint directly and return immediately.
+      console.log('[AI_AGENT_INTENT_DETECTED]', { actionType: 'create_challenger_drafts_immediate', controlAdId: ctrlId2, campaignId: cmpId2 });
 
-      const prop2 = await createActionProposal({
-        ownerKey:        effectiveOwnerKey,
-        campaignId:      cmpId2,
-        actionType:      'create_challenger_ads',
-        title:           `Create 2 challenger ads (control: ${ctrlId2})`,
-        reasoning:       `User explicitly requested 2 challenger ads using control ad ${ctrlId2}. No new campaign or ad set. Same budget and targeting.`,
-        proposedChanges: payload2,
-        riskLevel:       'medium',
-      }).catch((e) => { console.error('[AdAgent] proposal create error:', e?.message); return null; });
+      let draftResult2 = null;
+      try {
+        const selfBase2 = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
+        const sid2 = String(getSidFromReq(req) || '').trim();
+        const draftRes2 = await axios.post(
+          `${selfBase2}/api/campaign-context/create-challenger-drafts`,
+          {
+            campaignId:    cmpId2,
+            controlAdId:   ctrlId2,
+            accountId:     acctId2,
+            challengers:   challengers2,
+            adminClientId: adminClientId2 || '',
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(sid2 ? { 'x-sm-sid': sid2 } : {}),
+              'cookie': req.headers.cookie || '',
+            },
+            timeout: 20000,
+          }
+        );
+        draftResult2 = draftRes2.data || null;
+      } catch (draftErr2) {
+        console.error('[AD_AGENT_DRAFT_CREATION_FAILED]', draftErr2?.response?.data || draftErr2?.message);
+      }
 
-      const summaryLines2 = [
-        `**Control ad:** \`${ctrlId2}\``,
-        '',
-        `**1. ${hlName2}**`,
-        `   - Change headline only to: *${hl2}*`,
-        `   - Keep same image, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
-        '',
-        `**2. ${imgName2}**`,
-        `   - Change image only`,
-        `   - Keep same headline, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
-      ].join('\n');
+      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_drafts/immediate', ok: !!draftResult2?.ok, message: trimmed.slice(0, 300) });
 
-      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/proposal_created', proposalId: prop2?.id, message: trimmed.slice(0, 300) });
+      if (draftResult2?.ok && Array.isArray(draftResult2.drafts)) {
+        const d = draftResult2.drafts;
+        return res.json({
+          ok:                  true,
+          draftsCreated:       true,
+          drafts:              d,
+          campaignId:          cmpId2,
+          openCreativesTab:    true,
+          reply:               `I created **${d.length} challenger draft preview${d.length !== 1 ? 's' : ''}** for you to review before anything goes live on Meta.\n\n` +
+            d.map((dr, di) =>
+              `**Draft ${di + 1}: ${dr.name}** (${dr.testType} test)\n` +
+              `- Headline: ${dr.headline}\n` +
+              `- Body: ${String(dr.body || '').slice(0, 80)}${(dr.body || '').length > 80 ? '…' : ''}\n` +
+              `- CTA: ${dr.cta} · URL: ${dr.link}\n` +
+              (dr.imageUrl ? `- [View image ↗](${dr.imageUrl})\n` : '') +
+              `- Changes: ${(dr.changes || []).join(', ')}`
+            ).join('\n\n') +
+            `\n\nThe drafts are saved in this campaign's **Creatives tab** under **"Drafts pending review."** Review them there, then tell me **"approve the drafts"** when you want me to publish them to Meta.`,
+        });
+      }
 
       return res.json({
-        ok:              true,
-        proposalId:      prop2?.id || null,
-        proposalPending: true,
-        proposalTitle:   'Create 2 challenger ads',
-        proposalSummary: `Control: ${ctrlId2} | Headline: "${hl2}" | Image: HVAC visual`,
-        proposalAction:  'create_challenger_ads',
-        reply: prop2
-          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${ctrlId2}\`.\n\n${summaryLines2}\n\nArchived ads will not be touched.\n\nClick **Approve & Review Drafts** — I'll fetch the control ad details and build previews for you to review before anything goes live on Meta.`
-          : 'I could not queue the proposal. Please try again.',
+        ok:    true,
+        reply: `I could not build the draft previews — the control ad fetch may have failed. Check that \`${ctrlId2}\` is accessible and the client's Facebook account is connected, then try again.`,
       });
     }
     // ── End hard action router ────────────────────────────────────────────────
+
+    // ── "Show me the drafts" — point user to Creatives tab ──────────────────
+    if (isShowDraftsIntent(trimmed)) {
+      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'show_drafts', message: trimmed.slice(0, 300) });
+      return res.json({
+        ok:             true,
+        openCreativesTab: true,
+        reply: 'The challenger drafts are saved in this campaign\'s **Creatives tab** under **"Drafts pending review."** Open that tab to review the headline, body copy, image, and other details for each draft. When you\'re ready, tell me **"approve the drafts"** and I\'ll publish them to Meta.',
+      });
+    }
+
+    // ── "Approve / publish the drafts" — trigger Meta publish ───────────────
+    if (isPublishDraftsIntent(trimmed)) {
+      if (!safeCampaignId) {
+        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'publish_drafts/no_campaign', message: trimmed.slice(0, 300) });
+        return res.json({ ok: true, reply: 'I need to know which campaign to publish for. Please select a campaign first, then say "approve the drafts."' });
+      }
+      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'publish_drafts/executing', campaignId: safeCampaignId });
+      let publishResult = null;
+      try {
+        const selfBase3 = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
+        const sid3 = String(getSidFromReq(req) || '').trim();
+        const pubRes = await axios.post(
+          `${selfBase3}/api/campaign-context/publish-challenger-drafts`,
+          { campaignId: safeCampaignId, adminClientId: adminClientId2 || '' },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(sid3 ? { 'x-sm-sid': sid3 } : {}),
+              'cookie': req.headers.cookie || '',
+            },
+            timeout: 30000,
+          }
+        );
+        publishResult = pubRes.data || null;
+      } catch (pubErr) {
+        console.error('[AD_AGENT_PUBLISH_FAILED]', pubErr?.response?.data || pubErr?.message);
+        const errMsg = pubErr?.response?.data?.error || pubErr?.message || 'unknown error';
+        return res.json({ ok: true, reply: `Approval received, but ad creation failed before Meta returned real ad IDs.\n\nError: ${errMsg}` });
+      }
+      if (publishResult?.ok) {
+        return res.json({ ok: true, openCreativesTab: true, reply: publishResult.reply || 'Challenger ads are now live on Meta.' });
+      }
+      return res.json({ ok: true, reply: `Publish failed: ${publishResult?.error || 'unknown error'}` });
+    }
+    // ── End publish drafts router ─────────────────────────────────────────────
 
     // Pixel CREATE intent — must be checked before general pixel intent
     if (isPixelCreateIntent(trimmed)) {

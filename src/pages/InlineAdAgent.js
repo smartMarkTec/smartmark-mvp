@@ -830,6 +830,10 @@ export default function InlineAdAgent({
         ...(j?.proposalSummary && { proposalSummary: j.proposalSummary }),
         ...(j?.proposalAction  && { proposalAction:  j.proposalAction }),
       });
+      // If the agent built drafts or points to Creatives tab, auto-switch there
+      if (j?.openCreativesTab && onGoToCreatives) {
+        setTimeout(() => onGoToCreatives(), 600);
+      }
     } catch (e) {
       console.error("[AD_AGENT_FRONTEND_ERROR]", e?.message);
       push({ role: "assistant", content: "Something went wrong. Try again." });

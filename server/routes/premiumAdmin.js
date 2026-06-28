@@ -835,9 +835,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         images:              Array.isArray(c.images) ? c.images : [],
         meta:                { headline: String(c.meta?.headline || ''), body: String(c.meta?.body || ''), link: String(c.meta?.link || '') },
         mediaSelection:      c.mediaSelection || 'image',
-        launchedCreativeSet: Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [],
-        archivedMetaAdIds:   (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === 'object') ? c.archivedMetaAdIds : {},
-        optimizerState:      opt ? sanitizeOptState(opt) : null,
+        launchedCreativeSet:     Array.isArray(c.launchedCreativeSet) ? c.launchedCreativeSet : [],
+        archivedMetaAdIds:       (c.archivedMetaAdIds && typeof c.archivedMetaAdIds === 'object') ? c.archivedMetaAdIds : {},
+        pendingChallengerDrafts: Array.isArray(c.pendingChallengerDrafts) ? c.pendingChallengerDrafts : [],
+        optimizerState:          opt ? sanitizeOptState(opt) : null,
       });
 
       console.log('[ADMIN_CAMPAIGNS_CREATIVE_STATUS]', {
