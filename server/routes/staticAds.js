@@ -1263,3 +1263,4 @@ router.head("/proxy-img", proxyHeadHandler);
 module.exports = router;
 module.exports.proxyImgHandler = proxyImgHandler;
 module.exports.proxyHeadHandler = proxyHeadHandler;
+module.exports.generateOpenAIAdImageBuffers = generateOpenAIAdImageBuffers;

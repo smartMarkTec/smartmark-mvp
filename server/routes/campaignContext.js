@@ -20,6 +20,7 @@ const { nanoid } = require('nanoid');
 const { getFbUserToken } = require('../tokenStore');
 const { META_API_VERSION } = require('../metaConfig');
 const { executeAction } = require('../optimizerAction');
+const { generateOpenAIAdImageBuffers } = require('./staticAds');
 const {
   findOptimizerCampaignStateByCampaignId,
   updateOptimizerCampaignState,
@@ -641,24 +642,12 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
     let imageFailed    = false;
 
     if (!isHeadline) {
-      // Image challenger: generate with OpenAI — never use Pexels or hardcoded stock
-      const imagePrompt =
-        'Photorealistic HVAC air conditioning service photograph. Outdoor residential AC ' +
-        'condenser unit on a bright sunny day. Clean suburban home exterior in background. ' +
-        'Professional, trustworthy, local service feel. No people visible. ' +
-        'No text overlay, no logos, no branding, no fake phone numbers. High quality photo.';
+      // Image challenger: use the same proven pipeline as normal campaign ad generation
+      const imagePrompt = 'Photorealistic HVAC tune-up ad image. Outdoor residential AC unit, clean professional service look, sunny day, no people, no logos, no text.';
       try {
-        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name, prompt: imagePrompt });
-        const openaiKey = process.env.OPENAI_API_KEY;
-        if (!openaiKey) throw new Error('OPENAI_API_KEY not configured');
-        const openaiRes = await axios.post(
-          'https://api.openai.com/v1/images/generations',
-          { model: 'gpt-image-1', prompt: imagePrompt, size: '1024x1024', quality: 'auto', output_format: 'png', n: 1 },
-          { headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
-        const b64 = openaiRes.data?.data?.[0]?.b64_json;
-        if (!b64) throw new Error('OpenAI returned no image data');
-        const buf      = Buffer.from(b64, 'base64');
+        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name });
+        const buffers = await generateOpenAIAdImageBuffers({ prompt: imagePrompt, quality: 'high', n: 1 });
+        const buf      = buffers[0];
         const fname    = `ab-img-${nanoid(10)}.png`;
         const fpath    = path.join(generatedDir, fname);
         fs.writeFileSync(fpath, buf);
@@ -666,15 +655,8 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
         imagePublicUrl = renderBase ? `${renderBase}/api/media/${fname}` : imageUrl;
         console.log('[OPENAI_IMAGE_GENERATION_SUCCESS]', { filename: fname, bytes: buf.length });
       } catch (imgErr) {
-        const statusCode    = imgErr?.response?.status;
-        const responseBody  = imgErr?.response?.data;
-        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', {
-          message:      imgErr?.message,
-          statusCode,
-          responseBody,
-          prompt:       imagePrompt,
-        });
-        throw new Error(`Image generation failed for the image challenger preview: ${imgErr?.message}`);
+        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', { message: imgErr?.message, prompt: imagePrompt });
+        throw new Error(`Image generation failed. Please try again.`);
       }
     }
 
