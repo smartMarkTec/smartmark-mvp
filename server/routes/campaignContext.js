@@ -595,7 +595,8 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const userToken = getFbUserToken(clientOwnerKey);
   if (!userToken) throw new Error(`No Facebook token found for ${clientOwnerKey}. Please reconnect the client's Facebook account.`);
 
-  console.log('[AB_TEST_PREVIEW_GENERATING]', { controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
+  const previewSessionId = nanoid(8);
+  console.log('[AB_TEST_PREVIEW_SESSION_START]', { previewSessionId, controlAdId, campaignId, clientOwnerKey, challengerCount: challengers.length });
 
   // Fetch control ad from Meta (read-only)
   const controlRes = await axios.get(
@@ -622,8 +623,8 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const controlCta      = String(linkData.call_to_action?.type || 'LEARN_MORE').trim();
   const controlLink     = String(linkData.link    || '').trim();
   const controlImageUrl     = String(creative.thumbnail_url || '').trim();
-  // linkData.picture is the actual ad image — higher-res than thumbnail_url
-  const controlFullImageUrl = String(linkData.picture || '').trim();
+  const controlFullImageUrl = String(linkData.picture      || '').trim();
+  const imageHash           = String(creative.image_hash   || '').trim();
 
   // Set up storage for generated images
   const fs   = require('fs');
@@ -633,21 +634,64 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const renderBase = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   try { fs.mkdirSync(generatedDir, { recursive: true }); } catch {}
 
-  // Download and cache the control ad image locally for sharp headline-test preview.
-  // Meta CDN thumbnails are tiny; serving through /api/media/ gives a full-res copy.
+  // Resolve the best control image URL.
+  // Priority: image_hash lookup → linkData.picture → thumbnail_url (tiny, last resort).
+  const CTRL_IMG_MIN_BYTES = 50000; // anything smaller is a thumbnail/icon, not a proper ad image
+  let controlHiResUrl    = '';
   let controlCachedImageUrl = '';
-  const controlSourceUrl = controlFullImageUrl || controlImageUrl;
-  if (controlSourceUrl) {
+  let controlImageLowRes = false; // set true when no usable full-size image is available
+
+  if (imageHash) {
+    console.log('[CONTROL_IMAGE_HASH_LOOKUP_START]', { previewSessionId, imageHash, accountId });
     try {
-      const imgDl = await axios.get(controlSourceUrl, { responseType: 'arraybuffer', timeout: 15000 });
-      const fname  = `ctrl-img-${nanoid(10)}.jpg`;
+      const hashRes   = await axios.get(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
+        {
+          params: { access_token: userToken, hashes: JSON.stringify([imageHash]), fields: 'url' },
+          timeout: 10000,
+        }
+      );
+      const entry     = (hashRes.data?.data || [])[0];
+      controlHiResUrl = String(entry?.url || '').trim();
+      console.log('[CONTROL_IMAGE_HASH_LOOKUP_RESULT]', { previewSessionId, imageHash, found: !!controlHiResUrl, urlPreview: controlHiResUrl.slice(0, 100) });
+    } catch (hashErr) {
+      console.warn('[CONTROL_IMAGE_HASH_LOOKUP_FAILED]', { previewSessionId, imageHash, message: hashErr?.message });
+    }
+  }
+
+  // Try each candidate source in priority order; accept only images ≥ 50 KB with an image content-type.
+  const candidateSources = [
+    { url: controlHiResUrl,     type: 'image_hash_url'    },
+    { url: controlFullImageUrl, type: 'linkdata_picture'  },
+    { url: controlImageUrl,     type: 'thumbnail_url'     },
+  ].filter((s) => !!s.url);
+
+  for (const candidate of candidateSources) {
+    try {
+      const imgDl      = await axios.get(candidate.url, { responseType: 'arraybuffer', timeout: 15000 });
+      const bytes      = imgDl.data.byteLength;
+      const contentType = String(imgDl.headers?.['content-type'] || '').toLowerCase();
+      const isImage    = contentType.startsWith('image/');
+      const isUsable   = isImage && bytes >= CTRL_IMG_MIN_BYTES;
+
+      if (!isUsable) {
+        console.warn('[CONTROL_IMAGE_TOO_SMALL]', { previewSessionId, sourceType: candidate.type, bytes, contentType, url: candidate.url.slice(0, 100) });
+        continue; // try next candidate
+      }
+
+      const fname = `ctrl-img-${nanoid(10)}.jpg`;
       fs.writeFileSync(path.join(generatedDir, fname), Buffer.from(imgDl.data));
       controlCachedImageUrl = `/api/media/${fname}`;
-      console.log('[CONTROL_IMAGE_CACHED]', { fname, bytes: imgDl.data.byteLength });
+      console.log('[CONTROL_IMAGE_SOURCE_SELECTED]', { previewSessionId, sourceType: candidate.type, fname, bytes });
+      break;
     } catch (dlErr) {
-      console.warn('[CONTROL_IMAGE_CACHE_FAILED]', dlErr?.message);
-      // Non-fatal: fall back to Meta CDN URL below
+      console.warn('[CONTROL_IMAGE_CACHE_FAILED]', { previewSessionId, sourceType: candidate.type, message: dlErr?.message });
     }
+  }
+
+  if (!controlCachedImageUrl) {
+    controlImageLowRes = true;
+    console.warn('[CONTROL_IMAGE_SOURCE_SELECTED]', { previewSessionId, sourceType: 'none', reason: 'no usable full-size image — headline fullscreen will show low-res warning' });
   }
 
   const nowIso = new Date().toISOString();
@@ -656,15 +700,15 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   for (let i = 0; i < challengers.length; i++) {
     const challenger = challengers[i];
     const isHeadline = challenger.testType === 'headline';
-    let imageUrl       = controlCachedImageUrl || controlImageUrl; // cached local copy for sharp display
-    let imagePublicUrl = controlImageUrl; // absolute URL for Meta upload (headline test never re-uploads)
+    let imageUrl       = controlCachedImageUrl || controlImageUrl; // cached full-size for card; falls back to thumbnail
+    let imagePublicUrl = controlImageUrl; // Meta upload: headline test never re-uploads
     let imageFailed    = false;
 
     if (!isHeadline) {
       // Image challenger: use the same proven pipeline as normal campaign ad generation
       const imagePrompt = 'Photorealistic HVAC tune-up ad image. Outdoor residential AC unit, clean professional service look, sunny day, no people, no logos, no text.';
       try {
-        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name });
+        console.log('[OPENAI_IMAGE_GENERATION_START]', { previewSessionId, challengerName: challenger.name });
         const buffers = await generateOpenAIAdImageBuffers({ prompt: imagePrompt, quality: 'high', n: 1 });
         const buf      = buffers[0];
         const fname    = `ab-img-${nanoid(10)}.png`;
@@ -672,39 +716,42 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
         fs.writeFileSync(fpath, buf);
         imageUrl       = `/api/media/${fname}`;
         imagePublicUrl = renderBase ? `${renderBase}/api/media/${fname}` : imageUrl;
-        console.log('[OPENAI_IMAGE_GENERATION_SUCCESS]', { filename: fname, bytes: buf.length });
+        console.log('[OPENAI_IMAGE_GENERATION_SUCCESS]', { previewSessionId, filename: fname, bytes: buf.length, imageUrl });
       } catch (imgErr) {
-        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', { message: imgErr?.message, prompt: imagePrompt });
+        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', { previewSessionId, message: imgErr?.message, prompt: imagePrompt });
         throw new Error(`Image generation failed. Please try again.`);
       }
     }
 
     drafts.push({
-      id:             `preview-${Date.now()}-${i}`,
-      status:         'draft',
-      publishStatus:  imageFailed ? 'image_generation_failed' : 'needs_review',
-      source:         'ai_agent',
+      id:              `preview-${previewSessionId}-${i}`,
+      previewSessionId,
+      status:          'draft',
+      publishStatus:   imageFailed ? 'image_generation_failed' : 'needs_review',
+      source:          'ai_agent',
       controlAdId,
       campaignId,
       adsetId,
       pageId,
       accountId,
-      testType:       challenger.testType,
-      name:           challenger.name,
-      headline:       isHeadline ? (challenger.headline || controlHeadline) : controlHeadline,
-      body:           controlBody,
-      cta:            controlCta,
-      link:           controlLink,
+      testType:        challenger.testType,
+      name:            challenger.name,
+      headline:        isHeadline ? (challenger.headline || controlHeadline) : controlHeadline,
+      body:            controlBody,
+      cta:             controlCta,
+      link:            controlLink,
       imageUrl,
       imagePublicUrl,
-      // fullImageUrl: best available for lightbox display — cached local copy beats Meta CDN thumbnails
-      fullImageUrl:   isHeadline ? (controlCachedImageUrl || controlFullImageUrl || controlImageUrl) : imageUrl,
+      // fullImageUrl: only set for lightbox when we have a proper-sized image (≥50 KB).
+      // Empty string means frontend will not offer Enlarge for headline test.
+      fullImageUrl:        isHeadline ? (controlCachedImageUrl || '') : imageUrl,
+      controlImageLowRes:  isHeadline ? controlImageLowRes : false,
       imageFailed,
-      changes:        isHeadline ? ['headline'] : ['image'],
+      changes:         isHeadline ? ['headline'] : ['image'],
       controlHeadline,
       controlImageUrl,
-      linkDataJson:   JSON.stringify(linkData), // stored for direct Meta creation
-      createdAt:      nowIso,
+      linkDataJson:    JSON.stringify(linkData),
+      createdAt:       nowIso,
     });
   }
 
@@ -718,7 +765,12 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
     await db.write();
   }
 
-  console.log('[AB_TEST_PREVIEWS_READY]', { campaignId, draftCount: drafts.length });
+  console.log('[AB_TEST_PREVIEWS_READY]', {
+    previewSessionId,
+    campaignId,
+    draftCount: drafts.length,
+    drafts: drafts.map((d) => ({ id: d.id, testType: d.testType, imageUrl: d.imageUrl, fullImageUrl: d.fullImageUrl })),
+  });
   return { drafts, adsetId, pageId, controlHeadline, controlBody, controlCta, controlLink, controlImageUrl };
 }
 

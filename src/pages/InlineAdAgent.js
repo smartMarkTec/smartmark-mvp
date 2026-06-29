@@ -848,25 +848,32 @@ export default function InlineAdAgent({
 
       // A/B test preview cards — stay on AI Agent tab, show visual cards
       if (j?.eventType === "ab_test_previews_generated" && Array.isArray(j?.previews) && j.previews.length > 0) {
+        const newSessionId = j.previews[0]?.previewSessionId || "?";
         console.log("[AB_TEST_PREVIEW_RENDERED_FRONTEND]", {
-          campaignId:   j.campaignId,
-          controlAdId:  j.controlAdId,
-          previewCount: j.previews.length,
+          campaignId:      j.campaignId,
+          controlAdId:     j.controlAdId,
+          previewCount:    j.previews.length,
+          previewSessionId: newSessionId,
+          previewIds:      j.previews.map((p) => p.id),
+          imageUrls:       j.previews.map((p) => ({ testType: p.testType, imageUrl: p.imageUrl, fullImageUrl: p.fullImageUrl })),
         });
-        // Replace the "Generating…" interim message (or last assistant msg) with the preview card
         setMsgs((prev) => {
-          const updated = [...prev];
-          // Find the most recent generating/assistant message and upgrade it
+          // Strip ALL stale preview cards and ALL "Generating…" placeholders from prior runs,
+          // then upgrade the reply message just pushed to the new preview card.
+          const cleaned = prev.filter((m) => m.type !== "ab_test_preview" && !m._generating);
+          console.log("[AB_TEST_STALE_PREVIEWS_CLEARED]", { removedCount: prev.length - cleaned.length });
+          const updated = [...cleaned];
           for (let i = updated.length - 1; i >= 0; i--) {
             if (updated[i].role === "assistant") {
               updated[i] = {
                 ...updated[i],
-                content:     j.reply || `I generated ${j.previews.length} A/B test preview${j.previews.length !== 1 ? "s" : ""}.`,
-                type:        "ab_test_preview",
-                campaignId:  j.campaignId,
-                controlAdId: j.controlAdId,
-                previews:    j.previews,
-                _generating: false,
+                content:          j.reply || `I generated ${j.previews.length} A/B test preview${j.previews.length !== 1 ? "s" : ""}.`,
+                type:             "ab_test_preview",
+                campaignId:       j.campaignId,
+                controlAdId:      j.controlAdId,
+                previews:         j.previews,
+                previewSessionId: newSessionId,
+                _generating:      false,
               };
               break;
             }
@@ -966,8 +973,10 @@ export default function InlineAdAgent({
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", width: "100%" }}>
             {m.previews.map((preview, pi) => {
-              const imgSrc    = preview.imageUrl || null;
-              const fullImgSrc = preview.fullImageUrl || preview.imagePublicUrl || preview.imageUrl || null;
+              const imgSrc     = preview.imageUrl || null;
+              const fullImgSrc = preview.fullImageUrl || null;
+              // Only offer Enlarge when we have a proper full-size image (backend sets fullImageUrl empty if too small)
+              const canEnlarge = !preview.controlImageLowRes && !!fullImgSrc;
               return (
                 <div key={pi} style={{
                   flex: "1 1 220px", minWidth: 200, maxWidth: 300,
@@ -985,23 +994,30 @@ export default function InlineAdAgent({
                   </div>
                   {imgSrc ? (
                     <div
-                      style={{ position: "relative", cursor: "zoom-in" }}
-                      onClick={() => setAbLightbox({ src: fullImgSrc, title: preview.name })}
+                      style={{ position: "relative", cursor: canEnlarge ? "zoom-in" : "default" }}
+                      onClick={canEnlarge ? () => setAbLightbox({ src: fullImgSrc, title: preview.name }) : undefined}
                     >
                       <img
                         src={imgSrc}
                         alt={preview.name}
                         style={{ width: "100%", borderRadius: 8, aspectRatio: "1.9/1", objectFit: "cover", border: "1px solid #ddd6fe" }}
                       />
-                      <span style={{
-                        position: "absolute", bottom: 6, right: 6,
-                        background: "rgba(0,0,0,0.5)", color: "#fff",
-                        fontSize: 10, borderRadius: 4, padding: "2px 6px",
-                      }}>⤢ Enlarge</span>
+                      {canEnlarge && (
+                        <span style={{
+                          position: "absolute", bottom: 6, right: 6,
+                          background: "rgba(0,0,0,0.5)", color: "#fff",
+                          fontSize: 10, borderRadius: 4, padding: "2px 6px",
+                        }}>⤢ Enlarge</span>
+                      )}
                     </div>
                   ) : (
                     <div style={{ fontSize: 10, color: "#b91c1c", background: "#fef2f2", borderRadius: 6, padding: "6px 8px" }}>
                       Image missing — regenerate required before publishing
+                    </div>
+                  )}
+                  {preview.controlImageLowRes && preview.testType === "headline" && (
+                    <div style={{ fontSize: 10, color: "#92400e", background: "#fffbeb", borderRadius: 6, padding: "5px 8px", border: "1px solid #fcd34d" }}>
+                      Control image is low-resolution from Meta.
                     </div>
                   )}
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>{preview.headline}</div>
