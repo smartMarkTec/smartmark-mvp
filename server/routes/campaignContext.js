@@ -648,12 +648,12 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
         'Professional, trustworthy, local service feel. No people visible. ' +
         'No text overlay, no logos, no branding, no fake phone numbers. High quality photo.';
       try {
-        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name });
+        console.log('[OPENAI_IMAGE_GENERATION_START]', { challengerName: challenger.name, prompt: imagePrompt });
         const openaiKey = process.env.OPENAI_API_KEY;
         if (!openaiKey) throw new Error('OPENAI_API_KEY not configured');
         const openaiRes = await axios.post(
           'https://api.openai.com/v1/images/generations',
-          { model: 'gpt-image-1.5', prompt: imagePrompt, size: '1024x1024', quality: 'standard', output_format: 'png', n: 1 },
+          { model: 'gpt-image-1', prompt: imagePrompt, size: '1024x1024', quality: 'auto', output_format: 'png', n: 1 },
           { headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
         );
         const b64 = openaiRes.data?.data?.[0]?.b64_json;
@@ -666,10 +666,15 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
         imagePublicUrl = renderBase ? `${renderBase}/api/media/${fname}` : imageUrl;
         console.log('[OPENAI_IMAGE_GENERATION_SUCCESS]', { filename: fname, bytes: buf.length });
       } catch (imgErr) {
-        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', imgErr?.message);
-        imageFailed    = true;
-        imageUrl       = ''; // signals frontend: image generation failed
-        imagePublicUrl = '';
+        const statusCode    = imgErr?.response?.status;
+        const responseBody  = imgErr?.response?.data;
+        console.error('[OPENAI_IMAGE_GENERATION_FAILED]', {
+          message:      imgErr?.message,
+          statusCode,
+          responseBody,
+          prompt:       imagePrompt,
+        });
+        throw new Error(`Image generation failed for the image challenger preview: ${imgErr?.message}`);
       }
     }
 
@@ -1258,7 +1263,8 @@ router.post('/campaign-context/create-challenger-drafts', async (req, res) => {
     return res.json({ ok: true, ...result });
   } catch (err) {
     console.error('[create-challenger-drafts]', err?.message);
-    return res.status(500).json({ ok: false, error: err?.message || 'Failed to create challenger drafts.' });
+    // Return 200 with ok:false so adAgent.js can read the structured error without axios throwing.
+    return res.json({ ok: false, error: err?.message || 'Failed to create challenger drafts.' });
   }
 });
 

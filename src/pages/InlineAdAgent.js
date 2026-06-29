@@ -879,6 +879,13 @@ export default function InlineAdAgent({
         return;
       }
 
+      // A/B test generation error — clear "Generating…" placeholder, show error clearly
+      if (j?.eventType === "ab_test_error") {
+        setMsgs((prev) => prev.filter((msg) => !msg._generating));
+        scroll();
+        return;
+      }
+
       // Legacy: challenger_drafts_created (keep for backward compat)
       if (j?.eventType === "challenger_drafts_created" && Array.isArray(j?.drafts) && j.drafts.length > 0) {
         if (onChallengerDraftsCreated) onChallengerDraftsCreated(j.campaignId, j.drafts);

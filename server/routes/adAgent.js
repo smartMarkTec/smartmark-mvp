@@ -1275,12 +1275,21 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
               ...(sid2 ? { 'x-sm-sid': sid2 } : {}),
               'cookie': req.headers.cookie || '',
             },
-            timeout: 20000,
+            timeout: 150000, // 150s — accommodates OpenAI's 120s image generation timeout
           }
         );
         draftResult2 = draftRes2.data || null;
       } catch (draftErr2) {
-        console.error('[AD_AGENT_DRAFT_CREATION_FAILED]', draftErr2?.response?.data || draftErr2?.message);
+        const errMsg = draftErr2?.response?.data?.error || draftErr2?.message || 'Failed to build A/B test previews.';
+        console.error('[AD_AGENT_DRAFT_CREATION_FAILED]', { error: errMsg, status: draftErr2?.response?.status });
+        return res.json({ ok: false, eventType: 'ab_test_error', reply: errMsg });
+      }
+
+      // Route returned ok:false (e.g. image generation failed) — surface the error
+      if (draftResult2 && !draftResult2.ok) {
+        const errMsg = draftResult2.error || 'Failed to build A/B test previews.';
+        console.error('[AD_AGENT_DRAFT_RESULT_FAILED]', { error: errMsg });
+        return res.json({ ok: false, eventType: 'ab_test_error', reply: errMsg });
       }
 
       console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_drafts/immediate', ok: !!draftResult2?.ok, message: trimmed.slice(0, 300) });
@@ -1304,7 +1313,8 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       }
 
       return res.json({
-        ok:    true,
+        ok:    false,
+        eventType: 'ab_test_error',
         reply: `I could not build the draft previews — the control ad fetch may have failed. Check that \`${ctrlId2}\` is accessible and the client's Facebook account is connected, then try again.`,
       });
     }
