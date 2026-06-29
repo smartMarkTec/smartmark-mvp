@@ -855,52 +855,85 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
       if (challenger.imageHash) {
         newLinkData.image_hash = challenger.imageHash;
       } else {
-        // Upload image URL to Meta ad account to get a hash
-        const uploadRes = await axios.post(
-          `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
-          null,
-          {
-            params: { access_token: userToken, 'url': challenger.imageUrl },
-            timeout: 30000,
-          }
-        );
+        console.log('[AB_TEST_PUBLISH_IMAGE_UPLOAD_START]', { challengerName: challenger.name, imageUrl: challenger.imageUrl?.slice(0, 120) });
+        let uploadRes;
+        try {
+          uploadRes = await axios.post(
+            `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
+            null,
+            { params: { access_token: userToken, url: challenger.imageUrl }, timeout: 30000 }
+          );
+        } catch (upErr) {
+          const metaStatus = upErr?.response?.status;
+          const metaBody   = upErr?.response?.data;
+          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload', challengerName: challenger.name, imageUrl: challenger.imageUrl, metaStatus, metaBody });
+          throw new Error(`Meta image upload failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || upErr?.message}`);
+        }
+        if (uploadRes.data?.error) {
+          const e = uploadRes.data.error;
+          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload_meta_error', challengerName: challenger.name, metaError: e });
+          throw new Error(`Meta image upload error for "${challenger.name}": ${e.message || JSON.stringify(e)}`);
+        }
         const imgHash = Object.values(uploadRes.data?.images || {})[0]?.hash;
-        if (!imgHash) throw new Error(`Failed to upload image for challenger "${challenger.name}".`);
+        if (!imgHash) {
+          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload_no_hash', challengerName: challenger.name, metaResponse: uploadRes.data });
+          throw new Error(`Meta returned no image hash for "${challenger.name}". Response: ${JSON.stringify(uploadRes.data)}`);
+        }
         newLinkData.image_hash = imgHash;
-        delete newLinkData.image_url; // remove URL reference if present
+        delete newLinkData.image_url;
       }
     } else {
       throw new Error(`Unknown testType "${challenger.testType}" for challenger "${challenger.name}".`);
     }
 
     // 3. Create new ad creative
-    const creativeRes = await axios.post(
-      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
-      {
-        name: challenger.name,
-        object_story_spec: { page_id: pageId, link_data: newLinkData },
-      },
-      { params: { access_token: userToken }, timeout: 15000 }
-    );
+    console.log('[AB_TEST_PUBLISH_CREATIVE_CREATE_START]', { challengerName: challenger.name, pageId });
+    let creativeRes;
+    try {
+      creativeRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
+        { name: challenger.name, object_story_spec: { page_id: pageId, link_data: newLinkData } },
+        { params: { access_token: userToken }, timeout: 15000 }
+      );
+    } catch (crErr) {
+      const metaStatus = crErr?.response?.status;
+      const metaBody   = crErr?.response?.data;
+      console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'creative_create', challengerName: challenger.name, metaStatus, metaBody });
+      throw new Error(`Meta creative creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || crErr?.message}`);
+    }
+    if (creativeRes.data?.error) {
+      const e = creativeRes.data.error;
+      console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'creative_create_meta_error', challengerName: challenger.name, metaError: e });
+      throw new Error(`Meta creative error for "${challenger.name}": ${e.message || JSON.stringify(e)}`);
+    }
     const newCreativeId = String(creativeRes.data?.id || '').trim();
     if (!newCreativeId || !(/^\d+$/.test(newCreativeId))) {
-      throw new Error(`Meta did not return a real creative ID for "${challenger.name}". Got: ${creativeRes.data?.id}`);
+      throw new Error(`Meta did not return a real creative ID for "${challenger.name}". Response: ${JSON.stringify(creativeRes.data)}`);
     }
 
     // 4. Create new ad in same ad set
-    const adRes = await axios.post(
-      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
-      {
-        name:     challenger.name,
-        adset_id: adsetId,
-        creative: { creative_id: newCreativeId },
-        status:   'ACTIVE',
-      },
-      { params: { access_token: userToken }, timeout: 15000 }
-    );
+    console.log('[AB_TEST_PUBLISH_AD_CREATE_START]', { challengerName: challenger.name, adsetId, newCreativeId });
+    let adRes;
+    try {
+      adRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
+        { name: challenger.name, adset_id: adsetId, creative: { creative_id: newCreativeId }, status: 'ACTIVE' },
+        { params: { access_token: userToken }, timeout: 15000 }
+      );
+    } catch (adErr) {
+      const metaStatus = adErr?.response?.status;
+      const metaBody   = adErr?.response?.data;
+      console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'ad_create', challengerName: challenger.name, metaStatus, metaBody });
+      throw new Error(`Meta ad creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || adErr?.message}`);
+    }
+    if (adRes.data?.error) {
+      const e = adRes.data.error;
+      console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'ad_create_meta_error', challengerName: challenger.name, metaError: e });
+      throw new Error(`Meta ad error for "${challenger.name}": ${e.message || JSON.stringify(e)}`);
+    }
     const newAdId = String(adRes.data?.id || '').trim();
     if (!newAdId || !(/^\d+$/.test(newAdId))) {
-      throw new Error(`Meta did not return a real ad ID for "${challenger.name}". Got: ${adRes.data?.id}`);
+      throw new Error(`Meta did not return a real ad ID for "${challenger.name}". Response: ${JSON.stringify(adRes.data)}`);
     }
 
     createdAds.push({
@@ -1467,6 +1500,13 @@ router.post('/campaign-context/publish-ab-previews', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Preview is missing controlAdId or accountId.' });
     }
 
+    console.log('[AB_TEST_PUBLISH_REQUEST]', { campaignId, clientOwnerKey, previewCount: previews.length });
+    console.log('[AB_TEST_PUBLISH_PAYLOAD]', previews.map((p) => ({
+      id: p.id, testType: p.testType, headline: p.headline?.slice(0, 60),
+      imageUrl: p.imageUrl?.slice(0, 100), imagePublicUrl: p.imagePublicUrl?.slice(0, 100),
+      cta: p.cta, link: p.link?.slice(0, 80), imageFailed: p.imageFailed,
+    })));
+
     // Build challengers from preview data for createChallengerAds
     const challengers = previews.map((p) => ({
       testType:  p.testType,
@@ -1483,10 +1523,8 @@ router.post('/campaign-context/publish-ab-previews', async (req, res) => {
       createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
     } catch (createErr) {
       console.error('[AB_TEST_META_CREATE_FAILED]', createErr?.message);
-      return res.status(500).json({
-        ok: false,
-        error: createErr?.message || 'Ad creation failed before Meta returned real ad IDs.',
-      });
+      // Return 200 with ok:false so the frontend can read the exact error
+      return res.json({ ok: false, error: createErr?.message || 'Ad creation failed before Meta returned real ad IDs.' });
     }
 
     // Clear pending drafts and confirm active ads in DB
@@ -1511,6 +1549,113 @@ router.post('/campaign-context/publish-ab-previews', async (req, res) => {
   } catch (err) {
     console.error('[publish-ab-previews]', err?.message);
     return res.status(500).json({ ok: false, error: err?.message || 'Failed to publish A/B test ads.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/campaign-context/ab-previews
+// Returns the saved pendingChallengerDrafts for a campaign so the frontend can
+// reload them after a page refresh without regenerating.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/campaign-context/ab-previews', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId } = req.query || {};
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId is required.' });
+
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+    );
+    const previews = recIdx >= 0
+      ? (db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [])
+      : [];
+
+    return res.json({ ok: true, previews });
+  } catch (err) {
+    console.error('[ab-previews GET]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/publish-ab-preview  (singular — one card at a time)
+// Publishes a single A/B preview to Meta, marks it published in DB.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/publish-ab-preview', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId, preview, adminClientId: adminClientIdFromBody } = req.body || {};
+    if (!campaignId || !preview) {
+      return res.status(400).json({ ok: false, error: 'campaignId and preview are required.' });
+    }
+
+    const clientOwnerKey = adminClientIdFromBody && isAdminOwnerKey(ownerKey)
+      ? `user:${adminClientIdFromBody}`
+      : ownerKey;
+
+    const { controlAdId, accountId } = preview;
+    if (!controlAdId || !accountId) {
+      return res.status(400).json({ ok: false, error: 'Preview is missing controlAdId or accountId.' });
+    }
+
+    if (preview.imageFailed || (!preview.imageUrl && preview.testType === 'image')) {
+      return res.json({ ok: false, error: 'Cannot publish: image generation failed for this preview. Regenerate first.' });
+    }
+
+    const imageUrl = preview.testType === 'image' ? (preview.imagePublicUrl || preview.imageUrl) : undefined;
+
+    console.log('[AB_TEST_PUBLISH_REQUEST]', { campaignId, clientOwnerKey, previewId: preview.id, testType: preview.testType });
+    console.log('[AB_TEST_PUBLISH_PAYLOAD]', {
+      previewId: preview.id, testType: preview.testType,
+      headline: preview.headline?.slice(0, 60),
+      imageUrl: imageUrl?.slice(0, 100),
+      cta: preview.cta, link: preview.link?.slice(0, 80),
+    });
+
+    const challengers = [{ testType: preview.testType, name: preview.name, headline: preview.headline, imageUrl }];
+
+    let createdAds;
+    try {
+      createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
+    } catch (createErr) {
+      console.error('[AB_TEST_PUBLISH_FAILED]', { previewId: preview.id, error: createErr?.message });
+      return res.json({ ok: false, error: createErr?.message || 'Ad creation failed.' });
+    }
+
+    const createdAd = createdAds[0];
+
+    // Mark this preview as published in DB
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+    );
+    if (recIdx >= 0) {
+      const pending = db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [];
+      db.data.campaign_creatives[recIdx].pendingChallengerDrafts = pending.map((d) =>
+        d.id === preview.id
+          ? { ...d, publishStatus: 'published', metaAdId: createdAd?.metaAdId, publishedAt: new Date().toISOString() }
+          : d
+      );
+      await db.write();
+    }
+
+    console.log('[AB_TEST_META_AD_CREATED]', { campaignId, previewId: preview.id, metaAdId: createdAd?.metaAdId });
+
+    return res.json({
+      ok:        true,
+      createdAd: { ...createdAd, status: 'active', uiStatus: 'ACTIVE' },
+      campaignId,
+      reply:     `Published "${preview.name}". Meta ad ID: \`${createdAd?.metaAdId}\``,
+    });
+  } catch (err) {
+    console.error('[publish-ab-preview]', err?.message);
+    return res.json({ ok: false, error: err?.message || 'Failed to publish A/B preview.' });
   }
 });
 

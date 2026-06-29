@@ -309,8 +309,8 @@ export default function InlineAdAgent({
     const url = acId
       ? `/api/ad-agent/history?adminClientId=${encodeURIComponent(acId)}`
       : "/api/ad-agent/history";
-    // Only save plain text messages (not complex type objects like "creatives")
-    const toSave = newMsgs.filter((m) => typeof m.content === "string" && m.type !== "creatives");
+    // Only save plain text messages — exclude complex card types that are reloaded from backend
+    const toSave = newMsgs.filter((m) => typeof m.content === "string" && m.type !== "creatives" && m.type !== "ab_test_preview");
     fetch("/api/ad-agent/history", {
       method: "POST", credentials: "include",
       headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
@@ -329,6 +329,41 @@ export default function InlineAdAgent({
     saveTmr.current = setTimeout(() => saveHistory(msgs), 500);
     return () => clearTimeout(saveTmr.current);
   }, [msgs, saveHistory]);
+
+  /* ─── Load saved A/B previews when campaign changes ─────────────────── */
+  useEffect(() => {
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return;
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const url = `/api/campaign-context/ab-previews?campaignId=${encodeURIComponent(selectedCampaignId)}${adminClientId ? `&adminClientId=${encodeURIComponent(adminClientId)}` : ""}`;
+    fetch(url, { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} })
+      .then((r) => r.json())
+      .catch(() => ({}))
+      .then((j) => {
+        if (!j?.ok || !Array.isArray(j.previews) || j.previews.length === 0) return;
+        // All published — nothing to show
+        if (j.previews.every((p) => p.publishStatus === "published")) return;
+        setMsgs((prev) => {
+          // Don't inject if a preview card is already visible (fresh generation in progress)
+          if (prev.some((m) => m.type === "ab_test_preview")) return prev;
+          const restoredStates = Object.fromEntries(
+            j.previews
+              .filter((p) => p.publishStatus === "published")
+              .map((p) => [p.id, { published: true, metaAdId: p.metaAdId }])
+          );
+          return [...prev, {
+            _k: Date.now() + Math.random(),
+            role: "assistant",
+            type: "ab_test_preview",
+            content: `${j.previews.length} A/B test preview${j.previews.length !== 1 ? "s" : ""} are saved and ready to publish.`,
+            campaignId: selectedCampaignId,
+            controlAdId: j.previews[0]?.controlAdId,
+            previews: j.previews,
+            previewStates: restoredStates,
+          }];
+        });
+      });
+  // eslint-disable-next-line
+  }, [selectedCampaignId, adminClientId]);
 
   /* ─── Initial load ───────────────────────────────────────────────────── */
   useEffect(() => {
@@ -958,6 +993,45 @@ export default function InlineAdAgent({
     scroll();
   }
 
+  /* ─── Per-card publish helper ───────────────────────────────────────── */
+  async function handlePublishOnePreview(campaignId, preview, msgKey) {
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const _adminClientId = adminClientId || (localStorage.getItem("sm_admin_target_client_id") || "").trim();
+
+    if (preview.imageFailed || (!preview.imageUrl && preview.testType === "image")) {
+      setMsgs((prev) => prev.map((msg) => msg._k !== msgKey ? msg : {
+        ...msg, previewStates: { ...(msg.previewStates || {}), [preview.id]: { error: "Cannot publish — image generation failed." } },
+      }));
+      return;
+    }
+
+    setMsgs((prev) => prev.map((msg) => msg._k !== msgKey ? msg : {
+      ...msg, previewStates: { ...(msg.previewStates || {}), [preview.id]: { publishing: true } },
+    }));
+    console.log("[AB_TEST_SINGLE_PUBLISH_START]", { campaignId, previewId: preview.id, testType: preview.testType });
+
+    const r = await fetch("/api/campaign-context/publish-ab-preview", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+      body: JSON.stringify({ campaignId, preview, adminClientId: _adminClientId }),
+    }).catch(() => null);
+    const result = r ? await r.json().catch(() => ({})) : {};
+
+    if (result.ok && result.createdAd?.metaAdId) {
+      console.log("[AB_TEST_SINGLE_PUBLISHED]", { campaignId, previewId: preview.id, metaAdId: result.createdAd.metaAdId });
+      setMsgs((prev) => prev.map((msg) => msg._k !== msgKey ? msg : {
+        ...msg, previewStates: { ...(msg.previewStates || {}), [preview.id]: { published: true, metaAdId: result.createdAd.metaAdId } },
+      }));
+      if (onChallengerDraftsCreated) onChallengerDraftsCreated(campaignId, [result.createdAd]);
+    } else {
+      console.error("[AB_TEST_SINGLE_PUBLISH_FAILED]", { campaignId, previewId: preview.id, error: result.error });
+      setMsgs((prev) => prev.map((msg) => msg._k !== msgKey ? msg : {
+        ...msg, previewStates: { ...(msg.previewStates || {}), [preview.id]: { error: result.error || "Publish failed. Try again." } },
+      }));
+    }
+    scroll();
+  }
+
   /* ─── Render helpers ─────────────────────────────────────────────────── */
   function renderMsg(m) {
     const isAI = m.role === "assistant";
@@ -1033,31 +1107,45 @@ export default function InlineAdAgent({
                   <div style={{ fontSize: 10, color: "#7c3aed", fontStyle: "italic" }}>
                     Changes: {(preview.changes || []).join(", ")}
                   </div>
+                  {/* Per-card publish button */}
+                  {(() => {
+                    const ps = (m.previewStates || {})[preview.id];
+                    if (ps?.published) {
+                      return (
+                        <div style={{ fontSize: 10, color: "#16a34a", fontWeight: 700, background: "#f0fdf4", borderRadius: 6, padding: "5px 8px", border: "1px solid #86efac" }}>
+                          ✓ Published · Meta Ad ID: {ps.metaAdId}
+                        </div>
+                      );
+                    }
+                    if (ps?.error) {
+                      return (
+                        <div style={{ fontSize: 10, color: "#b91c1c", background: "#fef2f2", borderRadius: 6, padding: "5px 8px" }}>
+                          {ps.error}
+                          <button
+                            style={{ marginLeft: 8, fontSize: 10, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}
+                            onClick={() => handlePublishOnePreview(m.campaignId, preview, m._k)}
+                          >Retry</button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <button
+                        disabled={!!ps?.publishing}
+                        onClick={() => handlePublishOnePreview(m.campaignId, preview, m._k)}
+                        style={{
+                          background: ps?.publishing ? "#a78bfa" : "#7c3aed", color: "#fff", border: "none",
+                          borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, marginTop: 4,
+                          cursor: ps?.publishing ? "not-allowed" : "pointer", opacity: ps?.publishing ? 0.7 : 1,
+                        }}
+                      >
+                        {ps?.publishing ? "Publishing…" : "Publish this ad"}
+                      </button>
+                    );
+                  })()}
                 </div>
               );
             })}
           </div>
-          {!m.approved && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                disabled={!!m.publishing}
-                onClick={() => handleApproveAbPreviews(m.campaignId, m.previews, m._k)}
-                style={{
-                  background: m.publishing ? "#a78bfa" : "#7c3aed", color: "#fff", border: "none",
-                  borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700,
-                  cursor: m.publishing ? "not-allowed" : "pointer", opacity: m.publishing ? 0.7 : 1,
-                }}
-              >
-                {m.publishing ? "Publishing to Meta…" : "Approve & Publish to Meta"}
-              </button>
-              {!m.publishing && (
-                <span style={{ fontSize: 11, color: "#94a3b8" }}>Creates real ads in the existing ad set</span>
-              )}
-            </div>
-          )}
-          {m.approved && (
-            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>✓ Published — new ads are now active on Meta</div>
-          )}
         </div>
       );
     }
