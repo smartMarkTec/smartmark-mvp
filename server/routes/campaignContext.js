@@ -585,6 +585,32 @@ router.patch('/ai-proposal/:id', async (req, res) => {
 // applied (or failed). This is what "Approve & Apply" calls — it actually
 // mutates Meta, not just marks the record approved.
 // ─────────────────────────────────────────────────────────────────────────────
+// Build an image-generation prompt from control-ad context.
+// Uses the same system instruction as the normal Smartemark ad-image pipeline
+// so the result feels like a Smartemark creative, not a plain stock photo.
+// "change only the image" is an A/B rule for Meta — NOT this prompt.
+function buildAbImagePrompt({ headline, body, cta }) {
+  const lines = [
+    headline ? `Headline: "${headline}"` : null,
+    body     ? `Ad copy: "${body.slice(0, 200)}"` : null,
+    cta      ? `CTA: "${cta}"` : null,
+  ].filter(Boolean);
+
+  return [
+    'Create a simple, visually appealing, mildly creative, photorealistic ad image using the brief below.',
+    'Base the visual concept on the industry and ad copy. Keep it professional and not over the top.',
+    'Avoid humans when possible; if humans appear, vary race, gender, age, and appearance.',
+    'Use tasteful overlay copy that feels like a real ad, not a template.',
+    'Keep all text fully inside the image frame.',
+    'Do not invent phone numbers, websites, locations, offers, or contact details not listed below.',
+    'Each generation should have a visually distinct concept — vary the subject, composition, angle, setting, and layout so repeated generations feel fresh.',
+    'Do not draw any invented logo or brand mark.',
+    '',
+    'Brief:',
+    ...lines,
+  ].join('\n');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // buildChallengerDraftPreviews — Step 1 of the two-step flow.
 // Fetches the control ad from Meta (read-only), builds draft preview objects
@@ -705,8 +731,9 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
     let imageFailed    = false;
 
     if (!isHeadline) {
-      // Image challenger: use the same proven pipeline as normal campaign ad generation
-      const imagePrompt = 'Photorealistic HVAC tune-up ad image. Outdoor residential AC unit, clean professional service look, sunny day, no people, no logos, no text.';
+      // Image challenger: generate using the same creative pipeline as normal Smartemark ad creation.
+      // "change only the image" is the A/B rule for Meta — it is NOT the image prompt.
+      const imagePrompt = buildAbImagePrompt({ headline: controlHeadline, body: controlBody, cta: controlCta });
       try {
         console.log('[OPENAI_IMAGE_GENERATION_START]', { previewSessionId, challengerName: challenger.name });
         const buffers = await generateOpenAIAdImageBuffers({ prompt: imagePrompt, quality: 'high', n: 1 });
