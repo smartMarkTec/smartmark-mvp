@@ -633,14 +633,31 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const renderBase = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   try { fs.mkdirSync(generatedDir, { recursive: true }); } catch {}
 
+  // Download and cache the control ad image locally for sharp headline-test preview.
+  // Meta CDN thumbnails are tiny; serving through /api/media/ gives a full-res copy.
+  let controlCachedImageUrl = '';
+  const controlSourceUrl = controlFullImageUrl || controlImageUrl;
+  if (controlSourceUrl) {
+    try {
+      const imgDl = await axios.get(controlSourceUrl, { responseType: 'arraybuffer', timeout: 15000 });
+      const fname  = `ctrl-img-${nanoid(10)}.jpg`;
+      fs.writeFileSync(path.join(generatedDir, fname), Buffer.from(imgDl.data));
+      controlCachedImageUrl = `/api/media/${fname}`;
+      console.log('[CONTROL_IMAGE_CACHED]', { fname, bytes: imgDl.data.byteLength });
+    } catch (dlErr) {
+      console.warn('[CONTROL_IMAGE_CACHE_FAILED]', dlErr?.message);
+      // Non-fatal: fall back to Meta CDN URL below
+    }
+  }
+
   const nowIso = new Date().toISOString();
   const drafts = [];
 
   for (let i = 0; i < challengers.length; i++) {
     const challenger = challengers[i];
     const isHeadline = challenger.testType === 'headline';
-    let imageUrl       = controlImageUrl; // relative URL for frontend display
-    let imagePublicUrl = controlImageUrl; // absolute URL for Meta upload
+    let imageUrl       = controlCachedImageUrl || controlImageUrl; // cached local copy for sharp display
+    let imagePublicUrl = controlImageUrl; // absolute URL for Meta upload (headline test never re-uploads)
     let imageFailed    = false;
 
     if (!isHeadline) {
@@ -680,8 +697,8 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
       link:           controlLink,
       imageUrl,
       imagePublicUrl,
-      // fullImageUrl: best available for lightbox display (not Meta thumbnail)
-      fullImageUrl:   isHeadline ? (controlFullImageUrl || controlImageUrl) : imageUrl,
+      // fullImageUrl: best available for lightbox display — cached local copy beats Meta CDN thumbnails
+      fullImageUrl:   isHeadline ? (controlCachedImageUrl || controlFullImageUrl || controlImageUrl) : imageUrl,
       imageFailed,
       changes:        isHeadline ? ['headline'] : ['image'],
       controlHeadline,
