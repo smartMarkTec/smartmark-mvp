@@ -802,6 +802,59 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// uploadAbImageBytes — uploads a generated /api/media/ image to Meta as base64 bytes.
+// Same method as auth.js uploadImageFromBase64 — NOT the url= query-param path.
+// Returns the Meta image hash string.
+// ─────────────────────────────────────────────────────────────────────────────
+async function uploadAbImageBytes({ imageUrl, imagePublicUrl, challengerName, accountId, userToken }) {
+  const _path  = require('path');
+  const _fs    = require('fs');
+  const _gdir  = process.env.GENERATED_DIR ||
+    (process.env.RENDER ? '/tmp/generated' : _path.join(__dirname, '../public/generated'));
+  const _fname = String(imageUrl || '').replace(/^.*\/api\/media\//, '').replace(/^.*\/media\//, '');
+  const _fpath = _path.join(_gdir, _fname);
+
+  let _imgBuf;
+  try {
+    _imgBuf = _fs.readFileSync(_fpath);
+    console.log('[AB_IMAGE_PUBLISH_USING_EXISTING_UPLOAD_PATH]', { challengerName, fname: _fname, bytes: _imgBuf.length });
+  } catch (_readErr) {
+    console.warn('[AB_IMAGE_READ_FROM_DISK_FAILED]', { challengerName, fpath: _fpath, message: _readErr?.message });
+    if (!imagePublicUrl) throw new Error(`Generated image not found on disk and no imagePublicUrl fallback: ${_fpath}`);
+    const _dlRes = await axios.get(imagePublicUrl, { responseType: 'arraybuffer', timeout: 15000 });
+    _imgBuf = Buffer.from(_dlRes.data);
+    console.log('[AB_IMAGE_PUBLISH_USING_EXISTING_UPLOAD_PATH]', { challengerName, source: 'publicUrl', bytes: _imgBuf.length });
+  }
+
+  const _base64 = _imgBuf.toString('base64');
+  let uploadRes;
+  try {
+    uploadRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
+      new URLSearchParams({ bytes: _base64 }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken }, timeout: 60000 }
+    );
+  } catch (upErr) {
+    const metaStatus = upErr?.response?.status;
+    const metaBody   = upErr?.response?.data;
+    console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName, metaStatus, metaBody });
+    throw new Error(`Meta image upload failed for "${challengerName}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || upErr?.message}`);
+  }
+  if (uploadRes.data?.error) {
+    const e = uploadRes.data.error;
+    console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName, metaError: e });
+    throw new Error(`Meta image upload error for "${challengerName}": ${e.message || JSON.stringify(e)}`);
+  }
+  const imgHash = Object.values(uploadRes.data?.images || {})[0]?.hash;
+  if (!imgHash) {
+    console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName, metaResponse: uploadRes.data });
+    throw new Error(`Meta returned no image hash for "${challengerName}". Response: ${JSON.stringify(uploadRes.data)}`);
+  }
+  console.log('[AB_IMAGE_UPLOAD_SUCCESS]', { challengerName, imgHash });
+  return imgHash;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // createChallengerAds — Step 2: creates new Meta ads from approved draft previews.
 // Only changes headline OR image per challenger. Returns real Meta ad IDs only.
 // Throws on any failure so the caller can surface the error cleanly.
@@ -909,20 +962,25 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
       throw new Error(`Unknown testType "${challenger.testType}" for challenger "${challenger.name}".`);
     }
 
-    // 3. Create new ad creative
+    // 3. Create new ad creative (90s — Meta can be slow, especially right after image upload)
     console.log('[AB_TEST_PUBLISH_CREATIVE_CREATE_START]', { challengerName: challenger.name, pageId });
     let creativeRes;
     try {
       creativeRes = await axios.post(
         `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
         { name: challenger.name, object_story_spec: { page_id: pageId, link_data: newLinkData } },
-        { params: { access_token: userToken }, timeout: 15000 }
+        { params: { access_token: userToken }, timeout: 90000 }
       );
     } catch (crErr) {
+      const isTimeout  = crErr?.code === 'ECONNABORTED' || /timeout/i.test(crErr?.message || '');
       const metaStatus = crErr?.response?.status;
       const metaBody   = crErr?.response?.data;
+      if (isTimeout) console.log('[AB_CREATIVE_CREATE_TIMEOUT]', { challengerName: challenger.name });
       console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'creative_create', challengerName: challenger.name, metaStatus, metaBody });
-      throw new Error(`Meta creative creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || crErr?.message}`);
+      const err = new Error(`Meta creative creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || crErr?.message}`);
+      err.isTimeout  = isTimeout;
+      err.failedStep = 'creative_create';
+      throw err;
     }
     if (creativeRes.data?.error) {
       const e = creativeRes.data.error;
@@ -935,20 +993,26 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
     }
     console.log('[AB_IMAGE_CREATIVE_CREATED]', { challengerName: challenger.name, newCreativeId });
 
-    // 4. Create new ad in same ad set
+    // 4. Create new ad in same ad set (90s)
     console.log('[AB_TEST_PUBLISH_AD_CREATE_START]', { challengerName: challenger.name, adsetId, newCreativeId });
     let adRes;
     try {
       adRes = await axios.post(
         `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
         { name: challenger.name, adset_id: adsetId, creative: { creative_id: newCreativeId }, status: 'ACTIVE' },
-        { params: { access_token: userToken }, timeout: 15000 }
+        { params: { access_token: userToken }, timeout: 90000 }
       );
     } catch (adErr) {
+      const isTimeout  = adErr?.code === 'ECONNABORTED' || /timeout/i.test(adErr?.message || '');
       const metaStatus = adErr?.response?.status;
       const metaBody   = adErr?.response?.data;
+      if (isTimeout) console.log('[AB_AD_CREATE_TIMEOUT]', { challengerName: challenger.name, newCreativeId });
       console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'ad_create', challengerName: challenger.name, metaStatus, metaBody });
-      throw new Error(`Meta ad creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || adErr?.message}`);
+      const err = new Error(`Meta ad creation failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || adErr?.message}`);
+      err.isTimeout  = isTimeout;
+      err.failedStep = 'ad_create';
+      err.creativeId = newCreativeId; // preserve so caller can retry with same creative
+      throw err;
     }
     if (adRes.data?.error) {
       const e = adRes.data.error;
@@ -1649,23 +1713,84 @@ router.post('/campaign-context/publish-ab-preview', async (req, res) => {
       return res.json({ ok: false, error: 'Cannot publish: image generation failed for this preview. Regenerate first.' });
     }
 
-    const imageUrl = preview.testType === 'image' ? (preview.imagePublicUrl || preview.imageUrl) : undefined;
-
     console.log('[AB_TEST_PUBLISH_REQUEST]', { campaignId, clientOwnerKey, previewId: preview.id, testType: preview.testType });
     console.log('[AB_TEST_PUBLISH_PAYLOAD]', {
       previewId: preview.id, testType: preview.testType,
       headline: preview.headline?.slice(0, 60),
-      imageUrl: imageUrl?.slice(0, 100),
+      imageUrl: preview.imageUrl?.slice(0, 100),
       cta: preview.cta, link: preview.link?.slice(0, 80),
     });
 
+    // Helper: update the in-DB draft for this preview
+    const saveDraftProgress = async (patch) => {
+      await db.read();
+      const ri = (db.data.campaign_creatives || []).findIndex(
+        (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+      );
+      if (ri >= 0) {
+        const pending = db.data.campaign_creatives[ri].pendingChallengerDrafts || [];
+        db.data.campaign_creatives[ri].pendingChallengerDrafts = pending.map((d) =>
+          d.id === preview.id ? { ...d, ...patch } : d
+        );
+        await db.write();
+        console.log('[AB_PUBLISH_PROGRESS_SAVED]', { previewId: preview.id, ...patch });
+      }
+    };
+
+    // ── Image upload (image-test only): reuse saved hash or upload fresh ───────
+    let resolvedImageHash = null;
+    if (preview.testType === 'image') {
+      // Check DB for a previously uploaded hash (from a prior failed attempt)
+      await db.read();
+      const riCheck = (db.data.campaign_creatives || []).findIndex(
+        (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+      );
+      if (riCheck >= 0) {
+        const savedDraft = (db.data.campaign_creatives[riCheck].pendingChallengerDrafts || [])
+          .find((d) => d.id === preview.id);
+        if (savedDraft?.uploadedImageHash) {
+          resolvedImageHash = savedDraft.uploadedImageHash;
+          console.log('[AB_PUBLISH_REUSE_IMAGE_HASH]', { previewId: preview.id, imgHash: resolvedImageHash });
+        }
+      }
+
+      if (!resolvedImageHash) {
+        // Fresh upload using the same bytes path as normal campaign launch
+        const userTokenForUpload = getFbUserToken(clientOwnerKey);
+        try {
+          resolvedImageHash = await uploadAbImageBytes({
+            imageUrl:       preview.imageUrl,
+            imagePublicUrl: preview.imagePublicUrl,
+            challengerName: preview.name,
+            accountId,
+            userToken:      userTokenForUpload,
+          });
+        } catch (upErr) {
+          console.error('[AB_IMAGE_UPLOAD_FAILED]', { previewId: preview.id, error: upErr?.message });
+          return res.json({ ok: false, error: upErr?.message || 'Image upload to Meta failed.' });
+        }
+        // Persist hash so a retry skips re-upload
+        await saveDraftProgress({
+          publishStatus:       'publishing',
+          uploadedImageHash:   resolvedImageHash,
+          lastPublishStep:     'image_uploaded',
+          lastPublishAttemptAt: new Date().toISOString(),
+        });
+      }
+    } else {
+      await saveDraftProgress({ publishStatus: 'publishing', lastPublishAttemptAt: new Date().toISOString() });
+    }
+
+    // ── Build challenger with pre-resolved image hash ─────────────────────────
     const challengers = [{
       testType:        preview.testType,
       name:            preview.name,
       headline:        preview.headline,
-      imageUrl:        preview.testType === 'image' ? preview.imageUrl : undefined,
-      imagePublicUrl:  preview.testType === 'image' ? preview.imagePublicUrl : undefined,
-      // Display fields for Creatives tab — image test uses generated image, headline test uses control image
+      // For image test: pass the hash directly — createChallengerAds skips re-upload
+      imageHash:       resolvedImageHash || undefined,
+      imageUrl:        !resolvedImageHash && preview.testType === 'image' ? preview.imageUrl : undefined,
+      imagePublicUrl:  !resolvedImageHash && preview.testType === 'image' ? preview.imagePublicUrl : undefined,
+      // Display fields for Creatives tab
       displayImageUrl: preview.testType === 'image'
         ? (preview.imageUrl || '')
         : (preview.fullImageUrl || preview.controlImageUrl || ''),
@@ -1680,26 +1805,37 @@ router.post('/campaign-context/publish-ab-preview', async (req, res) => {
     try {
       createdAds = await createChallengerAds({ clientOwnerKey, campaignId, controlAdId, challengers, accountId });
     } catch (createErr) {
-      console.error('[AB_TEST_PUBLISH_FAILED]', { previewId: preview.id, error: createErr?.message });
+      const isRetryable = !!createErr.isTimeout;
+      const step        = createErr.failedStep || 'unknown';
+      console.error('[AB_TEST_PUBLISH_FAILED]', { previewId: preview.id, step, isRetryable, error: createErr?.message });
+
+      // Save failure state — keep uploadedImageHash so retry skips re-upload
+      await saveDraftProgress({
+        publishStatus:       isRetryable ? 'publish_failed_retry_safe' : 'publish_failed',
+        lastPublishStep:     step,
+        lastPublishError:    createErr?.message?.slice(0, 400),
+        lastPublishAttemptAt: new Date().toISOString(),
+      });
+
+      if (isRetryable) {
+        const retryMsg = step === 'creative_create'
+          ? 'Image uploaded. Creative creation timed out. Click Retry to continue without re-uploading.'
+          : 'Creative created. Ad creation timed out. Click Retry to continue.';
+        return res.json({ ok: false, retryable: true, error: retryMsg });
+      }
       return res.json({ ok: false, error: createErr?.message || 'Ad creation failed.' });
     }
 
     const createdAd = createdAds[0];
 
-    // Mark this preview as published in DB
-    await db.read();
-    const recIdx = (db.data.campaign_creatives || []).findIndex(
-      (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
-    );
-    if (recIdx >= 0) {
-      const pending = db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [];
-      db.data.campaign_creatives[recIdx].pendingChallengerDrafts = pending.map((d) =>
-        d.id === preview.id
-          ? { ...d, publishStatus: 'published', metaAdId: createdAd?.metaAdId, publishedAt: new Date().toISOString() }
-          : d
-      );
-      await db.write();
-    }
+    // Mark published and clear progress fields
+    await saveDraftProgress({
+      publishStatus:     'published',
+      metaAdId:          createdAd?.metaAdId,
+      publishedAt:       new Date().toISOString(),
+      lastPublishStep:   'done',
+      lastPublishError:  null,
+    });
 
     console.log('[AB_TEST_META_AD_CREATED]', { campaignId, previewId: preview.id, metaAdId: createdAd?.metaAdId });
 
