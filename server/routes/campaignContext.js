@@ -855,30 +855,53 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
       if (challenger.imageHash) {
         newLinkData.image_hash = challenger.imageHash;
       } else {
-        console.log('[AB_TEST_PUBLISH_IMAGE_UPLOAD_START]', { challengerName: challenger.name, imageUrl: challenger.imageUrl?.slice(0, 120) });
+        // Use the same bytes-based upload path as auth.js / normal campaign launch.
+        // Meta's url= query-param upload requires a capability most apps don't have.
+        const _path  = require('path');
+        const _fs    = require('fs');
+        const _gdir  = process.env.GENERATED_DIR ||
+          (process.env.RENDER ? '/tmp/generated' : _path.join(__dirname, '../public/generated'));
+        const _fname = String(challenger.imageUrl || '').replace(/^.*\/api\/media\//, '').replace(/^.*\/media\//, '');
+        const _fpath = _path.join(_gdir, _fname);
+
+        let _imgBuf;
+        try {
+          _imgBuf = _fs.readFileSync(_fpath);
+          console.log('[AB_IMAGE_PUBLISH_USING_EXISTING_UPLOAD_PATH]', { challengerName: challenger.name, fname: _fname, bytes: _imgBuf.length });
+        } catch (_readErr) {
+          // File not on disk (container restart) — fall back to fetching from publicUrl
+          console.warn('[AB_IMAGE_READ_FROM_DISK_FAILED]', { challengerName: challenger.name, fpath: _fpath, message: _readErr?.message });
+          if (!challenger.imagePublicUrl) throw new Error(`Generated image not found on disk and no imagePublicUrl fallback: ${_fpath}`);
+          const _dlRes = await axios.get(challenger.imagePublicUrl, { responseType: 'arraybuffer', timeout: 15000 });
+          _imgBuf = Buffer.from(_dlRes.data);
+          console.log('[AB_IMAGE_PUBLISH_USING_EXISTING_UPLOAD_PATH]', { challengerName: challenger.name, source: 'publicUrl', bytes: _imgBuf.length });
+        }
+
+        const _base64 = _imgBuf.toString('base64');
         let uploadRes;
         try {
           uploadRes = await axios.post(
             `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adimages`,
-            null,
-            { params: { access_token: userToken, url: challenger.imageUrl }, timeout: 30000 }
+            new URLSearchParams({ bytes: _base64 }),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken }, timeout: 60000 }
           );
         } catch (upErr) {
           const metaStatus = upErr?.response?.status;
           const metaBody   = upErr?.response?.data;
-          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload', challengerName: challenger.name, imageUrl: challenger.imageUrl, metaStatus, metaBody });
+          console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName: challenger.name, metaStatus, metaBody });
           throw new Error(`Meta image upload failed for "${challenger.name}" (HTTP ${metaStatus}): ${JSON.stringify(metaBody) || upErr?.message}`);
         }
         if (uploadRes.data?.error) {
           const e = uploadRes.data.error;
-          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload_meta_error', challengerName: challenger.name, metaError: e });
+          console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName: challenger.name, metaError: e });
           throw new Error(`Meta image upload error for "${challenger.name}": ${e.message || JSON.stringify(e)}`);
         }
         const imgHash = Object.values(uploadRes.data?.images || {})[0]?.hash;
         if (!imgHash) {
-          console.error('[AB_TEST_PUBLISH_FAILED]', { step: 'image_upload_no_hash', challengerName: challenger.name, metaResponse: uploadRes.data });
+          console.error('[AB_IMAGE_UPLOAD_FAILED]', { challengerName: challenger.name, metaResponse: uploadRes.data });
           throw new Error(`Meta returned no image hash for "${challenger.name}". Response: ${JSON.stringify(uploadRes.data)}`);
         }
+        console.log('[AB_IMAGE_UPLOAD_SUCCESS]', { challengerName: challenger.name, imgHash });
         newLinkData.image_hash = imgHash;
         delete newLinkData.image_url;
       }
@@ -910,6 +933,7 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
     if (!newCreativeId || !(/^\d+$/.test(newCreativeId))) {
       throw new Error(`Meta did not return a real creative ID for "${challenger.name}". Response: ${JSON.stringify(creativeRes.data)}`);
     }
+    console.log('[AB_IMAGE_CREATIVE_CREATED]', { challengerName: challenger.name, newCreativeId });
 
     // 4. Create new ad in same ad set
     console.log('[AB_TEST_PUBLISH_AD_CREATE_START]', { challengerName: challenger.name, adsetId, newCreativeId });
@@ -935,22 +959,30 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
     if (!newAdId || !(/^\d+$/.test(newAdId))) {
       throw new Error(`Meta did not return a real ad ID for "${challenger.name}". Response: ${JSON.stringify(adRes.data)}`);
     }
+    console.log('[AB_IMAGE_AD_CREATED]', { challengerName: challenger.name, newAdId, testType: challenger.testType });
 
     createdAds.push({
-      id:             newAdId,
-      metaAdId:       newAdId,
-      metaCreativeId: newCreativeId,
-      angleLabel:     challenger.name,
-      headline:       newLinkData.name || linkData.name || '',
-      body:           linkData.message || '',
-      cta:            linkData.call_to_action?.type || 'LEARN_MORE',
-      imageUrl:       '',
-      link:           linkData.link || '',
-      status:         'active',
-      uiStatus:       'ACTIVE',
-      lastAction:     'challenger_created',
-      lastActionAt:   new Date().toISOString(),
-      angle:          challenger.testType,
+      id:              newAdId,
+      metaAdId:        newAdId,
+      metaCreativeId:  newCreativeId,
+      angleLabel:      challenger.name,
+      name:            challenger.name,
+      testType:        challenger.testType,
+      headline:        newLinkData.name || linkData.name || '',
+      body:            linkData.message || '',
+      cta:             linkData.call_to_action?.type || 'LEARN_MORE',
+      link:            linkData.link || '',
+      // Image display fields — populated from challenger so Creatives tab can render immediately
+      imageUrl:        challenger.displayImageUrl || '',
+      fullImageUrl:    challenger.fullImageUrl    || '',
+      thumbnailUrl:    challenger.thumbnailUrl    || '',
+      sourcePreviewId: challenger.sourcePreviewId || '',
+      publishedAt:     new Date().toISOString(),
+      status:          'active',
+      uiStatus:        'ACTIVE',
+      lastAction:      'challenger_created',
+      lastActionAt:    new Date().toISOString(),
+      angle:           challenger.testType,
     });
   }
 
@@ -1418,10 +1450,15 @@ router.post('/campaign-context/publish-challenger-drafts', async (req, res) => {
 
     // Build challengers from drafts to pass to createChallengerAds
     const challengers = drafts.map((d) => ({
-      testType:  d.testType,
-      name:      d.name,
-      headline:  d.headline,
-      imageUrl:  d.testType === 'image' ? d.imageUrl : undefined,
+      testType:        d.testType,
+      name:            d.name,
+      headline:        d.headline,
+      imageUrl:        d.testType === 'image' ? d.imageUrl        : undefined,
+      imagePublicUrl:  d.testType === 'image' ? d.imagePublicUrl  : undefined,
+      displayImageUrl: d.testType === 'image' ? (d.imageUrl || '') : (d.fullImageUrl || d.controlImageUrl || ''),
+      fullImageUrl:    d.testType === 'image' ? (d.fullImageUrl || d.imageUrl || '') : (d.fullImageUrl || d.controlImageUrl || ''),
+      thumbnailUrl:    d.controlImageUrl || '',
+      sourcePreviewId: d.id || '',
     }));
 
     console.log('[CHALLENGER_PUBLISH_START]', { campaignId, clientOwnerKey, draftCount: drafts.length });
@@ -1509,11 +1546,15 @@ router.post('/campaign-context/publish-ab-previews', async (req, res) => {
 
     // Build challengers from preview data for createChallengerAds
     const challengers = previews.map((p) => ({
-      testType:  p.testType,
-      name:      p.name,
-      headline:  p.headline,
-      // For image test: use the publicly accessible URL so Meta can fetch it
-      imageUrl:  p.testType === 'image' ? (p.imagePublicUrl || p.imageUrl) : undefined,
+      testType:        p.testType,
+      name:            p.name,
+      headline:        p.headline,
+      imageUrl:        p.testType === 'image' ? p.imageUrl        : undefined,
+      imagePublicUrl:  p.testType === 'image' ? p.imagePublicUrl  : undefined,
+      displayImageUrl: p.testType === 'image' ? (p.imageUrl || '') : (p.fullImageUrl || p.controlImageUrl || ''),
+      fullImageUrl:    p.testType === 'image' ? (p.fullImageUrl || p.imageUrl || '') : (p.fullImageUrl || p.controlImageUrl || ''),
+      thumbnailUrl:    p.controlImageUrl || '',
+      sourcePreviewId: p.id || '',
     }));
 
     console.log('[AB_TEST_APPROVED_BY_USER]', { campaignId, clientOwnerKey, challengerCount: challengers.length });
@@ -1618,7 +1659,22 @@ router.post('/campaign-context/publish-ab-preview', async (req, res) => {
       cta: preview.cta, link: preview.link?.slice(0, 80),
     });
 
-    const challengers = [{ testType: preview.testType, name: preview.name, headline: preview.headline, imageUrl }];
+    const challengers = [{
+      testType:        preview.testType,
+      name:            preview.name,
+      headline:        preview.headline,
+      imageUrl:        preview.testType === 'image' ? preview.imageUrl : undefined,
+      imagePublicUrl:  preview.testType === 'image' ? preview.imagePublicUrl : undefined,
+      // Display fields for Creatives tab — image test uses generated image, headline test uses control image
+      displayImageUrl: preview.testType === 'image'
+        ? (preview.imageUrl || '')
+        : (preview.fullImageUrl || preview.controlImageUrl || ''),
+      fullImageUrl:    preview.testType === 'image'
+        ? (preview.fullImageUrl || preview.imageUrl || '')
+        : (preview.fullImageUrl || preview.controlImageUrl || ''),
+      thumbnailUrl:    preview.controlImageUrl || '',
+      sourcePreviewId: preview.id || '',
+    }];
 
     let createdAds;
     try {
