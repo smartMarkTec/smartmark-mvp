@@ -621,7 +621,9 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
   const controlBody     = String(linkData.message || '').trim();
   const controlCta      = String(linkData.call_to_action?.type || 'LEARN_MORE').trim();
   const controlLink     = String(linkData.link    || '').trim();
-  const controlImageUrl = String(creative.thumbnail_url || '').trim();
+  const controlImageUrl     = String(creative.thumbnail_url || '').trim();
+  // linkData.picture is the actual ad image — higher-res than thumbnail_url
+  const controlFullImageUrl = String(linkData.picture || '').trim();
 
   // Set up storage for generated images
   const fs   = require('fs');
@@ -678,6 +680,8 @@ async function buildChallengerDraftPreviews({ clientOwnerKey, campaignId, contro
       link:           controlLink,
       imageUrl,
       imagePublicUrl,
+      // fullImageUrl: best available for lightbox display (not Meta thumbnail)
+      fullImageUrl:   isHeadline ? (controlFullImageUrl || controlImageUrl) : imageUrl,
       imageFailed,
       changes:        isHeadline ? ['headline'] : ['image'],
       controlHeadline,

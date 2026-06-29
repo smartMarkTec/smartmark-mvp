@@ -966,7 +966,8 @@ export default function InlineAdAgent({
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", width: "100%" }}>
             {m.previews.map((preview, pi) => {
-              const imgSrc = preview.imageUrl || null;
+              const imgSrc    = preview.imageUrl || null;
+              const fullImgSrc = preview.fullImageUrl || preview.imagePublicUrl || preview.imageUrl || null;
               return (
                 <div key={pi} style={{
                   flex: "1 1 220px", minWidth: 200, maxWidth: 300,
@@ -985,7 +986,7 @@ export default function InlineAdAgent({
                   {imgSrc ? (
                     <div
                       style={{ position: "relative", cursor: "zoom-in" }}
-                      onClick={() => setAbLightbox({ src: imgSrc, title: preview.name })}
+                      onClick={() => setAbLightbox({ src: fullImgSrc, title: preview.name })}
                     >
                       <img
                         src={imgSrc}
