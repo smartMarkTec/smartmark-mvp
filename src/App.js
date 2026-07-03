@@ -28,6 +28,7 @@ import AdminLeads from "./pages/admin/AdminLeads";
 import BookingConfirmed from "./pages/BookingConfirmed";
 import Agreement from "./pages/Agreement";
 import OnboardingConnect from "./pages/OnboardingConnect";
+import SmsOptIn from "./pages/SmsOptIn";
 import LandingPage from "./pages/LandingPage";
 import LANDING_PAGES from "./data/landingPages";
 
@@ -130,6 +131,7 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/confirmation" element={<Confirmation />} />
+      <Route path="/sms-opt-in" element={<SmsOptIn />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/terms-of-service" element={<TermsOfService />} />

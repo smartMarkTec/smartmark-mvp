@@ -127,8 +127,10 @@ export default function PrivacyPolicy() {
         <PolicySection title="3. SMS and Messaging">
           <p>
             If you provide your phone number or agree to receive messages from Smartemark, we may
-            send you appointment reminders, follow-up messages, service updates, customer support
-            messages, and informational or promotional messages related to Smartemark.
+            send you text messages related to your inquiry, demo request, support request,
+            appointment coordination, missed-call follow-up, and account communication. Message
+            types may include appointment reminders, follow-up messages, service updates, customer
+            support messages, and informational messages related to Smartemark.
           </p>
           <p style={{ marginTop: 12 }}>
             Message frequency may vary. Message and data rates may apply. You can opt out of SMS
@@ -136,7 +138,11 @@ export default function PrivacyPolicy() {
             <strong>HELP</strong> for help.
           </p>
           <p style={{ marginTop: 12 }}>
-            We do not sell your phone number or SMS consent information to third parties.
+            Smartemark does not sell, rent, or share your mobile phone number or SMS consent with
+            third parties or affiliates for marketing or promotional purposes. Mobile information
+            and SMS consent are used only to communicate with you about your inquiry, demo request,
+            support request, customer service, account communication, and related business
+            communications.
           </p>
         </PolicySection>
 

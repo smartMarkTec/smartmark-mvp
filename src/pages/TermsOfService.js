@@ -181,14 +181,20 @@ export default function TermsOfService() {
 
         <PolicySection title="9. SMS and Communications">
           <p>
-            By providing your phone number or agreeing to receive messages, you consent to receive
-            communications from Smartemark, including appointment reminders, service updates,
-            customer support messages, follow-ups, and promotional or informational messages.
+            By providing your phone number or agreeing to receive messages from Smartemark, you
+            consent to receive text messages related to your inquiry, demo request, support
+            request, appointment coordination, missed-call follow-up, and account communication.
+            Message types may include appointment reminders, service updates, customer support
+            messages, follow-ups, and informational messages from Smartemark.
           </p>
           <p style={{ marginTop: 12 }}>
             Message frequency may vary. Message and data rates may apply. You can opt out of SMS
             messages at any time by replying <strong>STOP</strong>. Reply <strong>HELP</strong>{" "}
             for help.
+          </p>
+          <p style={{ marginTop: 12 }}>
+            Smartemark does not sell, rent, or share your mobile phone number or SMS consent with
+            third parties or affiliates for marketing or promotional purposes.
           </p>
         </PolicySection>
 
