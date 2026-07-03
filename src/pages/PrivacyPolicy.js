@@ -49,11 +49,11 @@ function SiteFooter() {
         </a>
       </div>
       <div style={{ marginTop: 8 }}>
-        <a href="/privacy-policy" style={{ color: "#94a3b8", textDecoration: "none" }}>
+        <a href="https://smartemark.com/privacy-policy" style={{ color: "#94a3b8", textDecoration: "none" }}>
           Privacy Policy
         </a>
         {" · "}
-        <a href="/terms-of-service" style={{ color: "#94a3b8", textDecoration: "none" }}>
+        <a href="https://smartemark.com/terms-of-service" style={{ color: "#94a3b8", textDecoration: "none" }}>
           Terms of Service
         </a>
       </div>

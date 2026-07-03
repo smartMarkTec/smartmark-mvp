@@ -757,9 +757,9 @@ export default function Landing({ pricingPath, homePath }) {
             </a>
           </div>
           <div style={{ marginTop: 6 }}>
-            <a href="/privacy-policy" style={{ color: "#c4c9d4", textDecoration: "none" }}>Privacy Policy</a>
+            <a href="https://smartemark.com/privacy-policy" style={{ color: "#c4c9d4", textDecoration: "none" }}>Privacy Policy</a>
             {" · "}
-            <a href="/terms-of-service" style={{ color: "#c4c9d4", textDecoration: "none" }}>Terms of Service</a>
+            <a href="https://smartemark.com/terms-of-service" style={{ color: "#c4c9d4", textDecoration: "none" }}>Terms of Service</a>
           </div>
         </div>
       </div>
