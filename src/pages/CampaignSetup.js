@@ -4162,6 +4162,19 @@ useEffect(() => {
   const [, setCampaignStatus] = useState("ACTIVE");
   const [campaignCount, setCampaignCount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+
+  // metaDraft is not scoped to a campaign — it's just "the last draft this tab
+  // created". Without this, selecting a different campaign (or reselecting the
+  // same one after it launched) kept showing the stale draft/review UI instead
+  // of that campaign's real metrics dashboard, because nothing ever cleared it.
+  useEffect(() => {
+    if (!metaDraft) return;
+    if (selectedCampaignId === "__DRAFT__") return; // still in the draft-review flow
+    if (metaDraft.metaCampaignId && String(metaDraft.metaCampaignId) === String(selectedCampaignId)) return;
+    setMetaDraft(null);
+    setDraftError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCampaignId]);
   const [expandedId, setExpandedId] = useState(null);
   const [setupTab, setSetupTab] = useState("connect");
   const [campaignSubtab, setCampaignSubtab] = useState("overview");
@@ -7400,6 +7413,46 @@ const handleLaunchDraft = async () => {
     setDraftCreatingState(null);
     setLaunched(true);
     setLaunchResult(data);
+
+    // Transition out of draft view into the real, launched campaign — mirrors
+    // handleLaunch's success path. Without this, selectedCampaignId/expandedId
+    // stayed at "__DRAFT__" forever, so the UI kept showing the pre-launch form
+    // (budget/name inputs) instead of the campaign's metrics dashboard, even
+    // though Meta had already activated the campaign.
+    const launchedId = String(data.draft?.metaCampaignId || "").trim();
+    if (launchedId) {
+      setDraftCreatives({ images: [], mediaSelection: "image" });
+      setSelectedCampaignId(launchedId);
+      setExpandedId(launchedId);
+
+      const newCampaignRecord = {
+        id: launchedId,
+        campaignId: launchedId,
+        metaCampaignId: launchedId,
+        name: data.draft?.campaignName || form.campaignName || "Campaign",
+        status: "ACTIVE",
+        effective_status: "ACTIVE",
+        currentStatus: "ACTIVE",
+        accountId: String(data.draft?.adAccountId || selectedAccount || "").replace(/^act_/, ""),
+        launchComplete: true,
+        createdAt: new Date().toISOString(),
+        mediaSelection: "image",
+      };
+      setCampaigns((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const idx = list.findIndex((c) => String(c.id) === launchedId);
+        if (idx !== -1) {
+          const updated = [...list];
+          updated[idx] = { ...list[idx], ...newCampaignRecord };
+          return updated;
+        }
+        return [newCampaignRecord, ...list];
+      });
+
+      if (adminClientId) {
+        refreshAdminCampaigns(adminClientId, setCampaigns, setMetricsMap, setOptimizerStateMap, setCampaignCreativesMap, recentStatusOverridesRef.current, launchedId);
+      }
+    }
   } catch (err) {
     setDraftError(String(err?.message || "Launch failed"));
     setDraftCreatingState(null);

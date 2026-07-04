@@ -9,6 +9,7 @@ const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { META_API_VERSION } = require('../metaConfig');
+const { upsertOptimizerCampaignState } = require('../optimizerCampaignState');
 // Same multi-alias token resolver the working /facebook/adaccount/:id/launch-campaign
 // route uses — a bare ownerKey lookup here misses tokens stored under a different
 // session/username alias, which was causing draft creation to 401 for users the
@@ -466,6 +467,37 @@ router.post('/facebook/launch-draft', async (req, res) => {
     draft.launchedAt = new Date().toISOString();
     draft.updatedAt = new Date().toISOString();
     await db.write();
+
+    // Register the now-live campaign for optimizer metrics tracking. Without this
+    // record the campaign has no backend state at all — metrics never populate and
+    // the frontend has nothing to distinguish it from a draft, so it keeps showing
+    // the pre-launch form (budget/name inputs) instead of the campaign dashboard.
+    try {
+      await upsertOptimizerCampaignState({
+        campaignId: draft.metaCampaignId,
+        metaCampaignId: draft.metaCampaignId,
+        accountId: draft.adAccountId,
+        ownerKey,
+        pageId: draft.pageId,
+        campaignName: draft.campaignName,
+        currentStatus: 'ACTIVE',
+        optimizationEnabled: false,
+        aiSettingsInitialized: false,
+        aiApprovalRequired: true,
+        billingBlocked: false,
+        metricsSnapshot: {},
+        publicSummary: {
+          headline: 'Monitoring campaign performance',
+          subtext: 'Smartemark is preparing to learn from campaign data and improve results over time.',
+          stage: 'monitoring',
+          tone: 'calm',
+          updatedAt: new Date().toISOString(),
+          mode: 'public_marketer_summary_v1',
+        },
+      });
+    } catch (stateErr) {
+      console.error('[facebook/launch-draft] optimizer state upsert failed:', stateErr?.message);
+    }
 
     console.log('[facebook/launch-draft] activated draft:', { ownerKey, draftId, metaCampaignId: draft.metaCampaignId });
 
