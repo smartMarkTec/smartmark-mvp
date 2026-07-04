@@ -12,6 +12,11 @@ const { getFbUserToken } = require('../tokenStore');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
 const { META_API_VERSION } = require('../metaConfig');
 const { CALL_CONFIGS } = require('./twilio');
+// Reconciles Meta's real campaign list into optimizer_campaign_state — used so a
+// campaign that launched (directly or via draft) but never got a tracked state
+// record (e.g. an old bug, or a race) self-heals the next time its client's
+// campaign list is viewed, instead of only showing up after the periodic autorunner runs.
+const { bootstrapOptimizerStatesFromMeta } = require('./auth');
 
 // Server-side mirror of src/data/landingPages.js — only the fields needed for tracking checks.
 // Keep in sync with the frontend config when adding new pages.
@@ -635,6 +640,27 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
 
     await ensureDB();
     const ownerKey = `user:${String(user.username || '').trim()}`;
+
+    // Self-heal: if this client has a real campaign active on Meta that never got a
+    // tracked optimizer_campaign_state record (e.g. it launched from a draft before
+    // that path wrote one, or the periodic autorunner hasn't run yet), pull it in now
+    // rather than showing an empty campaign list until the next background sync.
+    try {
+      const selection = (db.data.fb_selections || []).find((s) => String(s?.ownerKey || '').trim() === ownerKey);
+      const clientAccountId = String(selection?.adAccountId || '').replace(/^act_/, '').trim();
+      const clientToken = getFbUserToken(ownerKey);
+      if (clientAccountId && clientToken) {
+        const { bootstrapped } = await bootstrapOptimizerStatesFromMeta({
+          ownerKey, accountId: clientAccountId, userToken: clientToken,
+        });
+        if (bootstrapped > 0) {
+          console.log('[ADMIN_CAMPAIGNS_SELF_HEAL]', { ownerKey, clientAccountId, bootstrapped });
+          await ensureDB();
+        }
+      }
+    } catch (healErr) {
+      console.error('[ADMIN_CAMPAIGNS_SELF_HEAL_ERROR]', healErr?.message || healErr);
+    }
 
     const creativeRecords = (db.data.campaign_creatives || []).filter(
       (c) => String(c?.ownerKey || '').trim() === ownerKey

@@ -70,6 +70,24 @@ function ensureStoredSid() {
   return sid;
 }
 
+// Deletes the backend-persisted creative draft (the same record InlineAdAgent
+// restores from on mount). Must be called once a campaign actually goes live —
+// otherwise the next time the AI Agent tab mounts, it finds the still-present
+// draft, restores it, and force-resets selectedCampaignId back to "__DRAFT__"
+// (via CampaignSetup's onCreativesGenerated callback), permanently hiding the
+// real, already-launched campaign behind the pre-launch draft view again.
+async function clearBackendCreativeDraft(adminClientId) {
+  try {
+    const sid = getStoredSid();
+    const headers = {};
+    if (sid) headers["x-sm-sid"] = sid;
+    const url = adminClientId
+      ? `/api/campaign-context/creative-draft?adminClientId=${encodeURIComponent(adminClientId)}`
+      : "/api/campaign-context/creative-draft";
+    await fetch(url, { method: "DELETE", credentials: "include", headers });
+  } catch {}
+}
+
 // Appends standard UTM + Smartemark attribution params to a destination URL.
 // Used when building ad destination URLs so future landing events can be
 // attributed back to the specific ad/variant. Does NOT modify live campaigns —
@@ -7424,6 +7442,9 @@ const handleLaunchDraft = async () => {
       setDraftCreatives({ images: [], mediaSelection: "image" });
       setSelectedCampaignId(launchedId);
       setExpandedId(launchedId);
+      // Must also clear the backend-persisted draft — see clearBackendCreativeDraft
+      // for why leaving it in place resurrects "__DRAFT__" on the next AI Agent visit.
+      clearBackendCreativeDraft(adminClientId);
 
       const newCampaignRecord = {
         id: launchedId,
@@ -8025,6 +8046,9 @@ console.log("[LAUNCH][creative-payload]", {
       setDraftCreatives({ images: [], mediaSelection: "image" });
       if (expandedId === "__DRAFT__") setExpandedId(null);
       if (selectedCampaignId === "__DRAFT__") setSelectedCampaignId("");
+      // Must also clear the backend-persisted draft — see clearBackendCreativeDraft
+      // for why leaving it in place resurrects "__DRAFT__" on the next AI Agent visit.
+      clearBackendCreativeDraft(adminClientId);
 
       setLaunched(true);
       setLaunchResult(json);

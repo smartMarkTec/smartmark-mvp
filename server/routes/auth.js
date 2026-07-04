@@ -9333,4 +9333,10 @@ router.runInternalScheduledPass = runInternalScheduledPass;
 // resolution that misses tokens stored under a different session/username alias.
 router.resolveFacebookTokenFromReq = resolveFacebookTokenFromReq;
 
+// Expose the Meta campaign → optimizer_campaign_state reconciler so other route
+// modules (e.g. premiumAdmin.js's client campaigns list) can self-heal campaigns
+// that exist and are active on Meta but never got a tracked state record — instead
+// of waiting for the periodic autorunner pass to eventually pick them up.
+router.bootstrapOptimizerStatesFromMeta = bootstrapOptimizerStatesFromMeta;
+
 module.exports = router;

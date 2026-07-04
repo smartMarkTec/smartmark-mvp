@@ -647,7 +647,12 @@ export default function InlineAdAgent({
         const savedSet = j.creativeDraft?.creativeSet;
         const hasRealContent = Array.isArray(savedSet) && savedSet.length > 0 &&
           savedSet.some((c) => String(c?.headline || "").trim() || String(c?.imageUrl || "").trim());
-        if (j.ok && hasRealContent) {
+        // If a real (already-launched or otherwise selected) campaign is active when
+        // this tab mounts, a leftover persisted draft must never silently override it —
+        // that's what caused an already-live campaign to keep reverting to "__DRAFT__"
+        // every time this tab was revisited, hiding it and its metrics indefinitely.
+        const hasRealSelectedCampaign = !!(selectedCampaignId && selectedCampaignId !== "__DRAFT__");
+        if (j.ok && hasRealContent && !hasRealSelectedCampaign) {
           const saved = j.creativeDraft;
           setCreatives(saved.creativeSet);
           onCreativesGenerated?.({ images: saved.images || [], creativeSet: saved.creativeSet, creativeTestCount: saved.creativeSet.length });
