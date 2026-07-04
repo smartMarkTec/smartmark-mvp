@@ -11758,137 +11758,8 @@ ${pendingTest ? `
             </div>
           )}
 
-          {/* ── Multi-area launch toggle (admin only) ── */}
-          {!!adminClientId && !metaDraft?.status && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Launch Mode</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {[
-                  { key: "single",     label: "One broad campaign" },
-                  { key: "multi_area", label: "Split by area" },
-                ].map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setLaunchMode(key)}
-                    style={{
-                      flex: 1,
-                      padding: "10px 12px",
-                      borderRadius: 10,
-                      border: `2px solid ${launchMode === key ? "#5b5cf0" : "#dbe4ff"}`,
-                      background: launchMode === key ? "#eef2ff" : "#fff",
-                      color: launchMode === key ? "#4338ca" : "#667085",
-                      fontWeight: 800,
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {/* ── Area review cards ── */}
-              {launchMode === "multi_area" && (() => {
-                const PROTEKS_AREAS = [
-                  {
-                    areaKey:   "austin_hill_country",
-                    areaName:  "Austin / Hill Country",
-                    monthlyBudget: 250,
-                    dailyBudget:   8.33,
-                    offer:     "$500 Off Full System Replacement + Free Replacement Estimate",
-                    priceLine: "AC system replacements starting at $6,995 installed",
-                    destinationUrl: "https://smartemark.com/offers/proteks-austin",
-                    targetingLocations: [
-                      "Austin","Round Rock","Georgetown","Leander","Cedar Park",
-                      "Liberty Hill","Hutto","Dripping Springs","Bee Cave",
-                      "West Lake","Horseshoe Bay","Burnet","Blanco",
-                    ],
-                  },
-                  {
-                    areaKey:   "north_san_antonio",
-                    areaName:  "North San Antonio",
-                    monthlyBudget: 250,
-                    dailyBudget:   8.33,
-                    offer:     "$500 Off Full System Replacement + Free Replacement Estimate",
-                    priceLine: "AC system replacements starting at $6,495 installed",
-                    destinationUrl: "https://smartemark.com/offers/proteks-san-antonio",
-                    targetingLocations: [
-                      "North San Antonio","Boerne","New Braunfels","San Marcos",
-                      "Bulverde","Blanco","Spring Branch",
-                    ],
-                  },
-                ];
-                const GROUP_NAME = "Pro Teks HVAC — AC Replacement Split Test";
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ color: "#374151", fontWeight: 800, fontSize: 13 }}>{GROUP_NAME}</div>
-                    {PROTEKS_AREAS.map((area) => (
-                      <div
-                        key={area.areaKey}
-                        style={{
-                          background: "#f7f9ff",
-                          border: "1px solid #dbe4ff",
-                          borderRadius: 12,
-                          padding: "14px 16px",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>{area.areaName}</div>
-                        <div style={{ color: "#667085", fontSize: 12 }}>${area.monthlyBudget}/mo · ${area.dailyBudget.toFixed(2)}/day</div>
-                        <div style={{ color: "#374151", fontSize: 12 }}>{area.priceLine}</div>
-                        <div style={{ color: "#667085", fontSize: 11, marginTop: 2 }}>
-                          {area.targetingLocations.slice(0, 5).join(", ")}{area.targetingLocations.length > 5 ? ` +${area.targetingLocations.length - 5} more` : ""}
-                        </div>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => handleMultiAreaLaunch(PROTEKS_AREAS, GROUP_NAME)}
-                      disabled={
-                        loading ||
-                        !(fbConnected && selectedAccount && selectedPageId)
-                      }
-                      style={{
-                        width: "100%",
-                        border: "none",
-                        borderRadius: 14,
-                        padding: "14px 16px",
-                        background: loading ? "#a5b4fc" : "#5b5cf0",
-                        color: "#fff",
-                        fontWeight: 900,
-                        fontSize: 15,
-                        cursor: loading ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      {loading ? "Launching areas…" : `Launch ${PROTEKS_AREAS.length} Area Campaigns`}
-                    </button>
-
-                    {multiAreaResult && (
-                      <div style={{
-                        padding: "10px 14px",
-                        borderRadius: 10,
-                        background: multiAreaResult.errors?.length > 0 ? "#fff7ed" : "#f0fdf4",
-                        border: `1px solid ${multiAreaResult.errors?.length > 0 ? "#fed7aa" : "#bbf7d0"}`,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: multiAreaResult.errors?.length > 0 ? "#92400e" : "#15803d",
-                      }}>
-                        {multiAreaResult.errors?.length > 0
-                          ? `Partial success — ${multiAreaResult.results?.length} launched, ${multiAreaResult.errors?.length} failed`
-                          : `All ${multiAreaResult.results?.length} area campaigns launched`}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* ── Single-campaign launch button (default mode) ── */}
-          {launchMode === "single" && <button
+          {/* ── Single-campaign launch button ── */}
+          <button
             onClick={
               metaDraft?.status === "draft_review"
                 ? handleLaunchDraft
@@ -11949,7 +11820,7 @@ ${pendingTest ? `
               : metaDraft?.status === "draft_review"
               ? "Launch Campaign"
               : "Launch Campaign"}
-          </button>}
+          </button>
         </div>
       </>
     )}

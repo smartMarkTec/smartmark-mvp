@@ -9,6 +9,11 @@ const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { META_API_VERSION } = require('../metaConfig');
+// Same multi-alias token resolver the working /facebook/adaccount/:id/launch-campaign
+// route uses — a bare ownerKey lookup here misses tokens stored under a different
+// session/username alias, which was causing draft creation to 401 for users the
+// direct-launch flow could authenticate fine.
+const { resolveFacebookTokenFromReq } = require('./auth');
 
 const COOKIE_NAME = 'sm_sid';
 const SID_HEADER = 'x-sm-sid';
@@ -170,8 +175,10 @@ router.post('/facebook/create-draft', async (req, res) => {
   if (!adAccountId) return res.status(400).json({ ok: false, error: 'adAccountId required' });
   if (!pageId) return res.status(400).json({ ok: false, error: 'pageId required' });
 
-  const ownerKey = resolveOwnerKey(req, adminClientId);
-  const userToken = getFbUserToken(ownerKey);
+  const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req, {
+    accountId: adAccountId,
+    preferredOwnerKey: adminClientId ? `user:${String(adminClientId).trim()}` : '',
+  });
 
   if (!userToken) {
     return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook. Connect Facebook and try again.' });
@@ -339,8 +346,9 @@ router.post('/facebook/launch-draft', async (req, res) => {
   const { draftId, adminClientId } = req.body || {};
   if (!draftId) return res.status(400).json({ ok: false, error: 'draftId required' });
 
-  const ownerKey = resolveOwnerKey(req, adminClientId);
-  const userToken = getFbUserToken(ownerKey);
+  const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req, {
+    preferredOwnerKey: adminClientId ? `user:${String(adminClientId).trim()}` : '',
+  });
 
   if (!userToken) {
     return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook' });

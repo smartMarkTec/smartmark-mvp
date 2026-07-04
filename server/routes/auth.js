@@ -9328,4 +9328,9 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/ad-metrics', asy
 // The auto-runner calls router.runInternalScheduledPass({ minHoursBetweenRuns, limit }).
 router.runInternalScheduledPass = runInternalScheduledPass;
 
+// Expose the multi-alias Facebook token resolver so other route modules (e.g.
+// facebook.js) can use the same robust lookup instead of a simpler ownerKey-only
+// resolution that misses tokens stored under a different session/username alias.
+router.resolveFacebookTokenFromReq = resolveFacebookTokenFromReq;
+
 module.exports = router;
