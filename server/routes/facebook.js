@@ -309,7 +309,9 @@ router.post('/facebook/create-draft', async (req, res) => {
       draftAdIds.push(adId);
     }
 
-    // 4. Persist draft to LowDB
+    // 4. Persist draft to LowDB — including the resolved creative content (not just
+    // Meta object IDs) so launch-draft can build a proper campaign_creatives record
+    // for this specific campaign once activated (that's what the Creatives tab reads).
     await ensureCollections();
     const draft = {
       id: crypto.randomUUID(),
@@ -327,6 +329,15 @@ router.post('/facebook/create-draft', async (req, res) => {
       campaignName: name,
       status: 'draft_review',
       metaManagerUrl: `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${accountId}&selected_campaign_ids=${draftCampaignId}`,
+      creativeSet: adsToCreate.map((a, i) => ({
+        id: `draft-${i}`,
+        angleLabel: a.label,
+        headline: a.headlineText,
+        body: a.msgText,
+        cta: '',
+        imageUrl: a.imageUrlFinal,
+        link: a.destUrl,
+      })),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -497,6 +508,65 @@ router.post('/facebook/launch-draft', async (req, res) => {
       });
     } catch (stateErr) {
       console.error('[facebook/launch-draft] optimizer state upsert failed:', stateErr?.message);
+    }
+
+    // Register the real creative content for this specific campaign — this is what
+    // the Creatives tab actually reads (images/headline/body/launchedCreativeSet),
+    // not optimizer_campaign_state. Scoped precisely to this campaignId + ownerKey;
+    // never touches any other campaign or client's records.
+    try {
+      await ensureCollections();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      const adIdsForSet = Array.isArray(draft.metaAdIds) && draft.metaAdIds.length > 0
+        ? draft.metaAdIds
+        : [draft.metaAdId].filter(Boolean);
+      const launchedCreativeSet = (Array.isArray(draft.creativeSet) ? draft.creativeSet : []).map((c, i) => ({
+        id: c.id || `launched-${i}`,
+        angleLabel: c.angleLabel || `Ad ${i + 1}`,
+        headline: c.headline || '',
+        body: c.body || '',
+        cta: c.cta || '',
+        imageUrl: c.imageUrl || '',
+        link: c.link || '',
+        metaAdId: adIdsForSet[i] || null,
+        status: 'active',
+      }));
+
+      const nowIso = new Date().toISOString();
+      const ccIdx = db.data.campaign_creatives.findIndex(
+        (r) => String(r.campaignId || '') === String(draft.metaCampaignId) && String(r.ownerKey || '') === ownerKey
+      );
+      const ccRecord = {
+        ownerKey,
+        campaignId: draft.metaCampaignId,
+        metaCampaignId: draft.metaCampaignId,
+        accountId: draft.adAccountId,
+        pageId: draft.pageId,
+        name: draft.campaignName,
+        status: 'ACTIVE',
+        effective_status: 'ACTIVE',
+        currentStatus: 'ACTIVE',
+        mediaSelection: 'image',
+        mediaType: 'image',
+        images: launchedCreativeSet.map((c) => c.imageUrl).filter(Boolean),
+        launchedCreativeSet: launchedCreativeSet.length > 0 ? launchedCreativeSet : null,
+        launchComplete: true,
+        isDraft: false,
+        smArchived: false,
+        hiddenFromHistory: false,
+        meta: {
+          headline: launchedCreativeSet[0]?.headline || '',
+          body: launchedCreativeSet[0]?.body || '',
+          link: launchedCreativeSet[0]?.link || '',
+        },
+        updatedAt: nowIso,
+        ...(ccIdx === -1 ? { createdAt: nowIso } : {}),
+      };
+      if (ccIdx === -1) db.data.campaign_creatives.push(ccRecord);
+      else db.data.campaign_creatives[ccIdx] = { ...db.data.campaign_creatives[ccIdx], ...ccRecord };
+      await db.write();
+    } catch (ccErr) {
+      console.error('[facebook/launch-draft] campaign_creatives write failed:', ccErr?.message);
     }
 
     console.log('[facebook/launch-draft] activated draft:', { ownerKey, draftId, metaCampaignId: draft.metaCampaignId });
