@@ -515,15 +515,21 @@ export default function InlineAdAgent({
     const t = txt.toLowerCase().trim();
 
     // ── Hard bypass for explicit action commands ───────────────────────────
-    // If the message contains a Meta ad ID (10+ digits), "control ad" reference,
-    // or explicit test-type language, it must NEVER be routed to respondWithStrategy().
-    // respondWithStrategy() replaces the user's text with a system prompt — wrong.
-    // These messages must fall through to the LLM path that sends message: txt directly.
+    // Anything that maps to a real backend capability (pixel, challenger/A-B-test,
+    // drafts, live ads manager check) must never be intercepted by the local regex
+    // guesses below — it goes straight to the backend, which uses the AI model
+    // (with tool-calling and full conversation history) to route it correctly.
+    // Without this, loose local patterns below can misfire on unrelated wording
+    // (e.g. "create a pixel" being mistaken for "create a campaign").
     if (
       /\b\d{10,}\b/.test(t) ||          // long numeric Meta ad ID
       /control\s*ad/i.test(t) ||         // "control ad"
       /headline-only|image-only/i.test(t) ||  // "headline-only challenger"
-      /create.{0,50}challenger.*ad/i.test(t)  // "create ... challenger ads"
+      /create.{0,50}challenger.*ad/i.test(t) ||  // "create ... challenger ads"
+      /\bpixel\b/i.test(t) ||            // any Meta/Facebook Pixel request or follow-up
+      /challenger/i.test(t) ||           // create/remove/regenerate a challenger
+      /\bdrafts?\b/i.test(t) ||          // show/approve/publish drafts
+      /ads?\s*manager/i.test(t)          // live Meta Ads Manager check
     ) {
       return { type: "llm" };
     }
@@ -552,7 +558,10 @@ export default function InlineAdAgent({
     }
 
     if (/generat|creat|make|build/i.test(t) && n) return { type: "count", n };
-    if (/generat|creat|make.*campaign|build.*campaign|start.*campaign|i\s+want\s+to\s+creat/i.test(t)) return { type: "create" };
+    // Requires "campaign" (or equivalent explicit phrasing) near the verb — a bare
+    // "creat"/"generat" substring match here previously misfired on unrelated
+    // requests like "create a pixel", since regex alternation has low precedence.
+    if (/(generat|creat|make|build|start).{0,30}campaign/i.test(t) || /i\s+want\s+to\s+creat/i.test(t)) return { type: "create" };
     if (/budget|spend|per\s*day|\$\d|\d+\s*(dollar|bucks?)/i.test(t)) {
       const b = parseBudget(t);
       if (b) return { type: "budget", value: b };

@@ -23,23 +23,20 @@ const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const AD_AGENT_SYSTEM =
-  "You are Smartemark's AI Ad Agent. " +
-  "Your job is NOT only to give advice. Your job is to understand whether the user is asking for: " +
-  "(1) Information or advice, (2) Analysis of existing performance, or (3) A real platform action. " +
-  "If the user asks for a real action and the required details are present, do NOT answer with generic strategy. " +
-  "Examples of real actions the system can execute: create challenger ads, pause an ad, resume an ad, archive an ad, generate a new creative, update ad copy, create a test variation. " +
-  "If the user gives a detailed command like 'Create two challenger ads using control ad X', treat that as an execution request, NOT a request for general strategy. " +
-  "Do NOT say 'Would you like me to generate these ads?' if the user already asked you to create them. " +
-  "Do NOT suggest a different strategy if the user gave you explicit instructions. " +
-  "If the user provides a control ad ID, headline, ad names, and test types, those are complete instructions — queue the action for approval immediately. " +
-  "If the action affects Meta ads, budgets, campaign status, or ad creation, queue it as a pending approval action. " +
-  "Only ask a clarifying question if required fields (like control ad ID) are missing from the request. " +
-  "Do NOT say an action succeeded unless the backend executor returns success and real numeric IDs from Meta. " +
-  "For performance analysis: Use the saved customer intake, campaign history, and metrics context provided. " +
-  "Answer performance questions with the actual numbers from context — impressions, CTR, CPC, spend, clicks. " +
-  "Explain metrics in plain language a business owner would understand. " +
-  "Do not invent fake offers, guarantees, reviews, prices, or results. " +
-  "Only say data is unavailable if the context explicitly says so.";
+  "You are Smartemark's AI Ad Agent — a marketing operator embedded in the client's campaign dashboard. " +
+  "You have real tools available to check and manage the client's Meta (Facebook) ads account: fetching or creating the Meta Pixel, " +
+  "checking Pixel event activity, pulling a live Meta Ads Manager summary, creating challenger (A/B test) ads, generating a " +
+  "replacement AI challenger, pointing the user to saved drafts, publishing drafts live, and guiding challenger removal. " +
+  "Call the matching tool whenever the user's message maps to one of those capabilities — including short, informal follow-ups " +
+  "like 'just give me the pixel' or 'no, the one you made' that refer back to something earlier in the conversation. Use the " +
+  "conversation history to resolve what 'it', 'that', or 'the one you generated' refers to, rather than asking the user to repeat themselves. " +
+  "If the user gives a detailed command with a control ad ID, headline, or similar specifics, pass those details as tool arguments " +
+  "instead of asking a clarifying question — only ask when a required detail truly cannot be inferred. " +
+  "Do not call a tool for a plain question about strategy, advice, or performance analysis — answer those directly using the " +
+  "campaign data provided in context below. " +
+  "Never claim an action succeeded unless a tool result confirms it — if a tool reports an error, missing token, or missing data, relay that honestly. " +
+  "Do not invent fake offers, guarantees, reviews, prices, pixel IDs, or ad IDs. Only say data is unavailable if the context or a tool result explicitly says so. " +
+  "Explain metrics in plain language a business owner would understand.";
 
 // ── Campaign performance intent detection ─────────────────────────────────────
 function isCampaignPerformanceIntent(message) {
@@ -55,106 +52,6 @@ function isCampaignPerformanceIntent(message) {
     /(impressions|clicks|ctr|cpc|spend|conversions).*campaign/i.test(s) ||
     /campaign.*(\d|\$|%)/i.test(s)
   );
-}
-
-// ── Wrong challenger / regeneration intent detection ──────────────────────────
-function isWrongChallengerIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /(wrong|bad|incorrect|off.?brand|not related|unrelated|irrelevant|weird|random|generic).*(creative|challenger|ad|image|visual)/i.test(s) ||
-    /(delete|remove|pause|kill|clear|reset|get rid of|undo).*(challenger|a\/b test|ab test|creative test|test ad)/i.test(s) ||
-    /(challenger|creative|test ad).*(wrong|bad|incorrect|not right|not related|unrelated|doesn.?t match|doesn.?t look|delete|remove|pause|clear)/i.test(s) ||
-    /regenerate.*(challenger|creative|ad|test)/i.test(s) ||
-    /(start|restart|redo|try again|replace).*(challenger|creative test|ab test|a\/b test)/i.test(s) ||
-    /this (creative|ad|challenger|image) is.*(wrong|not|off|bad|weird|generic|unrelated|incorrect)/i.test(s)
-  );
-}
-
-function isGenerateChallengerIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /(make|create|generate|build|write|do|run|launch|start|produce).{0,20}(another|new|fresh|replacement|another|second|a).{0,20}(challenger|a\/b test|ab test|creative test|test ad|ad variation|creative variant)/i.test(s) ||
-    /(another|new|fresh|replacement|second).{0,20}(challenger|a\/b test|ab test|creative test|test ad|ad variation|creative variant)/i.test(s) ||
-    /regenerate.{0,15}(challenger|creative|ad|test)/i.test(s) ||
-    /(yes|yeah|yep|sure|ok|okay|go ahead|do it|please).{0,30}(make|generate|create|launch|start|produce|run).{0,20}(challenger|creative|test|ad)/i.test(s) ||
-    /(yes|yeah|yep|sure|ok|okay|go ahead|please).{0,20}(another|new|one|it)/i.test(s) ||
-    /(create|generate|make|build|launch).{0,20}(replacement|substitute|new|better|improved).{0,20}(creative|ad|challenger|variant)/i.test(s) ||
-    /start.{0,20}(a new|another|fresh).{0,20}(test|a\/b|ab).{0,20}(ad|creative|challenger)?/i.test(s) ||
-    /\b(challenger|creative test|a\/b test|ab test|test ad)\b.{0,30}(again|please|now|next)/i.test(s)
-  );
-}
-
-// ── Create specific challenger ads intent ──────────────────────────────────────
-// Fires when the user explicitly requests creating challenger ads with enough detail
-// to build a proposal. Triggers on create-language + control ad ID OR headline/image
-// test language. Deliberately broad so detailed action commands never fall through
-// to the generic OpenAI strategy reply.
-function isCreateSpecificChallengersIntent(message) {
-  const s = String(message || '').toLowerCase();
-
-  // Signal A: message contains a long numeric Meta ad ID (10+ digits)
-  const hasMetaAdId = /\b\d{10,}\b/.test(s);
-
-  // Signal B: explicit create/build + challenger/test language
-  const hasCreateChallenger = (
-    /(create|make|build|launch|add|run).{0,50}(challenger|test\s*ad|ad\s*test|variation)/i.test(s) ||
-    /(headline.?only|image.?only)\s*(challenger|test|ad)/i.test(s) ||
-    /(headline|image)\s*(test|challenger)(\s+ad)?/i.test(s) ||
-    /(2|two|both).{0,20}(challenger|test).{0,20}(ad|ads)/i.test(s) ||
-    /(headline.{0,30}test.{0,80}image.{0,30}test|image.{0,30}test.{0,80}headline.{0,30}test)/i.test(s)
-  );
-
-  // Signal C: explicit "control ad" reference
-  const hasControlAdRef = /control\s*ad/i.test(s) || /using\s*ad\s*\d/i.test(s);
-
-  return (hasCreateChallenger && (hasMetaAdId || hasControlAdRef)) ||
-         (hasControlAdRef && /(create|make|build|launch|run)/i.test(s));
-}
-
-// ── "Show me drafts" intent ────────────────────────────────────────────────────
-function isShowDraftsIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /show\s*(me\s*)?(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /where\s*(are\s*)?(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /see\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /view\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /look\s*at\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /check\s*(the\s*)?(challenger\s*)?drafts?/i.test(s)
-  );
-}
-
-// ── "Publish / approve drafts" intent ─────────────────────────────────────────
-function isPublishDraftsIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /approve\s*(and\s*)?(publish\s*)?the\s*(challenger\s*)?drafts?/i.test(s) ||
-    /publish\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /send\s*(them|the\s*drafts?)\s*to\s*meta/i.test(s) ||
-    /go\s*live\s*(with\s*)?(the\s*)?drafts?/i.test(s) ||
-    /launch\s*(the\s*)?(challenger\s*)?drafts?/i.test(s) ||
-    /create\s*(the\s*)?ads?\s*(now|from\s*draft)/i.test(s) ||
-    /publish\s*(these|those|them|the\s*challengers?)/i.test(s)
-  );
-}
-
-// ── Hard action router — runs BEFORE any performance/strategy/OpenAI logic ────
-// Detects explicit execution commands so they never fall through to OpenAI.
-function detectAdAgentActionIntent(message) {
-  const s = String(message || '');
-
-  const hasCreateVerb    = /\b(create|make|build|generate|launch|add)\b/i.test(s);
-  const hasChallenger    = /\b(challenger|test\s*ad|ad\s*variation|variant|headline-only|image-only|a\/b|ab\s*test)\b/i.test(s);
-  const hasControlAd     = /\bcontrol\s*ad\b/i.test(s) || /\busing\s*ad\b/i.test(s) || /\bad\s*id\b/i.test(s);
-  const hasMetaAdId      = /\b\d{10,}\b/.test(s);
-  const hasHeadlineOnly  = /headline-only|headline\s*only|change\s*only\s*the\s*headline|change\s*headline\s*only/i.test(s);
-  const hasImageOnly     = /image-only|image\s*only|change\s*only\s*the\s*image|change\s*image\s*only/i.test(s);
-
-  if (hasCreateVerb && hasChallenger && (hasControlAd || hasMetaAdId || hasHeadlineOnly || hasImageOnly)) {
-    return { intent: 'execute_action', actionType: 'create_challenger_ads' };
-  }
-
-  return { intent: 'chat' };
 }
 
 // Parses challenger details directly from the user's message text.
@@ -501,16 +398,6 @@ function adAgentAccess(user) {
   return 'locked';
 }
 
-// ── Pixel intent detection ────────────────────────────────────────────────────
-function isPixelIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /fetch.*pixel|get.*pixel|find.*pixel|show.*pixel|paste.*pixel|retrieve.*pixel|pixel.*code|pixel.*id/i.test(s) ||
-    /(meta|facebook|fb)\s*pixel/i.test(s) ||
-    /my pixel/i.test(s)
-  );
-}
-
 // ── Meta Pixel install snippet builder ───────────────────────────────────────
 function buildPixelSnippet(pixelId) {
   const id = String(pixelId || '');
@@ -616,24 +503,6 @@ async function fetchMetaPixels(ownerKey) {
   }
 }
 
-// ── Pixel create intent detection ─────────────────────────────────────────────
-// Must be checked BEFORE isPixelIntent because "create a meta pixel" also
-// matches the (meta|facebook|fb)\s*pixel pattern in the fetch detector.
-function isPixelCreateIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /create\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /make\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /set\s*up\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /generate\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /build\s+(a\s+)?(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /create\s+one\b/i.test(s) ||
-    /create\s+my\s+(meta\s+|facebook\s+|fb\s+)?pixel/i.test(s) ||
-    /that\s+is\s+fine.*create/i.test(s) ||
-    /fine.*create\s+one/i.test(s)
-  );
-}
-
 // ── Create-or-fetch Meta Pixel (deduplicated) ─────────────────────────────────
 async function createOrFetchMetaPixel(ownerKey) {
   const token = getFbUserToken(ownerKey);
@@ -732,34 +601,6 @@ function buildPixelCreateReply(result) {
     '• Shopify: Online Store → Themes → Edit code → theme.liquid (before </head>)\n' +
     '• Other: paste just before the closing </head> tag\n\n' +
     'Note: Smartemark does not install the Pixel automatically. You must paste this code into your website manually.'
-  );
-}
-
-// ── Pixel diagnostics / event activity ───────────────────────────────────────
-// Matches questions about whether the Pixel is working/receiving events.
-// MUST be checked before isPixelIntent so diagnostic phrases don't fall through
-// to the install-code path.
-function isPixelDiagnosticsIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /pixel.*receiv/i.test(s) ||
-    /pixel.*event/i.test(s) ||
-    /pixel.*activ/i.test(s) ||
-    /pixel.*work/i.test(s) ||
-    /pixel.*fir/i.test(s) ||
-    /pixel.*send/i.test(s) ||
-    /pixel.*status/i.test(s) ||
-    /pixel.*diagnos/i.test(s) ||
-    /pixel.*test/i.test(s) ||
-    /pixel.*verif/i.test(s) ||
-    /check.*pixel/i.test(s) ||
-    /event.*pixel/i.test(s) ||
-    /events?\s*manager/i.test(s) ||
-    /pagev?iew.*fire/i.test(s) ||
-    /lead.*event/i.test(s) ||
-    /track.*event/i.test(s) ||
-    /did.*pixel/i.test(s) ||
-    /is.*pixel/i.test(s)
   );
 }
 
@@ -969,23 +810,6 @@ function extractConversions(actions) {
   }, 0);
 }
 
-function isMetaAdsManagerIntent(message) {
-  const s = String(message || '').toLowerCase();
-  return (
-    /ads?\s*manager/i.test(s) ||
-    /check.*meta\s*ads/i.test(s) ||
-    /check.*facebook\s*ads/i.test(s) ||
-    /check.*fb\s*ads/i.test(s) ||
-    /meta\s*ads?\s*report/i.test(s) ||
-    /facebook\s*ads?\s*report/i.test(s) ||
-    /ad\s*account\s*performance/i.test(s) ||
-    /show.*meta.*campaigns?/i.test(s) ||
-    /what.*going.*on.*in.*(?:my\s+)?ads/i.test(s) ||
-    /give.*me.*(?:a\s+)?(?:meta|facebook)\s*ads?\s*(report|summary|update)/i.test(s) ||
-    /report.*(?:meta|facebook)\s*ads/i.test(s)
-  );
-}
-
 async function fetchMetaAdsSummary(ownerKey) {
   const token = getFbUserToken(ownerKey);
   if (!token) return { notConnected: true };
@@ -1129,6 +953,418 @@ function buildMetaAdsSummaryReply(result) {
   return lines.join('\n');
 }
 
+// ── AI Agent tools (OpenAI function calling) ─────────────────────────────────
+// The model decides which of these to call based on the full conversation —
+// replacing the old regex "intent detector" cascade, which misrouted messages
+// whenever wording didn't exactly match a hardcoded pattern.
+const AD_AGENT_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_meta_pixel',
+      description:
+        'Fetch the existing Meta Pixel ID and website install snippet for the connected Facebook ad account. ' +
+        'Use when the user asks to see, get, retrieve, or "give me" their pixel — including short follow-ups ' +
+        'like "give me the one you generated" that refer back to a pixel mentioned earlier in the conversation.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_meta_pixel',
+      description:
+        'Create a new Meta Pixel for the connected ad account, or return the existing one if one already exists ' +
+        '(never creates a duplicate). Use when the user asks to create, make, set up, or generate a pixel.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_pixel_diagnostics',
+      description:
+        'Check whether the Meta Pixel is actively receiving events (PageView, Lead, etc.). Use for questions ' +
+        'about whether the pixel is working, firing, active, or has recent event activity.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_meta_ads_manager',
+      description:
+        'Fetch a live, read-only summary of the connected Meta ad account\'s campaigns and performance directly from Meta.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_challenger_ads',
+      description:
+        'Create a headline-test and image-test challenger ad (an A/B test) against a control ad, as draft previews ' +
+        'for the user to review before publishing. Use when the user gives an explicit instruction to create ' +
+        'challenger/test/A-B-test ads, especially if they provide a control ad ID or specific headline text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          controlAdId: { type: 'string', description: 'The Meta ad ID to use as the control/base ad, if specified. Omit if not given.' },
+          headline: { type: 'string', description: 'The new headline text to test, if specified. Omit if not given.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_replacement_challenger',
+      description:
+        'Generate a brand-new AI challenger creative for the currently selected campaign via the autonomous optimizer. ' +
+        'Use when the user asks to generate/create/make another/new/replacement challenger or A/B test WITHOUT giving ' +
+        'a specific control ad ID or headline (use create_challenger_ads instead when those specifics are given).',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'show_challenger_drafts',
+      description: 'Point the user to where saved challenger drafts are for review. Use when asked to show/see/view/find drafts.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'publish_challenger_drafts',
+      description:
+        'Publish previously generated challenger drafts live to Meta for the selected campaign. Use when the user ' +
+        'says to approve, publish, launch, or go live with the drafts.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_challenger_instructions',
+      description:
+        'Guide the user through removing, deleting, or pausing the AI challenger ad from a campaign. This requires ' +
+        'manual UI confirmation rather than being executed directly. Use when the user says a challenger/test ad is ' +
+        'wrong, unrelated, off-brand, or wants it removed/deleted/reset/started over.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+];
+
+async function runFetchMetaPixelTool({ effectiveOwnerKey }) {
+  const pixelResult = await fetchMetaPixels(effectiveOwnerKey);
+  if (pixelResult.pixels?.length && pixelResult.adAccountId) {
+    const p = pixelResult.pixels[0];
+    savePixelInfo(effectiveOwnerKey, p.id, p.name, pixelResult.adAccountId, 'found_existing');
+  }
+  return { ok: true, reply: buildPixelReply(pixelResult) };
+}
+
+async function runCreateMetaPixelTool({ effectiveOwnerKey }) {
+  const createResult = await createOrFetchMetaPixel(effectiveOwnerKey);
+  if (createResult.pixels?.length && createResult.adAccountId) {
+    const p = createResult.pixels[0];
+    const st = createResult.created ? 'created' : 'found_existing';
+    savePixelInfo(effectiveOwnerKey, p.id, p.name, createResult.adAccountId, st);
+  }
+  return { ok: true, reply: buildPixelCreateReply(createResult) };
+}
+
+async function runPixelDiagnosticsTool({ effectiveOwnerKey }) {
+  const diagResult = await checkPixelEventActivity(effectiveOwnerKey);
+  return { ok: true, reply: buildPixelDiagnosticsReply(diagResult) };
+}
+
+async function runMetaAdsManagerTool({ effectiveOwnerKey }) {
+  const adsSummary = await fetchMetaAdsSummary(effectiveOwnerKey);
+  return { ok: true, reply: buildMetaAdsSummaryReply(adsSummary) };
+}
+
+async function runShowChallengerDraftsTool() {
+  return {
+    ok: true,
+    openCreativesTab: true,
+    reply: 'The challenger drafts are saved in this campaign\'s **Creatives tab** under **"Drafts pending review."** Open that tab to review the headline, body copy, image, and other details for each draft. When you\'re ready, tell me **"approve the drafts"** and I\'ll publish them to Meta.',
+  };
+}
+
+async function runPublishChallengerDraftsTool({ safeCampaignId, adminClientId2, req }) {
+  if (!safeCampaignId) {
+    return { ok: true, reply: 'I need to know which campaign to publish for. Please select a campaign first, then say "approve the drafts."' };
+  }
+  let publishResult = null;
+  try {
+    const selfBase = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
+    const sid = String(getSidFromReq(req) || '').trim();
+    const pubRes = await axios.post(
+      `${selfBase}/api/campaign-context/publish-challenger-drafts`,
+      { campaignId: safeCampaignId, adminClientId: adminClientId2 || '' },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sid ? { 'x-sm-sid': sid } : {}),
+          'cookie': req.headers.cookie || '',
+        },
+        timeout: 30000,
+      }
+    );
+    publishResult = pubRes.data || null;
+  } catch (pubErr) {
+    console.error('[AdAgent] publish drafts failed:', pubErr?.response?.data || pubErr?.message);
+    const errMsg = pubErr?.response?.data?.error || pubErr?.message || 'unknown error';
+    return { ok: true, reply: `Approval received, but ad creation failed before Meta returned real ad IDs.\n\nError: ${errMsg}` };
+  }
+  if (publishResult?.ok) {
+    return { ok: true, openCreativesTab: true, reply: publishResult.reply || 'Challenger ads are now live on Meta.' };
+  }
+  return { ok: true, reply: `Publish failed: ${publishResult?.error || 'unknown error'}` };
+}
+
+async function runRemoveChallengerInstructionsTool({ safeCampaignId }) {
+  const hasCampaign = !!safeCampaignId;
+  const reply = hasCampaign
+    ? 'Got it — I can remove the AI challenger from this campaign. To confirm the removal:\n\n' +
+      '1. Open the **A/B Test** tab for this campaign.\n' +
+      '2. Click **"Remove Challenger"** at the bottom of the tab.\n' +
+      '3. Confirm — only the AI challenger will be removed. Your original ad stays live and untouched.\n\n' +
+      'Once removed, I can generate a replacement challenger using the correct campaign context. Just say **"generate a new challenger"** after removing this one.'
+    : 'I can remove the AI challenger from your campaign. Please select a campaign first (use the campaign dropdown), then go to the **A/B Test** tab and click **"Remove Challenger"** to confirm. Your original ad will stay live and untouched.';
+  return { ok: true, reply };
+}
+
+async function runCreateChallengerAdsTool({ args, trimmed, safeCampaignId, effectiveOwnerKey, adminClientId2, req }) {
+  // Prefer structured arguments extracted by the model; fall back to regex parsing
+  // of the raw text for anything it didn't pick up.
+  const parsedFallback = parseChallengerRequest(trimmed);
+  const controlAdId    = String(args?.controlAdId || '').trim() || parsedFallback.controlAdId;
+  const headline       = String(args?.headline || '').trim() || parsedFallback.headline;
+  const headlineName   = parsedFallback.headlineName;
+  const imageName      = parsedFallback.imageName;
+
+  const token = getFbUserToken(effectiveOwnerKey);
+  if (!token) {
+    return { ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' };
+  }
+
+  await db.read();
+  const DEAD = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
+  let creativeRec = safeCampaignId
+    ? (db.data.campaign_creatives || []).find((r) => String(r.campaignId || '').trim() === safeCampaignId)
+    : null;
+  if (!creativeRec && controlAdId) {
+    creativeRec = (db.data.campaign_creatives || []).find((r) =>
+      Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((a) => a.metaAdId === controlAdId)
+    );
+  }
+
+  const accountId  = String(creativeRec?.accountId || '').replace(/^act_/, '').trim();
+  const campaignId = String(creativeRec?.campaignId || safeCampaignId || '').trim();
+  const resolvedControlAdId = controlAdId || String(
+    (creativeRec?.launchedCreativeSet || []).find((a) => !DEAD.has(String(a.status || '')))?.metaAdId || ''
+  ).trim();
+
+  if (!resolvedControlAdId) {
+    return { ok: true, reply: 'I could not identify a control ad ID. Please include it in your request (e.g., "using control ad 52543256381288") or select the campaign first.' };
+  }
+  if (!accountId) {
+    return { ok: true, reply: 'Could not find the ad account ID. Please select the campaign in the Campaigns tab and try again.' };
+  }
+
+  const hl = headline || '$75 AC Tune-Up Before Houston Heat Gets Worse';
+  const challengers = [
+    { testType: 'headline', name: headlineName, headline: hl },
+    { testType: 'image', name: imageName, imageUrl: 'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg' },
+  ];
+
+  console.log('[AI_AGENT_INTENT_DETECTED]', { actionType: 'create_challenger_drafts_immediate', controlAdId: resolvedControlAdId, campaignId });
+
+  let draftResult = null;
+  try {
+    const selfBase = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
+    const sid = String(getSidFromReq(req) || '').trim();
+    const draftRes = await axios.post(
+      `${selfBase}/api/campaign-context/create-challenger-drafts`,
+      {
+        campaignId,
+        controlAdId: resolvedControlAdId,
+        accountId,
+        challengers,
+        adminClientId: adminClientId2 || '',
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sid ? { 'x-sm-sid': sid } : {}),
+          'cookie': req.headers.cookie || '',
+        },
+        timeout: 150000, // 150s — accommodates OpenAI's 120s image generation timeout
+      }
+    );
+    draftResult = draftRes.data || null;
+  } catch (draftErr) {
+    const errMsg = draftErr?.response?.data?.error || draftErr?.message || 'Failed to build A/B test previews.';
+    console.error('[AD_AGENT_DRAFT_CREATION_FAILED]', { error: errMsg, status: draftErr?.response?.status });
+    return { ok: false, eventType: 'ab_test_error', reply: errMsg };
+  }
+
+  if (draftResult && !draftResult.ok) {
+    const errMsg = draftResult.error || 'Failed to build A/B test previews.';
+    console.error('[AD_AGENT_DRAFT_RESULT_FAILED]', { error: errMsg });
+    return { ok: false, eventType: 'ab_test_error', reply: errMsg };
+  }
+
+  if (draftResult?.ok && Array.isArray(draftResult.drafts)) {
+    const d = draftResult.drafts;
+    console.log('[AB_TEST_PREVIEWS_GENERATED]', {
+      campaignId, controlAdId: resolvedControlAdId, previewCount: d.length,
+      previews: d.map((dr) => ({ id: dr.id, name: dr.name, testType: dr.testType, hasImage: !!dr.imageUrl })),
+    });
+    return {
+      ok: true,
+      eventType: 'ab_test_previews_generated',
+      campaignId,
+      controlAdId: resolvedControlAdId,
+      previews: d,
+      reply: `I generated ${d.length} A/B test preview${d.length !== 1 ? 's' : ''}.`,
+    };
+  }
+
+  return {
+    ok: false,
+    eventType: 'ab_test_error',
+    reply: `I could not build the draft previews — the control ad fetch may have failed. Check that \`${resolvedControlAdId}\` is accessible and the client's Facebook account is connected, then try again.`,
+  };
+}
+
+async function runGenerateReplacementChallengerTool({ safeCampaignId, effectiveOwnerKey, ownerKey }) {
+  if (!safeCampaignId) {
+    return { ok: true, reply: 'Select a campaign first (go back to the Campaigns tab and click Ad Agent from there), then ask me to generate a challenger.' };
+  }
+
+  const campaignState = await findOptimizerCampaignStateByCampaignId(safeCampaignId).catch(() => null);
+  if (!campaignState) {
+    return { ok: true, reply: 'I could not find an optimizer state for the selected campaign. Make sure the campaign is set up and try again.' };
+  }
+
+  const stateOwner = String(campaignState.ownerKey || '').trim();
+  const callerIsAdmin = effectiveOwnerKey !== ownerKey;
+  if (!callerIsAdmin && stateOwner && stateOwner !== effectiveOwnerKey) {
+    return { ok: true, reply: 'You are not authorized to modify that campaign.' };
+  }
+
+  const existingPending = campaignState.pendingCreativeTest;
+  const existingStatus = String(existingPending?.status || '').trim().toLowerCase();
+  if (existingPending && existingStatus !== 'failed' && existingStatus !== '') {
+    return { ok: true, reply: `There's already an AI challenger in progress for this campaign (status: **${existingStatus || 'active'}**). Go to the **A/B Test** tab to review it. If it's the wrong one, click **Remove Challenger** first, then ask me to generate a new one.` };
+  }
+
+  const IS_DRY_RUN = String(process.env.SMARTEMARK_AI_OPERATOR_DRY_RUN || '').trim() === '1';
+  if (IS_DRY_RUN) {
+    return { ok: true, reply: 'The optimizer is in dry-run mode — real Meta actions are paused. The account owner needs to disable `SMARTEMARK_AI_OPERATOR_DRY_RUN` in the server settings before challengers can be generated.' };
+  }
+
+  const userToken = getFbUserToken(effectiveOwnerKey);
+  if (!userToken) {
+    return { ok: true, reply: 'No Meta access token found. Please reconnect your Facebook account in Settings, then try again.' };
+  }
+
+  // AI control gate — see comment history in optimizerCampaignState for rationale:
+  //   • Effective Autopilot OFF → always queue as proposal
+  //   • Effective Autopilot ON + Approval Required ON → queue as proposal
+  //   • Effective Autopilot ON + Approval Required OFF → execute directly
+  const { aiAutopilotEnabled: _autopilot, aiApprovalRequired: _approvalRequired } =
+    getEffectiveAiControlSettings(campaignState);
+  if (!_autopilot || _approvalRequired) {
+    const proposal = await createActionProposal({
+      ownerKey: effectiveOwnerKey,
+      campaignId: safeCampaignId,
+      actionType: 'generate_single_creative_variant',
+      title: 'Generate challenger ad (user requested via Ad Agent)',
+      reasoning: 'User asked Ad Agent to generate a replacement challenger. Approval required before Meta changes are made.',
+      proposedChanges: { adCount: 1, testType: 'creative_variant', requestedBy: 'ad_agent' },
+      riskLevel: 'low',
+    }).catch((e) => {
+      console.error('[AdAgent] proposal create error:', e?.message);
+      return null;
+    });
+
+    return {
+      ok: true,
+      proposalId: proposal?.id || null,
+      proposalPending: true,
+      proposalTitle: 'Generate challenger ad',
+      proposalSummary: 'Create 1 new challenger ad variant and start an A/B test',
+      proposalAction: 'generate_single_creative_variant',
+      reply: proposal
+        ? `**Approval required.** I've queued a request to generate a challenger ad for this campaign.\n\nProposed action: **${proposal.title}**\n\nTo approve or reject this change, use the Approve/Reject buttons below or visit the AI Settings panel.`
+        : 'Approval is required for this campaign, but I could not create the proposal record. Please try again or disable approval mode in AI Settings.',
+    };
+  }
+
+  const synthDecision = {
+    decision: 'launch_creative_test',
+    actionType: 'generate_single_creative_variant',
+    priority: 'high',
+    reason: 'User requested a replacement challenger via Ad Agent.',
+    requiresHumanApproval: false,
+    confidence: 0.95,
+    generatedAt: new Date().toISOString(),
+    mode: 'ad_agent_manual_v1',
+  };
+
+  const stateWithDecision = { ...campaignState, latestDecision: synthDecision };
+
+  let actionResult;
+  try {
+    actionResult = await executeAction({ optimizerState: stateWithDecision, userToken });
+  } catch (execErr) {
+    console.error('[AdAgent] generate-challenger executeAction error:', execErr?.message);
+    return { ok: true, reply: `Challenger generation failed: ${execErr?.message || 'unknown error'}. Check the server logs or try again.` };
+  }
+
+  const creativePatch = buildCreativePatchFromResult(actionResult);
+  await updateOptimizerCampaignState(safeCampaignId, {
+    latestDecision: synthDecision,
+    latestAction: actionResult,
+    ...creativePatch,
+  }).catch((e) => console.error('[AdAgent] generate-challenger state persist error:', e?.message));
+
+  await appendAiHistoryEntry(safeCampaignId, {
+    type: 'action',
+    timestamp: actionResult?.generatedAt || new Date().toISOString(),
+    title: 'Generated replacement challenger',
+    summary: String(actionResult?.status || '').trim(),
+    reason: String(actionResult?.reason || synthDecision.reason).trim(),
+    actionType: 'generate_single_creative_variant',
+    source: 'ad_agent_manual',
+  }).catch(() => {});
+
+  return { ok: true, reply: buildGenerateChallengerReply(actionResult) };
+}
+
+const AD_AGENT_TOOL_RUNNERS = {
+  fetch_meta_pixel: runFetchMetaPixelTool,
+  create_meta_pixel: runCreateMetaPixelTool,
+  check_pixel_diagnostics: runPixelDiagnosticsTool,
+  check_meta_ads_manager: runMetaAdsManagerTool,
+  create_challenger_ads: runCreateChallengerAdsTool,
+  generate_replacement_challenger: runGenerateReplacementChallengerTool,
+  show_challenger_drafts: runShowChallengerDraftsTool,
+  publish_challenger_drafts: runPublishChallengerDraftsTool,
+  remove_challenger_instructions: runRemoveChallengerInstructionsTool,
+};
+
+const PIXEL_PLAN_TOOLS = new Set([
+  'fetch_meta_pixel', 'create_meta_pixel', 'check_pixel_diagnostics', 'check_meta_ads_manager',
+]);
+
 // ── Rate limits ───────────────────────────────────────────────────────────────
 const limitChat = basicRateLimit({ windowMs: 60 * 1000, max: 30 });
 const limitPixel = basicRateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -1170,553 +1406,17 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
 
     const trimmed = message.trim().slice(0, 2000);
 
-    // Derive safeCampaignId early — used by all intent handlers below
+    // Derive safeCampaignId early — used by all tool handlers below
     const safeCampaignId = selectedCampaignId && selectedCampaignId !== '__DRAFT__'
       ? String(selectedCampaignId).trim()
       : null;
 
-    // ── HARD ACTION ROUTER — runs before EVERY other branch ─────────────────
-    // detectAdAgentActionIntent must run first so explicit execution commands
-    // never fall through to performance context injection or the OpenAI call.
-    const routedIntent = detectAdAgentActionIntent(trimmed);
-
-    console.log('[AD_AGENT_ROUTE_TRACE_START]', {
-      selectedCampaignId,
-      adminClientId: req.body?.adminClientId || req.query?.adminClientId || null,
-      effectiveOwnerKey,
-      intent:     routedIntent.intent,
-      actionType: routedIntent.actionType || null,
-      message:    trimmed.slice(0, 300),
-    });
-
-    if (routedIntent.actionType === 'create_challenger_ads') {
-      // Do not call OpenAI. Do not return performance advice. Create proposal and return approval.
-      const parsed2        = parseChallengerRequest(trimmed);
-      const parsedCtrlId   = parsed2.controlAdId;
-
-      console.log('[AD_AGENT_INTENT_DETECTED]', {
-        intent:       routedIntent.intent,
-        actionType:   routedIntent.actionType,
-        controlAdId:  parsedCtrlId,
-        campaignId:   safeCampaignId,
-        clientId:     effectiveOwnerKey,
-      });
-
-      const challengerToken2 = getFbUserToken(effectiveOwnerKey);
-      if (!challengerToken2) {
-        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_token', message: trimmed.slice(0, 300) });
-        return res.json({ ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' });
-      }
-
-      await db.read();
-      const DEAD3 = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
-      let cRec2 = safeCampaignId
-        ? (db.data.campaign_creatives || []).find((r) => String(r.campaignId || '').trim() === safeCampaignId)
-        : null;
-      if (!cRec2 && parsedCtrlId) {
-        cRec2 = (db.data.campaign_creatives || []).find((r) =>
-          Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((a) => a.metaAdId === parsedCtrlId)
-        );
-      }
-
-      const acctId2  = String(cRec2?.accountId || '').replace(/^act_/, '').trim();
-      const cmpId2   = String(cRec2?.campaignId || safeCampaignId || '').trim();
-      const ctrlId2  = parsedCtrlId || String(
-        (cRec2?.launchedCreativeSet || []).find((a) => !DEAD3.has(String(a.status || '')))?.metaAdId || ''
-      ).trim();
-
-      if (!ctrlId2) {
-        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_control_id', message: trimmed.slice(0, 300) });
-        return res.json({ ok: true, reply: 'I could not identify a control ad ID. Please include it in your request (e.g., "using control ad 52543256381288") or select the campaign first.' });
-      }
-      if (!acctId2) {
-        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_ads/no_account_id', message: trimmed.slice(0, 300) });
-        return res.json({ ok: true, reply: 'Could not find the ad account ID. Please select the campaign in the Campaigns tab and try again.' });
-      }
-
-      const hlName2  = parsed2.headlineName;
-      const imgName2 = parsed2.imageName;
-      const hl2      = parsed2.headline || '$75 AC Tune-Up Before Houston Heat Gets Worse';
-
-      const challengers2 = [
-        { testType: 'headline', name: hlName2, headline: hl2 },
-        { testType: 'image',   name: imgName2, imageUrl: 'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg' },
-      ];
-
-      const payload2 = {
-        ownerKey:    effectiveOwnerKey,
-        campaignId:  cmpId2,
-        controlAdId: ctrlId2,
-        accountId:   acctId2,
-        challengers: challengers2,
-        safety: { doNotCreateCampaign: true, doNotCreateAdSet: true, doNotChangeBudget: true, doNotChangeTargeting: true, doNotTouchArchivedAds: true },
-      };
-
-      // Draft creation is safe (read-only Meta fetch) — no approval needed.
-      // Call the create-challenger-drafts endpoint directly and return immediately.
-      console.log('[AI_AGENT_INTENT_DETECTED]', { actionType: 'create_challenger_drafts_immediate', controlAdId: ctrlId2, campaignId: cmpId2 });
-
-      let draftResult2 = null;
-      try {
-        const selfBase2 = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
-        const sid2 = String(getSidFromReq(req) || '').trim();
-        const draftRes2 = await axios.post(
-          `${selfBase2}/api/campaign-context/create-challenger-drafts`,
-          {
-            campaignId:    cmpId2,
-            controlAdId:   ctrlId2,
-            accountId:     acctId2,
-            challengers:   challengers2,
-            adminClientId: adminClientId2 || '',
-          },
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(sid2 ? { 'x-sm-sid': sid2 } : {}),
-              'cookie': req.headers.cookie || '',
-            },
-            timeout: 150000, // 150s — accommodates OpenAI's 120s image generation timeout
-          }
-        );
-        draftResult2 = draftRes2.data || null;
-      } catch (draftErr2) {
-        const errMsg = draftErr2?.response?.data?.error || draftErr2?.message || 'Failed to build A/B test previews.';
-        console.error('[AD_AGENT_DRAFT_CREATION_FAILED]', { error: errMsg, status: draftErr2?.response?.status });
-        return res.json({ ok: false, eventType: 'ab_test_error', reply: errMsg });
-      }
-
-      // Route returned ok:false (e.g. image generation failed) — surface the error
-      if (draftResult2 && !draftResult2.ok) {
-        const errMsg = draftResult2.error || 'Failed to build A/B test previews.';
-        console.error('[AD_AGENT_DRAFT_RESULT_FAILED]', { error: errMsg });
-        return res.json({ ok: false, eventType: 'ab_test_error', reply: errMsg });
-      }
-
-      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'create_challenger_drafts/immediate', ok: !!draftResult2?.ok, message: trimmed.slice(0, 300) });
-
-      if (draftResult2?.ok && Array.isArray(draftResult2.drafts)) {
-        const d = draftResult2.drafts;
-        console.log('[AB_TEST_PREVIEWS_GENERATED]', {
-          campaignId:  cmpId2,
-          controlAdId: ctrlId2,
-          previewCount: d.length,
-          previews:    d.map((dr) => ({ id: dr.id, name: dr.name, testType: dr.testType, hasImage: !!dr.imageUrl })),
-        });
-        return res.json({
-          ok:          true,
-          eventType:   'ab_test_previews_generated',
-          campaignId:  cmpId2,
-          controlAdId: ctrlId2,
-          previews:    d,
-          reply:       `I generated ${d.length} A/B test preview${d.length !== 1 ? 's' : ''}.`,
-        });
-      }
-
-      return res.json({
-        ok:    false,
-        eventType: 'ab_test_error',
-        reply: `I could not build the draft previews — the control ad fetch may have failed. Check that \`${ctrlId2}\` is accessible and the client's Facebook account is connected, then try again.`,
-      });
-    }
-    // ── End hard action router ────────────────────────────────────────────────
-
-    // ── "Show me the drafts" — point user to Creatives tab ──────────────────
-    if (isShowDraftsIntent(trimmed)) {
-      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'show_drafts', message: trimmed.slice(0, 300) });
-      return res.json({
-        ok:             true,
-        openCreativesTab: true,
-        reply: 'The challenger drafts are saved in this campaign\'s **Creatives tab** under **"Drafts pending review."** Open that tab to review the headline, body copy, image, and other details for each draft. When you\'re ready, tell me **"approve the drafts"** and I\'ll publish them to Meta.',
-      });
-    }
-
-    // ── "Approve / publish the drafts" — trigger Meta publish ───────────────
-    if (isPublishDraftsIntent(trimmed)) {
-      if (!safeCampaignId) {
-        console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'publish_drafts/no_campaign', message: trimmed.slice(0, 300) });
-        return res.json({ ok: true, reply: 'I need to know which campaign to publish for. Please select a campaign first, then say "approve the drafts."' });
-      }
-      console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'publish_drafts/executing', campaignId: safeCampaignId });
-      let publishResult = null;
-      try {
-        const selfBase3 = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 10000}`;
-        const sid3 = String(getSidFromReq(req) || '').trim();
-        const pubRes = await axios.post(
-          `${selfBase3}/api/campaign-context/publish-challenger-drafts`,
-          { campaignId: safeCampaignId, adminClientId: adminClientId2 || '' },
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(sid3 ? { 'x-sm-sid': sid3 } : {}),
-              'cookie': req.headers.cookie || '',
-            },
-            timeout: 30000,
-          }
-        );
-        publishResult = pubRes.data || null;
-      } catch (pubErr) {
-        console.error('[AD_AGENT_PUBLISH_FAILED]', pubErr?.response?.data || pubErr?.message);
-        const errMsg = pubErr?.response?.data?.error || pubErr?.message || 'unknown error';
-        return res.json({ ok: true, reply: `Approval received, but ad creation failed before Meta returned real ad IDs.\n\nError: ${errMsg}` });
-      }
-      if (publishResult?.ok) {
-        return res.json({ ok: true, openCreativesTab: true, reply: publishResult.reply || 'Challenger ads are now live on Meta.' });
-      }
-      return res.json({ ok: true, reply: `Publish failed: ${publishResult?.error || 'unknown error'}` });
-    }
-    // ── End publish drafts router ─────────────────────────────────────────────
-
-    // Pixel CREATE intent — must be checked before general pixel intent
-    if (isPixelCreateIntent(trimmed)) {
-      if (access !== 'pixel') {
-        return res.json({
-          ok: true,
-          reply: 'Meta Pixel setup is available on the Premium plan. Upgrade to Premium to create or fetch your Meta Pixel.',
-        });
-      }
-      const createResult = await createOrFetchMetaPixel(effectiveOwnerKey);
-      if (createResult.pixels?.length && createResult.adAccountId) {
-        const p = createResult.pixels[0];
-        const st = createResult.created ? 'created' : 'found_existing';
-        savePixelInfo(effectiveOwnerKey, p.id, p.name, createResult.adAccountId, st);
-      }
-      return res.json({ ok: true, reply: buildPixelCreateReply(createResult) });
-    }
-
-    // Pixel DIAGNOSTICS intent — check BEFORE fetch intent so "check my pixel / is it active"
-    // doesn't fall through to the install-code path
-    if (isPixelDiagnosticsIntent(trimmed)) {
-      if (access !== 'pixel') {
-        return res.json({
-          ok: true,
-          reply: 'Meta Pixel diagnostics are available on the Premium plan. Upgrade to Premium to check Pixel event activity.',
-        });
-      }
-      const diagResult = await checkPixelEventActivity(effectiveOwnerKey);
-      return res.json({ ok: true, reply: buildPixelDiagnosticsReply(diagResult) });
-    }
-
-    // Meta Ads Manager read-only check
-    if (isMetaAdsManagerIntent(trimmed)) {
-      if (access !== 'pixel') {
-        return res.json({
-          ok: true,
-          reply: 'Live Meta Ads Manager checks are available on Premium. Upgrade to Premium to check your ad account performance directly from Ad Agent.',
-        });
-      }
-      const adsSummary = await fetchMetaAdsSummary(effectiveOwnerKey);
-      return res.json({ ok: true, reply: buildMetaAdsSummaryReply(adsSummary) });
-    }
-
-    // Pixel FETCH intent on non-pixel plan
-    if (isPixelIntent(trimmed) && access !== 'pixel') {
-      return res.json({
-        ok: true,
-        reply:
-          'Meta Pixel setup is available on the Premium plan. ' +
-          'Upgrade to Premium to fetch your Meta Pixel from your connected Facebook ad account.',
-      });
-    }
-
-    // Pixel FETCH intent on premium/operator — fetch inline
-    if (isPixelIntent(trimmed) && access === 'pixel') {
-      const pixelResult = await fetchMetaPixels(effectiveOwnerKey);
-      if (pixelResult.pixels?.length && pixelResult.adAccountId) {
-        const p = pixelResult.pixels[0];
-        savePixelInfo(effectiveOwnerKey, p.id, p.name, pixelResult.adAccountId, 'found_existing');
-      }
-      return res.json({ ok: true, reply: buildPixelReply(pixelResult) });
-    }
-
-    // Wrong challenger intent — guide user to confirm removal via the A/B Test tab
-    if (isWrongChallengerIntent(trimmed)) {
-      const hasCampaign = !!safeCampaignId;
-      const reply = hasCampaign
-        ? 'Got it — I can remove the AI challenger from this campaign. To confirm the removal:\n\n' +
-          '1. Open the **A/B Test** tab for this campaign.\n' +
-          '2. Click **"Remove Challenger"** at the bottom of the tab.\n' +
-          '3. Confirm — only the AI challenger will be removed. Your original ad stays live and untouched.\n\n' +
-          'Once removed, I can generate a replacement challenger using the correct campaign context. Just say **"generate a new challenger"** after removing this one.'
-        : 'I can remove the AI challenger from your campaign. Please select a campaign first (use the campaign dropdown), then go to the **A/B Test** tab and click **"Remove Challenger"** to confirm. Your original ad will stay live and untouched.';
-      return res.json({ ok: true, reply });
-    }
-
-    // ── Create 2 specific challengers (headline + image) ─────────────────────
-    // Handles "create 2 challenger ads" style prompts. Creates real Meta ads
-    // by cloning the control ad's creative and changing only headline or image.
-    if (isCreateSpecificChallengersIntent(trimmed)) {
-      // Parse control ad ID and challenger details directly from the message text.
-      // This removes the dependency on a pre-selected campaign when the user provides IDs.
-      const parsed = parseChallengerRequest(trimmed);
-      const parsedControlAdId = parsed.controlAdId;
-
-      console.log('[AD_AGENT_INTENT_DETECTED]', {
-        intent:       'create_challenger_ads',
-        actionType:   'create_challenger_ads',
-        controlAdId:  parsedControlAdId,
-        campaignId:   safeCampaignId,
-        clientId:     effectiveOwnerKey,
-      });
-
-      // Require Meta token
-      const challengerToken = getFbUserToken(effectiveOwnerKey);
-      if (!challengerToken) {
-        return res.json({ ok: true, reply: 'No Meta access token found for this account. Please reconnect the client\'s Facebook account.' });
-      }
-
-      // Look up campaign/account context from DB.
-      // Primary: use safeCampaignId if the campaign tab has one selected.
-      // Secondary: find the campaign that contains the parsed control ad ID.
-      await db.read();
-      const DEAD2 = new Set(['archived', 'deleted', 'ARCHIVED', 'DELETED']);
-      let creativeRec = safeCampaignId
-        ? (db.data.campaign_creatives || []).find((r) => String(r.campaignId || '').trim() === String(safeCampaignId).trim())
-        : null;
-
-      if (!creativeRec && parsedControlAdId) {
-        creativeRec = (db.data.campaign_creatives || []).find((r) =>
-          Array.isArray(r.launchedCreativeSet) &&
-          r.launchedCreativeSet.some((ad) => ad.metaAdId === parsedControlAdId)
-        );
-      }
-
-      const launchedSet  = Array.isArray(creativeRec?.launchedCreativeSet) ? creativeRec.launchedCreativeSet : [];
-      const activeAds    = launchedSet.filter((ad) => !DEAD2.has(String(ad.status || '')) && !DEAD2.has(String(ad.uiStatus || '')));
-      const accountId    = String(creativeRec?.accountId || '').replace(/^act_/, '').trim();
-      const campaignId   = String(creativeRec?.campaignId || safeCampaignId || '').trim();
-
-      // Resolve final controlAdId: parsed from message wins, otherwise first active ad
-      const controlAdId  = parsedControlAdId || String(activeAds[0]?.metaAdId || '').trim();
-
-      if (!controlAdId) {
-        return res.json({ ok: true, reply: 'I could not identify a control ad ID. Please include the control ad ID in your request (e.g., "using control ad 52543256381288") or select the campaign first.' });
-      }
-      if (!accountId) {
-        return res.json({ ok: true, reply: 'Could not find the ad account ID for this campaign. Please select the campaign in the Campaigns tab and try again.' });
-      }
-
-      // Build challengers from parsed message data
-      const headlineName = parsed.headlineName;
-      const imageName    = parsed.imageName;
-      const headline     = parsed.headline || '$75 AC Tune-Up Before Houston Heat Gets Worse';
-
-      const challengersPayload = [
-        {
-          testType: 'headline',
-          name:     headlineName,
-          headline,
-        },
-        {
-          testType:  'image',
-          name:      imageName,
-          imageUrl:  'https://images.pexels.com/photos/5463575/pexels-photo-5463575.jpeg',
-        },
-      ];
-
-      const safety = {
-        doNotCreateCampaign:   true,
-        doNotCreateAdSet:      true,
-        doNotChangeBudget:     true,
-        doNotChangeTargeting:  true,
-        doNotTouchArchivedAds: true,
-      };
-
-      const proposalPayload = {
-        ownerKey: effectiveOwnerKey,
-        campaignId,
-        controlAdId,
-        accountId,
-        challengers: challengersPayload,
-        safety,
-      };
-
-      console.log('[AI_AGENT_PENDING_ACTION_CREATED]', { actionType: 'create_challenger_ads', proposalId: '(pending)', payload: proposalPayload });
-
-      const proposal = await createActionProposal({
-        ownerKey:        effectiveOwnerKey,
-        campaignId,
-        actionType:      'create_challenger_ads',
-        title:           `Create 2 challenger ads (control: ${controlAdId})`,
-        reasoning:       `User explicitly requested 2 challenger ads using control ad ${controlAdId}. Planned: (1) headline-only change, (2) image-only change. Same ad set, same budget, same targeting. No new campaign or ad set will be created.`,
-        proposedChanges: proposalPayload,
-        riskLevel:       'medium',
-      }).catch((e) => {
-        console.error('[AdAgent] create_challenger_ads proposal error:', e?.message);
-        return null;
-      });
-
-      const summaryLines = [
-        `**Control ad:** \`${controlAdId}\``,
-        '',
-        `**Challenger 1 — ${headlineName}**`,
-        `- Change headline only: *${headline}*`,
-        `- Keep same image, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
-        '',
-        `**Challenger 2 — ${imageName}**`,
-        `- Change image only`,
-        `- Keep same headline, body copy, CTA, landing page, campaign, ad set, budget, and targeting`,
-      ].join('\n');
-
-      return res.json({
-        ok:              true,
-        proposalId:      proposal?.id || null,
-        proposalPending: true,
-        proposalTitle:   'Create 2 challenger ads',
-        proposalSummary: `Control: ${controlAdId} | Headline: "${headline}" | Image: HVAC visual`,
-        proposalAction:  'create_challenger_ads',
-        reply: proposal
-          ? `**Approval required.** I've queued a request to create 2 challenger ads using control ad \`${controlAdId}\`.\n\n${summaryLines}\n\nArchived ads will not be touched.\n\nClick **Approve & Review Drafts** — I'll fetch the control ad details and build previews for you to review before anything goes live on Meta.`
-          : 'I could not queue the proposal. Please try again.',
-      });
-    }
-
-    // Generate challenger intent — execute generate_single_creative_variant via optimizer pipeline
-    if (isGenerateChallengerIntent(trimmed)) {
-      if (!safeCampaignId) {
-        return res.json({
-          ok: true,
-          reply: 'Select a campaign first (go back to the Campaigns tab and click Ad Agent from there), then ask me to generate a challenger.',
-        });
-      }
-
-      const campaignState = await findOptimizerCampaignStateByCampaignId(safeCampaignId).catch(() => null);
-      if (!campaignState) {
-        return res.json({
-          ok: true,
-          reply: 'I could not find an optimizer state for the selected campaign. Make sure the campaign is set up and try again.',
-        });
-      }
-
-      // Ownership check
-      const stateOwner = String(campaignState.ownerKey || '').trim();
-      const callerIsAdmin = effectiveOwnerKey !== ownerKey;
-      if (!callerIsAdmin && stateOwner && stateOwner !== effectiveOwnerKey) {
-        return res.json({ ok: true, reply: 'You are not authorized to modify that campaign.' });
-      }
-
-      // Block if a non-failed challenger already exists
-      const existingPending = campaignState.pendingCreativeTest;
-      const existingStatus = String(existingPending?.status || '').trim().toLowerCase();
-      if (existingPending && existingStatus !== 'failed' && existingStatus !== '') {
-        return res.json({
-          ok: true,
-          reply: `There's already an AI challenger in progress for this campaign (status: **${existingStatus || 'active'}**). Go to the **A/B Test** tab to review it. If it's the wrong one, click **Remove Challenger** first, then ask me to generate a new one.`,
-        });
-      }
-
-      // Check dry-run mode
-      const IS_DRY_RUN = String(process.env.SMARTEMARK_AI_OPERATOR_DRY_RUN || '').trim() === '1';
-      if (IS_DRY_RUN) {
-        return res.json({
-          ok: true,
-          reply: 'The optimizer is in dry-run mode — real Meta actions are paused. The account owner needs to disable `SMARTEMARK_AI_OPERATOR_DRY_RUN` in the server settings before challengers can be generated.',
-        });
-      }
-
-      // Require Meta token
-      const userToken = getFbUserToken(effectiveOwnerKey);
-      if (!userToken) {
-        return res.json({
-          ok: true,
-          reply: 'No Meta access token found. Please reconnect your Facebook account in Settings, then try again.',
-        });
-      }
-
-      // AI control gate — uses the central effective-settings helper so that
-      // uninitialized campaigns (no explicit aiSettingsInitialized) are treated
-      // the same as Autopilot OFF + Approval Required ON.
-      //
-      //   • Effective Autopilot OFF → always queue as proposal
-      //   • Effective Autopilot ON + Approval Required ON → queue as proposal
-      //   • Effective Autopilot ON + Approval Required OFF → execute directly
-      //
-      // "Approve & Apply" bypasses this gate — it calls POST /api/ai-proposal/:id/apply
-      // directly, which is the explicit user-confirmation path.
-      const { aiAutopilotEnabled: _autopilot, aiApprovalRequired: _approvalRequired } =
-        getEffectiveAiControlSettings(campaignState);
-      if (!_autopilot || _approvalRequired) {
-        const proposal = await createActionProposal({
-          ownerKey:        effectiveOwnerKey,
-          campaignId:      safeCampaignId,
-          actionType:      'generate_single_creative_variant',
-          title:           'Generate challenger ad (user requested via Ad Agent)',
-          reasoning:       'User asked Ad Agent to generate a replacement challenger. Approval required before Meta changes are made.',
-          proposedChanges: { adCount: 1, testType: 'creative_variant', requestedBy: 'ad_agent' },
-          riskLevel:       'low',
-        }).catch((e) => {
-          console.error('[AdAgent] proposal create error:', e?.message);
-          return null;
-        });
-
-        return res.json({
-          ok: true,
-          proposalId:       proposal?.id || null,
-          proposalPending:  true,
-          proposalTitle:    'Generate challenger ad',
-          proposalSummary:  'Create 1 new challenger ad variant and start an A/B test',
-          proposalAction:   'generate_single_creative_variant',
-          reply: proposal
-            ? `**Approval required.** I've queued a request to generate a challenger ad for this campaign.\n\nProposed action: **${proposal.title}**\n\nTo approve or reject this change, use the Approve/Reject buttons below or visit the AI Settings panel.`
-            : 'Approval is required for this campaign, but I could not create the proposal record. Please try again or disable approval mode in AI Settings.',
-        });
-      }
-
-      // Inject a synthetic decision so executeAction dispatches to creative generation
-      const synthDecision = {
-        decision: 'launch_creative_test',
-        actionType: 'generate_single_creative_variant',
-        priority: 'high',
-        reason: 'User requested a replacement challenger via Ad Agent.',
-        requiresHumanApproval: false,
-        confidence: 0.95,
-        generatedAt: new Date().toISOString(),
-        mode: 'ad_agent_manual_v1',
-      };
-
-      const stateWithDecision = { ...campaignState, latestDecision: synthDecision };
-
-      let actionResult;
-      try {
-        actionResult = await executeAction({ optimizerState: stateWithDecision, userToken });
-      } catch (execErr) {
-        console.error('[AdAgent] generate-challenger executeAction error:', execErr?.message);
-        return res.json({
-          ok: true,
-          reply: `Challenger generation failed: ${execErr?.message || 'unknown error'}. Check the server logs or try again.`,
-        });
-      }
-
-      // Persist: save latestDecision, latestAction, and creative patch (pendingCreativeTest etc.)
-      const creativePatch = buildCreativePatchFromResult(actionResult);
-      await updateOptimizerCampaignState(safeCampaignId, {
-        latestDecision: synthDecision,
-        latestAction: actionResult,
-        ...creativePatch,
-      }).catch((e) => console.error('[AdAgent] generate-challenger state persist error:', e?.message));
-
-      // Append AI history entry
-      await appendAiHistoryEntry(safeCampaignId, {
-        type: 'action',
-        timestamp: actionResult?.generatedAt || new Date().toISOString(),
-        title: 'Generated replacement challenger',
-        summary: String(actionResult?.status || '').trim(),
-        reason: String(actionResult?.reason || synthDecision.reason).trim(),
-        actionType: 'generate_single_creative_variant',
-        source: 'ad_agent_manual',
-      }).catch(() => {});
-
-      return res.json({ ok: true, reply: buildGenerateChallengerReply(actionResult) });
-    }
-
-    // Normal chat — with in-session history + read-only campaign metrics context
     const normalizedHistory = Array.isArray(history)
       ? history
           .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
           .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
           .slice(-8)
       : [];
-
-    console.log('[AD_AGENT_ROUTE_TRACE_RETURN]', { route: 'openai_generic', message: trimmed.slice(0, 300) });
 
     const campaignContext = await getCampaignContext(effectiveOwnerKey, safeCampaignId);
 
@@ -1727,23 +1427,57 @@ router.post('/ad-agent/chat', limitChat, async (req, res) => {
       ? 'The user is asking about campaign performance. Use the campaign data in this context to give a direct, specific answer with the actual numbers. Lead with the key metrics (impressions, CTR, spend, CPC), then add a brief observation about what they mean. Keep it under 120 words.'
       : null;
 
-    const completion = await openaiClient.chat.completions.create({
+    const messages = [
+      { role: 'system', content: AD_AGENT_SYSTEM },
+      ...(campaignContext ? [{ role: 'system', content: campaignContext }] : []),
+      ...(performanceInstruction ? [{ role: 'system', content: performanceInstruction }] : []),
+      ...normalizedHistory,
+      { role: 'user', content: trimmed },
+    ];
+
+    // ── AI-driven routing — the model decides intent from full context ──────
+    // (replaces the old regex "intent detector" cascade, which broke on
+    // wording that didn't exactly match a hardcoded pattern)
+    const routed = await openaiClient.chat.completions.create({
       model: MODEL,
-      messages: [
-        { role: 'system', content: AD_AGENT_SYSTEM },
-        ...(campaignContext ? [{ role: 'system', content: campaignContext }] : []),
-        ...(performanceInstruction ? [{ role: 'system', content: performanceInstruction }] : []),
-        ...normalizedHistory,
-        { role: 'user', content: trimmed },
-      ],
-      max_tokens: 400,
-      temperature: 0.7,
+      messages,
+      tools: AD_AGENT_TOOLS,
+      tool_choice: 'auto',
+      max_tokens: 500,
+      temperature: 0.4,
     });
 
-    const reply =
-      completion.choices?.[0]?.message?.content?.trim() ||
-      'I can help with your campaigns and marketing. What would you like to know?';
+    const choice = routed.choices?.[0];
+    const toolCall = choice?.message?.tool_calls?.[0];
 
+    if (toolCall) {
+      const toolName = toolCall.function?.name;
+      let args = {};
+      try { args = JSON.parse(toolCall.function?.arguments || '{}'); } catch {}
+
+      console.log('[AD_AGENT_TOOL_CALL]', { toolName, args, campaignId: safeCampaignId, effectiveOwnerKey, message: trimmed.slice(0, 300) });
+
+      if (PIXEL_PLAN_TOOLS.has(toolName) && access !== 'pixel') {
+        return res.json({
+          ok: true,
+          reply: 'That capability is available on the Premium plan. Upgrade to Premium to use it from Ad Agent.',
+        });
+      }
+
+      const runner = AD_AGENT_TOOL_RUNNERS[toolName];
+      if (!runner) {
+        return res.json({ ok: true, reply: "I wasn't able to complete that action. Could you rephrase what you'd like me to do?" });
+      }
+
+      const result = await runner({ args, trimmed, req, effectiveOwnerKey, ownerKey, safeCampaignId, adminClientId2 })
+        .catch((e) => {
+          console.error(`[AdAgent] tool ${toolName} error:`, e?.message);
+          return { ok: false, error: 'Something went wrong performing that action. Please try again.' };
+        });
+      return res.json(result);
+    }
+
+    const reply = choice?.message?.content?.trim() || 'I can help with your campaigns and marketing. What would you like to know?';
     return res.json({ ok: true, reply });
   } catch (err) {
     console.error('[AdAgent] chat error:', err?.message || err);
