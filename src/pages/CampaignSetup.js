@@ -7274,6 +7274,13 @@ function isValidHttpUrl(u) {
 }
 
 // Creates a PAUSED campaign/adset/ad on Meta for review before committing to a live launch.
+// Convert a relative/same-origin image URL to an absolute Render URL so Meta can fetch it.
+const toRenderAbsolute = (u) => {
+  const raw = String(u || "").trim();
+  if (!raw || /^data:/i.test(raw)) return "";
+  return raw.replace(/^\//, `${RENDER_MEDIA_ORIGIN}/`);
+};
+
 const handleCreateDraft = async () => {
   if (!fbConnected || !selectedAccount || !selectedPageId) return;
   setDraftCreatingState("creating");
@@ -7281,11 +7288,22 @@ const handleCreateDraft = async () => {
 
   try {
     const imageUrls = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
-    const rawImage = imageUrls[0] || "";
-    // Convert relative/same-origin URLs to absolute Render URLs so Meta can fetch them
-    const imageUrl = rawImage && !/^data:/i.test(rawImage)
-      ? rawImage.replace(/^\//, `${RENDER_MEDIA_ORIGIN}/`)
-      : "";
+    const imageUrl = toRenderAbsolute(imageUrls[0] || "");
+
+    // Multi-ad test: send every creative so the draft mirrors the full ad set,
+    // not just the first ad. Falls back to the single top-level fields below
+    // when there's only one creative (or none was generated yet).
+    const hasMultiSet = Array.isArray(draftCreatives?.creativeSet) && draftCreatives.creativeSet.length > 1;
+    const creativeSet = hasMultiSet
+      ? draftCreatives.creativeSet.map((c) => ({
+          headline: c.headline || "",
+          body: c.body || "",
+          cta: c.cta || "",
+          imageUrl: toRenderAbsolute(c.imageUrl) || imageUrl,
+          link: c.link || previewCopy?.link || inferredLink || "",
+          angleLabel: c.angleLabel || c.angle || "",
+        }))
+      : null;
 
     const sid = getStoredSid();
     const headers = { "Content-Type": "application/json" };
@@ -7305,6 +7323,7 @@ const handleCreateDraft = async () => {
         dailyBudget: parseFloat(budget) || 5,
         campaignName: form.campaignName || previewCopy?.headline || "Draft Review",
         adminClientId: adminClientId || "",
+        ...(creativeSet ? { creativeSet } : {}),
       }),
     });
 
@@ -7315,6 +7334,40 @@ const handleCreateDraft = async () => {
     setDraftCreatingState(null);
   } catch (err) {
     setDraftError(String(err?.message || "Draft creation failed"));
+    setDraftCreatingState(null);
+  }
+};
+
+// Deletes the Meta-side PAUSED draft campaign only. Never touches draftCreatives /
+// the backend creative-draft record — the Creatives tab and AI Agent tab keep
+// their creatives intact so the user can create a fresh draft or launch directly.
+const handleDeleteDraft = async () => {
+  if (!metaDraft?.id) return;
+  setDraftCreatingState("deleting");
+  setDraftError(null);
+
+  try {
+    const sid = getStoredSid();
+    const headers = { "Content-Type": "application/json" };
+    if (sid) headers["x-sm-sid"] = sid;
+
+    const r = await fetch("/api/facebook/delete-draft", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({
+        draftId: metaDraft.id,
+        adminClientId: adminClientId || "",
+      }),
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || "Delete failed");
+
+    setMetaDraft(null);
+    setDraftCreatingState(null);
+  } catch (err) {
+    setDraftError(String(err?.message || "Delete failed"));
     setDraftCreatingState(null);
   }
 };
@@ -11718,7 +11771,6 @@ ${pendingTest ? `
                   ["Page ID", metaDraft.pageId],
                   ["Campaign ID", metaDraft.metaCampaignId],
                   ["Ad Set ID", metaDraft.metaAdSetId],
-                  ["Ad ID", metaDraft.metaAdId],
                   ["Status", "PAUSED — ready for review"],
                 ].map(([label, val]) => (
                   <div key={label}>
@@ -11727,6 +11779,26 @@ ${pendingTest ? `
                   </div>
                 ))}
               </div>
+
+              {(() => {
+                const adIds = Array.isArray(metaDraft.metaAdIds) && metaDraft.metaAdIds.length > 0
+                  ? metaDraft.metaAdIds
+                  : [metaDraft.metaAdId].filter(Boolean);
+                return (
+                  <div>
+                    <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 10, marginBottom: 4 }}>
+                      {adIds.length}-Ad Set
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {adIds.map((id) => (
+                        <div key={id} style={{ color: "#111827", fontWeight: 700, fontSize: 12, wordBreak: "break-all" }}>
+                          Ad ID: {id}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {metaDraft.metaManagerUrl && (
                 <a
@@ -11749,6 +11821,27 @@ ${pendingTest ? `
                   Open in Meta Ads Manager ↗
                 </a>
               )}
+
+              <button
+                type="button"
+                onClick={handleDeleteDraft}
+                disabled={draftCreatingState === "deleting"}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: "#fff",
+                  border: "1px solid #fca5a5",
+                  color: "#dc2626",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: draftCreatingState === "deleting" ? "not-allowed" : "pointer",
+                }}
+              >
+                {draftCreatingState === "deleting" ? "Deleting draft…" : "Delete Draft"}
+              </button>
+              <div style={{ color: "#94a3b8", fontWeight: 600, fontSize: 11, textAlign: "center", marginTop: -8 }}>
+                Only removes the paused draft from Meta — your creatives stay saved here and in AI Agent.
+              </div>
 
               {draftError && (
                 <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fff1f2", border: "1px solid #ffd6d6", color: "#b42318", fontWeight: 700, fontSize: 12 }}>

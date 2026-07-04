@@ -157,19 +157,23 @@ router.post('/facebook/selection', async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────────────────
    POST /api/facebook/create-draft
-   Creates a PAUSED campaign / adset / creative / ad on Meta so the user
-   can review it in Ads Manager before committing to a live launch.
+   Creates a PAUSED campaign / adset on Meta, plus one creative + ad PER
+   entry in creativeSet (or a single ad from the top-level fields when no
+   set is given), so the user can review the whole set in Ads Manager
+   before committing to a live launch.
    Body: {
      adAccountId, pageId, imageUrl?, primaryText?, headline?,
-     destinationUrl?, dailyBudget?, campaignName?, adminClientId?
+     destinationUrl?, dailyBudget?, campaignName?, adminClientId?,
+     creativeSet?: [{ headline, body, cta, imageUrl, link, angleLabel }]
    }
-   Returns: { ok: true, draft: { id, metaCampaignId, metaAdSetId, metaAdId, ... } }
+   Returns: { ok: true, draft: { id, metaCampaignId, metaAdSetId, metaAdIds, ... } }
 ───────────────────────────────────────────────────────────────────────── */
 router.post('/facebook/create-draft', async (req, res) => {
   const {
     adAccountId, pageId, imageUrl,
     primaryText, headline, destinationUrl,
     dailyBudget, campaignName, adminClientId,
+    creativeSet,
   } = req.body || {};
 
   if (!adAccountId) return res.status(400).json({ ok: false, error: 'adAccountId required' });
@@ -186,19 +190,33 @@ router.post('/facebook/create-draft', async (req, res) => {
 
   const accountId = String(adAccountId).replace(/^act_/, '').trim();
   const pageIdStr = String(pageId).trim();
-  const destUrl = String(destinationUrl || '').trim();
-  const msgText = String(primaryText || '').trim();
-  const headlineText = String(headline || campaignName || 'Learn More').trim();
   const name = String(campaignName || `Draft Review ${new Date().toLocaleDateString()}`).slice(0, 200);
   const budget = Math.max(100, Math.round((parseFloat(dailyBudget) || 5) * 100));
-  const imageUrlFinal = normalizeImageUrl(imageUrl);
+
+  // One ad per creativeSet entry when a multi-ad test was generated; otherwise
+  // fall back to a single ad built from the top-level fields.
+  const adsToCreate = Array.isArray(creativeSet) && creativeSet.length > 0
+    ? creativeSet.map((c, i) => ({
+        headlineText: String(c?.headline || headline || campaignName || 'Learn More').trim(),
+        msgText: String(c?.body || primaryText || '').trim(),
+        destUrl: String(c?.link || destinationUrl || '').trim(),
+        imageUrlFinal: normalizeImageUrl(c?.imageUrl || imageUrl),
+        label: String(c?.angleLabel || c?.angle || `Ad ${i + 1}`).trim(),
+      }))
+    : [{
+        headlineText: String(headline || campaignName || 'Learn More').trim(),
+        msgText: String(primaryText || '').trim(),
+        destUrl: String(destinationUrl || '').trim(),
+        imageUrlFinal: normalizeImageUrl(imageUrl),
+        label: 'Ad 1',
+      }];
 
   const mkParams = () => ({ access_token: userToken });
 
   let draftCampaignId = null;
   let draftAdSetId = null;
-  let draftCreativeId = null;
-  let draftAdId = null;
+  const draftCreativeIds = [];
+  const draftAdIds = [];
 
   try {
     // 1. Create PAUSED campaign
@@ -221,7 +239,7 @@ router.post('/facebook/create-draft', async (req, res) => {
     draftCampaignId = campaignRes.data?.id;
     if (!draftCampaignId) throw new Error('Campaign creation returned no ID');
 
-    // 2. Create PAUSED adset
+    // 2. Create PAUSED adset — shared by every ad in the set
     const draftAdsetPayload = {
       name: `${name} — Ad Set`,
       campaign_id: draftCampaignId,
@@ -247,47 +265,50 @@ router.post('/facebook/create-draft', async (req, res) => {
     draftAdSetId = adSetRes.data?.id;
     if (!draftAdSetId) throw new Error('Ad set creation returned no ID');
 
-    // 3. Create creative
-    const linkData = {
-      message: msgText || name,
-      call_to_action: {
-        type: destUrl ? 'LEARN_MORE' : 'NO_BUTTON',
-        ...(destUrl ? { value: { link: destUrl } } : {}),
-      },
-      name: headlineText,
-      ...(destUrl ? { link: destUrl } : {}),
-      ...(imageUrlFinal ? { picture: imageUrlFinal } : {}),
-    };
-
-    const creativeRes = await axios.post(
-      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
-      {
-        name: `${name} — Creative`,
-        object_story_spec: {
-          page_id: pageIdStr,
-          link_data: linkData,
+    // 3. Create one creative + one PAUSED ad per entry in adsToCreate
+    for (const a of adsToCreate) {
+      const linkData = {
+        message: a.msgText || name,
+        call_to_action: {
+          type: a.destUrl ? 'LEARN_MORE' : 'NO_BUTTON',
+          ...(a.destUrl ? { value: { link: a.destUrl } } : {}),
         },
-      },
-      { params: mkParams() }
-    );
-    draftCreativeId = creativeRes.data?.id;
-    if (!draftCreativeId) throw new Error('Creative creation returned no ID');
+        name: a.headlineText,
+        ...(a.destUrl ? { link: a.destUrl } : {}),
+        ...(a.imageUrlFinal ? { picture: a.imageUrlFinal } : {}),
+      };
 
-    // 4. Create PAUSED ad
-    const adRes = await axios.post(
-      `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
-      {
-        name: `${name} — Ad`,
-        adset_id: draftAdSetId,
-        creative: { creative_id: draftCreativeId },
-        status: 'PAUSED',
-      },
-      { params: mkParams() }
-    );
-    draftAdId = adRes.data?.id;
-    if (!draftAdId) throw new Error('Ad creation returned no ID');
+      const creativeRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/adcreatives`,
+        {
+          name: `${name} — ${a.label} Creative`,
+          object_story_spec: {
+            page_id: pageIdStr,
+            link_data: linkData,
+          },
+        },
+        { params: mkParams() }
+      );
+      const creativeId = creativeRes.data?.id;
+      if (!creativeId) throw new Error(`Creative creation returned no ID for ${a.label}`);
+      draftCreativeIds.push(creativeId);
 
-    // 5. Persist draft to LowDB
+      const adRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${accountId}/ads`,
+        {
+          name: `${name} — ${a.label}`,
+          adset_id: draftAdSetId,
+          creative: { creative_id: creativeId },
+          status: 'PAUSED',
+        },
+        { params: mkParams() }
+      );
+      const adId = adRes.data?.id;
+      if (!adId) throw new Error(`Ad creation returned no ID for ${a.label}`);
+      draftAdIds.push(adId);
+    }
+
+    // 4. Persist draft to LowDB
     await ensureCollections();
     const draft = {
       id: crypto.randomUUID(),
@@ -297,8 +318,11 @@ router.post('/facebook/create-draft', async (req, res) => {
       pageId: pageIdStr,
       metaCampaignId: draftCampaignId,
       metaAdSetId: draftAdSetId,
-      metaCreativeId: draftCreativeId,
-      metaAdId: draftAdId,
+      metaCreativeIds: draftCreativeIds,
+      metaAdIds: draftAdIds,
+      // Back-compat single-value fields for any older readers of this record.
+      metaCreativeId: draftCreativeIds[0] || null,
+      metaAdId: draftAdIds[0] || null,
       campaignName: name,
       status: 'draft_review',
       metaManagerUrl: `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${accountId}&selected_campaign_ids=${draftCampaignId}`,
@@ -309,7 +333,7 @@ router.post('/facebook/create-draft', async (req, res) => {
     await db.write();
 
     console.log('[facebook/create-draft] created PAUSED draft:', {
-      ownerKey, accountId, draftCampaignId, draftAdSetId, draftAdId,
+      ownerKey, accountId, draftCampaignId, draftAdSetId, adCount: draftAdIds.length,
     });
 
     return res.json({ ok: true, draft });
@@ -317,8 +341,9 @@ router.post('/facebook/create-draft', async (req, res) => {
     const metaErr = err?.response?.data?.error;
     console.error('[facebook/create-draft] error:', metaErr || err.message);
 
-    // Best-effort cleanup: delete campaign if downstream object creation failed
-    if (draftCampaignId && !draftAdId) {
+    // Best-effort cleanup: delete campaign if any ad failed to create — deleting the
+    // campaign cascades to its adsets/creatives/ads on Meta's side.
+    if (draftCampaignId && draftAdIds.length < adsToCreate.length) {
       try {
         await axios.delete(
           `https://graph.facebook.com/${META_API_VERSION}/${draftCampaignId}`,
@@ -334,6 +359,54 @@ router.post('/facebook/create-draft', async (req, res) => {
       metaErrorType: metaErr?.type || null,
     });
   }
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   POST /api/facebook/delete-draft
+   Deletes a PAUSED draft campaign from Meta (cascades to its adsets/ads)
+   and removes the local draft record. Never touches Smartemark's own
+   creative draft (draftCreatives / creative-draft backend record) — the
+   Creatives tab and AI Agent tab creatives are a separate, untouched store.
+   Body: { draftId, adminClientId? }
+───────────────────────────────────────────────────────────────────────── */
+router.post('/facebook/delete-draft', async (req, res) => {
+  const { draftId, adminClientId } = req.body || {};
+  if (!draftId) return res.status(400).json({ ok: false, error: 'draftId required' });
+
+  const { userToken } = await resolveFacebookTokenFromReq(req, {
+    preferredOwnerKey: adminClientId ? `user:${String(adminClientId).trim()}` : '',
+  });
+
+  if (!userToken) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook' });
+  }
+
+  await ensureCollections();
+  const idx = (db.data.campaign_drafts || []).findIndex((d) => d.id === draftId);
+  if (idx === -1) return res.status(404).json({ ok: false, error: 'Draft not found' });
+  const draft = db.data.campaign_drafts[idx];
+
+  try {
+    if (draft.metaCampaignId) {
+      await axios.delete(
+        `https://graph.facebook.com/${META_API_VERSION}/${draft.metaCampaignId}`,
+        { params: { access_token: userToken } }
+      );
+    }
+  } catch (err) {
+    const metaErr = err?.response?.data?.error;
+    // If Meta already doesn't have it (e.g. deleted manually in Ads Manager), treat as success.
+    if (metaErr?.error_subcode !== 1487534 && metaErr?.code !== 100) {
+      console.error('[facebook/delete-draft] error:', metaErr || err.message);
+      return res.status(500).json({ ok: false, error: metaErr?.message || err.message || 'Delete failed' });
+    }
+  }
+
+  db.data.campaign_drafts.splice(idx, 1);
+  await db.write();
+
+  console.log('[facebook/delete-draft] deleted draft:', { draftId, metaCampaignId: draft.metaCampaignId });
+  return res.json({ ok: true });
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -364,7 +437,8 @@ router.post('/facebook/launch-draft', async (req, res) => {
   const mkParams = () => ({ access_token: userToken });
 
   try {
-    // Activate all three objects in order
+    // Activate the campaign, the adset, and every ad in the set (draft.metaAdIds —
+    // falls back to the single metaAdId field for older draft records).
     await axios.post(
       `https://graph.facebook.com/${META_API_VERSION}/${draft.metaCampaignId}`,
       { status: 'ACTIVE' },
@@ -375,11 +449,18 @@ router.post('/facebook/launch-draft', async (req, res) => {
       { status: 'ACTIVE' },
       { params: mkParams() }
     );
-    await axios.post(
-      `https://graph.facebook.com/${META_API_VERSION}/${draft.metaAdId}`,
-      { status: 'ACTIVE' },
-      { params: mkParams() }
-    );
+
+    const adIds = Array.isArray(draft.metaAdIds) && draft.metaAdIds.length > 0
+      ? draft.metaAdIds
+      : [draft.metaAdId].filter(Boolean);
+
+    for (const adId of adIds) {
+      await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+        { status: 'ACTIVE' },
+        { params: mkParams() }
+      );
+    }
 
     draft.status = 'launched';
     draft.launchedAt = new Date().toISOString();
