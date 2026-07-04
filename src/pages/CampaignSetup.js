@@ -4163,6 +4163,9 @@ useEffect(() => {
   const [copyEditHeadline, setCopyEditHeadline] = useState("");
   const [copyEditLoading, setCopyEditLoading] = useState(false);
   const [copyEditError, setCopyEditError] = useState(null);
+  // Per-card inline copy editing for the draft multi-creative test cards
+  const [editingCreativeIdx, setEditingCreativeIdx] = useState(null);
+  const [creativeEditBuffer, setCreativeEditBuffer] = useState({ headline: "", body: "", cta: "" });
   // 3-dot creative replace menu
   const [creativeMenuOpen, setCreativeMenuOpen] = useState(false);
   // null | { action: "ai_image"|"upload_photo"|"upload_video", confirmed: false }
@@ -6834,7 +6837,26 @@ const handleSaveCopyEdit = async () => {
     setCopyEditError("Primary text cannot be blank.");
     return;
   }
-  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+  const trimmedHeadline = String(copyEditHeadline || "").trim();
+
+  // Draft (pre-launch) campaigns have no live Meta campaign to PATCH yet — the
+  // launch payload reads copy straight from previewCopy / draftCreatives.creativeSet[0],
+  // so just update those directly instead of calling the Meta-backed copy endpoint.
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") {
+    setPreviewCopy((prev) => ({ ...(prev || {}), headline: trimmedHeadline || prev?.headline || "", body: trimmedText }));
+    if (draftCreatives?.creativeSet?.length === 1) {
+      const updatedDraft = {
+        ...draftCreatives,
+        creativeSet: [{ ...draftCreatives.creativeSet[0], headline: trimmedHeadline || draftCreatives.creativeSet[0].headline, body: trimmedText }],
+      };
+      setDraftCreatives(updatedDraft);
+      persistDraftCreativesNow(resolvedUser, updatedDraft);
+    }
+    setCopyEditMode(false);
+    return;
+  }
+
+  if (!selectedAccount) return;
 
   const acctId = String(selectedAccount).trim().replace(/^act_/, "");
   setCopyEditLoading(true);
@@ -6848,7 +6870,7 @@ const handleSaveCopyEdit = async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           primaryText: trimmedText,
-          headline: String(copyEditHeadline || "").trim() || undefined,
+          headline: trimmedHeadline || undefined,
           // In admin-client mode pass ownerKey so backend uses client token, not TheBoss's.
           ...(adminClientId ? { ownerKey: `user:${adminClientId}` } : {}),
         }),
@@ -9536,35 +9558,40 @@ ${pendingTest ? `
                                 {label}
                               </button>
                             ))}
-                            <div style={{ borderTop: "1px solid #f0f0f8", margin: "4px 0" }} />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCreativeMenuOpen(false);
-                                setCopyEditPrimaryText(
-                                  aiCurrentPrimaryText || creativeMeta?.body || previewCopy?.body || body || ""
-                                );
-                                setCopyEditHeadline(
-                                  creativeMeta?.headline || previewCopy?.headline || headline || ""
-                                );
-                                setCopyEditError(null);
-                                setCopyEditMode(true);
-                              }}
-                              style={{
-                                width: "100%",
-                                display: "block",
-                                textAlign: "left",
-                                padding: "8px 16px",
-                                background: "none",
-                                border: "none",
-                                fontSize: 13,
-                                fontWeight: 600,
-                                color: "#111827",
-                                cursor: "pointer",
-                              }}
-                            >
-                              ✏️ Edit Copy
-                            </button>
+                            {/* Hidden for multi-ad draft tests — edit copy directly on each card instead. */}
+                            {!(isDraftView && draftCreatives?.creativeSet?.length > 1) && (
+                              <>
+                                <div style={{ borderTop: "1px solid #f0f0f8", margin: "4px 0" }} />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCreativeMenuOpen(false);
+                                    setCopyEditPrimaryText(
+                                      aiCurrentPrimaryText || creativeMeta?.body || previewCopy?.body || body || ""
+                                    );
+                                    setCopyEditHeadline(
+                                      creativeMeta?.headline || previewCopy?.headline || headline || ""
+                                    );
+                                    setCopyEditError(null);
+                                    setCopyEditMode(true);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    display: "block",
+                                    textAlign: "left",
+                                    padding: "8px 16px",
+                                    background: "none",
+                                    border: "none",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    color: "#111827",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  ✏️ Edit Copy
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -9640,10 +9667,12 @@ ${pendingTest ? `
                           {draftCreatives.creativeSet.length}-Ad Creative Test Plan
                         </div>
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          {draftCreatives.creativeSet.map((c, idx) => (
+                          {draftCreatives.creativeSet.map((c, idx) => {
+                            const isEditingCard = editingCreativeIdx === idx;
+                            return (
                             <div
                               key={c.id || idx}
-                              onClick={() => setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx)}
+                              onClick={() => { if (!isEditingCard) setExpandedCreativeCardIdx(expandedCreativeCardIdx === idx ? null : idx); }}
                               style={{
                                 flex: "1 1 200px",
                                 minWidth: 160,
@@ -9652,15 +9681,30 @@ ${pendingTest ? `
                                 border: expandedCreativeCardIdx === idx ? "2px solid #5d59ea" : "1px solid #dbe4ff",
                                 borderRadius: 14,
                                 padding: "10px 12px",
-                                cursor: "pointer",
+                                cursor: isEditingCard ? "default" : "pointer",
                                 boxShadow: "0 2px 8px rgba(93,89,234,0.08)",
                                 transition: "border 0.15s",
                               }}
                             >
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
                                 <span style={{ background: "#eef2ff", color: "#4f46e5", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 800 }}>
                                   {c.angleLabel || c.angle || `Ad ${idx + 1}`}
                                 </span>
+                                {!isEditingCard && (
+                                  <button
+                                    type="button"
+                                    title="Edit copy"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setCreativeEditBuffer({ headline: c.headline || "", body: c.body || "", cta: c.cta || "Learn more" });
+                                      setEditingCreativeIdx(idx);
+                                      setExpandedCreativeCardIdx(idx);
+                                    }}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#4f46e5", fontSize: 12, padding: 0, lineHeight: 1 }}
+                                  >
+                                    ✏️
+                                  </button>
+                                )}
                               </div>
                               {c.imageUrl && (
                                 <img
@@ -9670,29 +9714,87 @@ ${pendingTest ? `
                                   onError={(e) => { e.target.style.display = "none"; }}
                                 />
                               )}
-                              <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
-                                {c.headline || "(no headline)"}
-                              </div>
-                              {expandedCreativeCardIdx === idx && (
+                              {isEditingCard ? (
+                                <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  <input
+                                    value={creativeEditBuffer.headline}
+                                    onChange={(e) => setCreativeEditBuffer((b) => ({ ...b, headline: e.target.value }))}
+                                    placeholder="Headline"
+                                    style={{ fontSize: 13, fontWeight: 800, padding: "6px 8px", border: "1px solid #dbe4ff", borderRadius: 6, width: "100%", boxSizing: "border-box" }}
+                                  />
+                                  <textarea
+                                    value={creativeEditBuffer.body}
+                                    onChange={(e) => setCreativeEditBuffer((b) => ({ ...b, body: e.target.value }))}
+                                    placeholder="Body copy"
+                                    rows={3}
+                                    style={{ fontSize: 12, padding: "6px 8px", border: "1px solid #dbe4ff", borderRadius: 6, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}
+                                  />
+                                  <input
+                                    value={creativeEditBuffer.cta}
+                                    onChange={(e) => setCreativeEditBuffer((b) => ({ ...b, cta: e.target.value }))}
+                                    placeholder="CTA (e.g. Learn more)"
+                                    style={{ fontSize: 11, fontWeight: 700, padding: "6px 8px", border: "1px solid #dbe4ff", borderRadius: 6, width: "100%", boxSizing: "border-box" }}
+                                  />
+                                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 2 }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingCreativeIdx(null)}
+                                      style={{ background: "#fff", border: "1px solid #dbe4ff", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#64748b", cursor: "pointer" }}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updatedSet = draftCreatives.creativeSet.map((cc, i) =>
+                                          i === idx
+                                            ? {
+                                                ...cc,
+                                                headline: creativeEditBuffer.headline.trim() || cc.headline,
+                                                body: creativeEditBuffer.body.trim(),
+                                                cta: creativeEditBuffer.cta.trim() || "Learn more",
+                                              }
+                                            : cc
+                                        );
+                                        const updatedDraft = { ...draftCreatives, creativeSet: updatedSet };
+                                        setDraftCreatives(updatedDraft);
+                                        persistDraftCreativesNow(resolvedUser, updatedDraft);
+                                        setEditingCreativeIdx(null);
+                                      }}
+                                      style={{ background: "#4f46e5", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
                                 <>
-                                  <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>
-                                    {c.body || ""}
+                                  <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 3, lineHeight: 1.3 }}>
+                                    {c.headline || "(no headline)"}
                                   </div>
-                                  <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>
-                                    CTA: {c.cta || "Learn more"}
-                                  </div>
-                                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                                    Status: {c.status || "draft"}
-                                  </div>
+                                  {expandedCreativeCardIdx === idx && (
+                                    <>
+                                      <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginBottom: 4 }}>
+                                        {c.body || ""}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: "#4f46e5", fontWeight: 700 }}>
+                                        CTA: {c.cta || "Learn more"}
+                                      </div>
+                                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                                        Status: {c.status || "draft"}
+                                      </div>
+                                    </>
+                                  )}
+                                  {expandedCreativeCardIdx !== idx && (
+                                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                                      {(c.body || "").slice(0, 60)}{c.body?.length > 60 ? "…" : ""}
+                                    </div>
+                                  )}
                                 </>
                               )}
-                              {expandedCreativeCardIdx !== idx && (
-                                <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                                  {(c.body || "").slice(0, 60)}{c.body?.length > 60 ? "…" : ""}
-                                </div>
-                              )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                         <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, fontWeight: 600 }}>
                           Launch creates 1 campaign · 1 ad set · {draftCreatives.creativeSet.length} ads — one per angle
@@ -9986,7 +10088,9 @@ ${pendingTest ? `
                     })()}
                     {/* old map/closing tags removed — new IIFE block above handles all rendering */}
 
-                    {!isDraftView && !selectedLiveCampaign?.smArchived && (
+                    {/* Hidden when a multi-ad draft test is active — those cards have their own
+                        per-card "Edit" affordance below, which is the more precise control. */}
+                    {!(isDraftView && draftCreatives?.creativeSet?.length > 1) && !selectedLiveCampaign?.smArchived && (
                       <button
                         type="button"
                         onClick={() => {
@@ -10184,7 +10288,7 @@ ${pendingTest ? `
                   </div>
                 ) /* closes the isDraftView multi-creative guard */}
 
-                {copyEditMode && !isDraftView && (
+                {copyEditMode && (
                   <div
                     style={{
                       border: "1px solid #dbe4ff",
