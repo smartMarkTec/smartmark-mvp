@@ -11,7 +11,7 @@
  *  - InputBox is module-level (no focus-loss typing bug)
  */
 import React, { memo, useCallback, useEffect, useRef, useState } from "react";
-import { FaChevronLeft, FaChevronRight, FaHistory, FaPaperPlane, FaRobot, FaTimes, FaUpload, FaSyncAlt } from "react-icons/fa";
+import { FaChevronLeft, FaChevronRight, FaHistory, FaPaperPlane, FaRobot, FaTimes, FaUpload, FaSyncAlt, FaExpand } from "react-icons/fa";
 import {
   buildIntakeAnswers,
   fetchAdCopy,
@@ -131,9 +131,42 @@ function Md({ text }) {
   );
 }
 
+/* ─── Copy + link helpers ─────────────────────────────────────────────────── */
+// Cheap safety net on top of the backend's own copy cleaning — strips a single
+// pair of wrapping quotes some model outputs add around the whole line, and
+// collapses stray whitespace, so nothing janky-looking slips into the card.
+function cleanCopyText(s) {
+  let out = String(s || "").trim();
+  if (out.length > 1) {
+    const first = out[0], last = out[out.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'") || (first === "“" && last === "”")) {
+      out = out.slice(1, -1).trim();
+    }
+  }
+  return out.replace(/[ \t]{2,}/g, " ");
+}
+
+function hostnameOf(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return new URL(withProto).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
+
 /* ─── Creative card with per-creative actions ────────────────────────────── */
-function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, onUploadImage, regenning }) {
+function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, onUploadImage, onEditCopy, onEnlarge, regenning }) {
   const fileRef = useRef(null);
+  const [editing, setEditing] = useState(false);
+  const [buf, setBuf] = useState({ headline: c.headline || "", body: c.body || "", cta: c.cta || "Learn more" });
+
+  useEffect(() => {
+    if (!editing) setBuf({ headline: c.headline || "", body: c.body || "", cta: c.cta || "Learn more" });
+    // eslint-disable-next-line
+  }, [c.headline, c.body, c.cta]);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -160,10 +193,14 @@ function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, o
   };
 
   const spinning = regenning === idx;
+  const domain = hostnameOf(c.link);
+  const headline = cleanCopyText(c.headline);
+  const body = cleanCopyText(c.body);
+  const cta = cleanCopyText(c.cta) || "Learn more";
 
   return (
     <div style={{
-      flex: "0 0 210px", maxWidth: 210,
+      flex: "0 0 230px", maxWidth: 230,
       background: "#fff", borderRadius: 16, overflow: "hidden",
       border: expanded ? `2px solid ${ACCENT}` : "1px solid #e8eaf0",
       boxShadow: "0 2px 10px rgba(0,0,0,0.06)", transition: "border 0.12s",
@@ -171,7 +208,8 @@ function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, o
       {/* Image area */}
       <div style={{ position: "relative" }}>
         {c.imageUrl ? (
-          <img src={c.imageUrl} alt="" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }}
+          <img src={c.imageUrl} alt="" onClick={() => onEnlarge?.(c.imageUrl, headline || `Ad ${idx + 1}`)}
+            style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block", cursor: "zoom-in" }}
             onError={(e) => { e.target.style.display = "none"; }} />
         ) : (
           <div style={{ aspectRatio: "1/1", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#d1d5db", fontSize: 26 }}>
@@ -180,6 +218,12 @@ function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, o
         )}
         {/* Per-image action buttons */}
         <div style={{ position: "absolute", bottom: 6, right: 6, display: "flex", gap: 4 }}>
+          {c.imageUrl && (
+            <button title="Full screen" onClick={() => onEnlarge?.(c.imageUrl, headline || `Ad ${idx + 1}`)}
+              style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.9)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
+              <FaExpand />
+            </button>
+          )}
           <button title="Regenerate image" onClick={() => onRegenImage(idx)}
             disabled={spinning}
             style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.9)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
@@ -194,34 +238,89 @@ function CreativeCard({ c, idx, expanded, onToggle, onRegenImage, onRegenCopy, o
       </div>
 
       <div style={{ padding: "10px 12px" }}>
-        <div style={{ display: "inline-block", background: "#eef2ff", color: ACCENT, fontSize: 10, fontWeight: 800, borderRadius: 5, padding: "2px 7px", marginBottom: 5 }}>
-          Ad {idx + 1} · {c.angleLabel}
-        </div>
-        <div style={{ fontWeight: 800, fontSize: 12, color: c.headline ? TEXT : "#ef4444", lineHeight: 1.3, marginBottom: 3, cursor: "pointer" }} onClick={onToggle}>
-          {c.headline || "⚠ no headline"}
-        </div>
-        {expanded ? (
-          <>
-            <div style={{ fontSize: 11, color: SOFT, lineHeight: 1.5, marginBottom: 4 }}>{c.body}</div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: ACCENT, marginBottom: 4 }}>CTA: {c.cta}</div>
-            <button onClick={() => onRegenCopy(idx)} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", color: SOFT }}>
-              Regenerate copy
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <span style={{ background: "#eef2ff", color: ACCENT, fontSize: 10, fontWeight: 800, borderRadius: 5, padding: "2px 7px" }}>
+            Ad {idx + 1} · {c.angleLabel}
+          </span>
+          {!editing && (
+            <button title="Edit copy" onClick={() => setEditing(true)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: ACCENT, fontSize: 12, padding: 0, lineHeight: 1 }}>
+              ✏️
             </button>
-          </>
-        ) : (
-          <div style={{ fontSize: 11, color: SOFT, cursor: "pointer" }} onClick={onToggle}>
-            {(c.body || "").slice(0, 55)}{(c.body || "").length > 55 ? "…" : ""}
-          </div>
-        )}
-        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4, cursor: "pointer" }} onClick={onToggle}>
-          {expanded ? "▲ collapse" : "▼ expand"}
+          )}
         </div>
+
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <input value={buf.headline} onChange={(e) => setBuf((b) => ({ ...b, headline: e.target.value }))}
+              placeholder="Headline"
+              style={{ fontSize: 12, fontWeight: 800, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box" }} />
+            <textarea value={buf.body} onChange={(e) => setBuf((b) => ({ ...b, body: e.target.value }))}
+              placeholder="Body copy" rows={3}
+              style={{ fontSize: 11, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: FONT }} />
+            <input value={buf.cta} onChange={(e) => setBuf((b) => ({ ...b, cta: e.target.value }))}
+              placeholder="CTA (e.g. Learn more)"
+              style={{ fontSize: 11, fontWeight: 700, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => { setBuf({ headline: c.headline || "", body: c.body || "", cta: c.cta || "Learn more" }); setEditing(false); }}
+                style={{ background: "#fff", border: "1px solid " + BORDER, borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: SOFT, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onEditCopy(idx, {
+                    headline: buf.headline.trim() || c.headline,
+                    body: buf.body.trim(),
+                    cta: buf.cta.trim() || "Learn more",
+                  });
+                  setEditing(false);
+                }}
+                style={{ background: ACCENT, border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#fff", cursor: "pointer" }}>
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontWeight: 800, fontSize: 12, color: headline ? TEXT : "#ef4444", lineHeight: 1.3, marginBottom: 3, cursor: "pointer" }} onClick={onToggle}>
+              {headline || "⚠ no headline"}
+            </div>
+            {expanded ? (
+              <>
+                <div style={{ fontSize: 11, color: SOFT, lineHeight: 1.5, marginBottom: 6 }}>{body}</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: ACCENT, borderRadius: 6, padding: "4px 9px" }}>
+                    {cta}
+                  </span>
+                  {domain && (
+                    <a href={/^https?:\/\//i.test(c.link) ? c.link : `https://${c.link}`} target="_blank" rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ fontSize: 10, color: SOFT, textDecoration: "none", fontWeight: 600 }}>
+                      {domain} ↗
+                    </a>
+                  )}
+                </div>
+                <button onClick={() => onRegenCopy(idx)} style={{ marginTop: 6, fontSize: 10, padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", color: SOFT }}>
+                  Regenerate copy
+                </button>
+              </>
+            ) : (
+              <div style={{ fontSize: 11, color: SOFT, cursor: "pointer" }} onClick={onToggle}>
+                {body.slice(0, 55)}{body.length > 55 ? "…" : ""}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4, cursor: "pointer" }} onClick={onToggle}>
+              {expanded ? "▲ collapse" : "▼ expand"}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function CreativeCarousel({ creatives, onRegenImage, onRegenCopy, onUploadImage, regenning }) {
+function CreativeCarousel({ creatives, onRegenImage, onRegenCopy, onUploadImage, onEditCopy, onEnlarge, regenning }) {
   const [exp, setExp] = useState(-1);
   const ref = useRef(null);
   return (
@@ -244,10 +343,122 @@ function CreativeCarousel({ creatives, onRegenImage, onRegenCopy, onUploadImage,
           <CreativeCard key={c.id || i} c={c} idx={i}
             expanded={exp === i} onToggle={() => setExp(exp === i ? -1 : i)}
             onRegenImage={onRegenImage} onRegenCopy={onRegenCopy} onUploadImage={onUploadImage}
+            onEditCopy={onEditCopy} onEnlarge={onEnlarge}
             regenning={regenning}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ─── Upload-your-own creatives form ──────────────────────────────────────── */
+// Lets a user skip AI generation entirely: upload an image and type their own
+// headline/body/CTA per ad, for however many ads they picked.
+function UploadCreativesForm({ count, answers, onSubmit }) {
+  const [slots, setSlots] = useState(() =>
+    Array.from({ length: count }, (_, i) => ({
+      angleLabel: `Ad ${i + 1}`, headline: "", body: "", cta: "Learn more", imageUrl: "", uploading: false,
+    }))
+  );
+  const [submitted, setSubmitted] = useState(false);
+
+  const updateSlot = (i, patch) => setSlots((prev) => prev.map((s, si) => (si === i ? { ...s, ...patch } : s)));
+
+  const handleFile = async (i, file) => {
+    if (!file) return;
+    updateSlot(i, { uploading: true });
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target?.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+      const r = await fetch("/api/media/upload", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const j = await r.json().catch(() => ({}));
+      updateSlot(i, { imageUrl: j?.urls?.[0] || "", uploading: false });
+    } catch {
+      updateSlot(i, { uploading: false });
+    }
+  };
+
+  const canSubmit = !submitted && slots.every((s) => s.imageUrl && s.headline.trim());
+  const domain = hostnameOf(answers?.url);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {slots.map((s, i) => (
+          <div key={i} style={{ flex: "1 1 210px", maxWidth: 240, background: "#fff", border: "1px solid " + BORDER, borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: ACCENT, background: "#eef2ff", borderRadius: 5, padding: "2px 7px", alignSelf: "flex-start" }}>
+              {s.angleLabel}
+            </div>
+            <label style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              aspectRatio: "1/1", borderRadius: 8, background: "#f3f4f6",
+              border: "1px dashed #d1d5db", cursor: "pointer", overflow: "hidden", position: "relative",
+            }}>
+              {s.imageUrl ? (
+                <img src={s.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <span style={{ color: "#9ca3af", fontSize: 11, textAlign: "center", padding: 8 }}>
+                  {s.uploading ? "Uploading…" : "Click to upload image"}
+                </span>
+              )}
+              <input type="file" accept="image/*" style={{ display: "none" }}
+                onChange={(e) => handleFile(i, e.target.files?.[0])} />
+            </label>
+            <input value={s.headline} onChange={(e) => updateSlot(i, { headline: e.target.value })}
+              placeholder="Headline"
+              style={{ fontSize: 12, fontWeight: 700, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6 }} />
+            <textarea value={s.body} onChange={(e) => updateSlot(i, { body: e.target.value })}
+              placeholder="Body copy" rows={3}
+              style={{ fontSize: 11, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, resize: "vertical", fontFamily: FONT }} />
+            <input value={s.cta} onChange={(e) => updateSlot(i, { cta: e.target.value })}
+              placeholder="CTA (e.g. Learn more)"
+              style={{ fontSize: 11, fontWeight: 700, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6 }} />
+            {domain && (
+              <div style={{ fontSize: 10, color: SOFT, fontWeight: 600 }}>Links to: {domain}</div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        disabled={!canSubmit}
+        onClick={() => {
+          setSubmitted(true);
+          const creatives = slots.map((s, i) => ({
+            id: `c-upload-${Date.now()}-${i}`,
+            angle: "upload",
+            angleLabel: s.angleLabel,
+            headline: s.headline.trim(),
+            body: s.body.trim(),
+            cta: s.cta.trim() || "Learn more",
+            imageUrl: s.imageUrl,
+            link: answers?.url || "",
+            mediaSelection: "image",
+            creativeSource: "user_upload",
+            status: "draft",
+          }));
+          onSubmit(creatives);
+        }}
+        style={{
+          alignSelf: "flex-start", padding: "10px 20px", borderRadius: 10, border: "none",
+          background: canSubmit ? ACCENT : "#e5e7eb", color: canSubmit ? "#fff" : "#9ca3af",
+          fontWeight: 700, fontSize: 13, cursor: canSubmit ? "pointer" : "not-allowed", fontFamily: FONT,
+        }}
+      >
+        {submitted ? "Saved ✓" : "Save creatives"}
+      </button>
+      {!canSubmit && !submitted && (
+        <div style={{ fontSize: 11, color: SOFT }}>Each ad needs an image and a headline before saving.</div>
+      )}
     </div>
   );
 }
@@ -582,13 +793,74 @@ export default function InlineAdAgent({
     if (action === "confirm")       { if (pendingN) startGeneration(pendingN); return; }
     if (action === "regen")         { askHowMany(); return; }
     if (action === "clear")         { clearDrafts(); return; }
+    if (action === "method-ai")     { respondWithStrategy(); return; }
+    if (action === "method-upload") { beginUploadFlow(); return; }
     if (action.startsWith("count-")) { askConfirm(parseInt(action.replace("count-", ""))); return; }
+    if (action.startsWith("upload-count-")) { beginUploadForm(parseInt(action.replace("upload-count-", ""))); return; }
   }
 
   function askHowMany() {
     push({ role: "assistant", type: "count-pick",
       content: "How many ad creatives do you want to test?" });
     setPhase("count-pick"); scroll();
+  }
+
+  /* ─── Generate-with-AI vs upload-your-own choice ─────────────────────── */
+  function offerCreativeMethodChoice() {
+    push({ role: "assistant", type: "chips",
+      content: "How would you like to build your ad creatives?",
+      chips: [
+        { label: "✨ Generate with AI (recommended)", action: "method-ai", primary: true },
+        { label: "📤 Upload my own", action: "method-upload" },
+      ],
+    });
+    setPhase("chat"); scroll();
+  }
+
+  function beginUploadFlow() {
+    push({ role: "assistant", type: "chips",
+      content: "How many ads would you like to upload?",
+      chips: [1, 2, 3, 4].map((n) => ({ label: `${n} ad${n > 1 ? "s" : ""}`, action: `upload-count-${n}`, primary: n === 1 })),
+    });
+    setPhase("upload-pick"); scroll();
+  }
+
+  function beginUploadForm(n) {
+    push({ role: "assistant", type: "upload-form", uploadCount: n,
+      content: `Add your image and copy for ${n} ad${n > 1 ? "s" : ""}:` });
+    setPhase("upload-form"); scroll();
+  }
+
+  async function handleUploadSubmit(newCreatives) {
+    setCreatives(newCreatives);
+    const images = newCreatives.map((c) => c.imageUrl).filter(Boolean);
+    onCreativesGenerated?.({ images, creativeSet: newCreatives, creativeTestCount: newCreatives.length });
+
+    const ci = clientRef.current;
+    const suggestedName = suggestCampaignName(ci, ctx, newCreatives.length);
+    onSetCampaignName?.(suggestedName);
+
+    await saveCreativeDraft(adminClientId, {
+      creativeSet: newCreatives, images,
+      campaignName: suggestedName,
+      headline: newCreatives[0]?.headline || "",
+      body:     newCreatives[0]?.body     || "",
+      link:     newCreatives[0]?.link     || "",
+      savedAt: Date.now(), status: "draft",
+    });
+
+    push({ role: "assistant", type: "creatives",
+      content: `Here are your **${newCreatives.length} ad${newCreatives.length > 1 ? "s" : ""}** — ready to review:`,
+      creatives: newCreatives });
+    push({ role: "assistant", type: "chips",
+      content: `Creatives saved ✓\n\nWhat **daily budget** do you want to start with? Minimum $3/day is recommended for ${newCreatives.length} ad${newCreatives.length > 1 ? "s" : ""}.`,
+      chips: [
+        { label: "$3/day", action: "budget-3" },
+        { label: "$5/day", action: "budget-5", primary: true },
+        { label: "$10/day", action: "budget-10" },
+      ],
+    });
+    setPhase("budget"); scroll();
   }
 
   function askConfirm(n) {
@@ -689,6 +961,7 @@ export default function InlineAdAgent({
     push({ role: "assistant", type: "chips", content: null, chips: [
       { label: "Generate 3 ads (recommended)", action: "count-3", primary: true },
       { label: "Choose count", action: "regen" },
+      { label: "Upload my own instead", action: "method-upload" },
     ]});
     scroll();
   }
@@ -753,6 +1026,20 @@ export default function InlineAdAgent({
   }
 
   /* ─── Per-creative regeneration ──────────────────────────────────────── */
+  // The visible creative cards render from the frozen `creatives` array snapshotted
+  // onto the chat message at push time (m.creatives), not from the live `creatives`
+  // state — so any per-card mutation must also patch that message, or the card will
+  // keep showing the old headline/body/image even though the save succeeded.
+  function syncCreativesMessage(updatedCreatives) {
+    setMsgs((prev) => {
+      const lastIdx = prev.map((m) => m.type).lastIndexOf("creatives");
+      if (lastIdx === -1) return prev;
+      const next = [...prev];
+      next[lastIdx] = { ...next[lastIdx], creatives: updatedCreatives };
+      return next;
+    });
+  }
+
   async function regenCreativeImage(idx) {
     if (idx < 0 || idx >= creatives.length) return;
     setRegenning(idx);
@@ -764,6 +1051,7 @@ export default function InlineAdAgent({
     if (newUrl) {
       const updated = creatives.map((cr, i) => i === idx ? { ...cr, imageUrl: newUrl } : cr);
       setCreatives(updated);
+      syncCreativesMessage(updated);
       onCreativesGenerated?.({ images: updated.map(c => c.imageUrl).filter(Boolean), creativeSet: updated, creativeTestCount: updated.length });
       await saveCreativeDraft(adminClientId, { creativeSet: updated, images: updated.map(c => c.imageUrl).filter(Boolean), savedAt: Date.now(), status: "draft" });
       push({ role: "assistant", content: `Ad ${idx + 1} image regenerated ✓` });
@@ -784,6 +1072,7 @@ export default function InlineAdAgent({
     if (copy.headline || copy.body) {
       const updated = creatives.map((cr, i) => i === idx ? { ...cr, headline: copy.headline, body: copy.body, cta: copy.cta } : cr);
       setCreatives(updated);
+      syncCreativesMessage(updated);
       onCreativesGenerated?.({ images: updated.map(c => c.imageUrl).filter(Boolean), creativeSet: updated, creativeTestCount: updated.length });
       await saveCreativeDraft(adminClientId, { creativeSet: updated, images: updated.map(c => c.imageUrl).filter(Boolean), savedAt: Date.now(), status: "draft" });
       push({ role: "assistant", content: `Ad ${idx + 1} copy regenerated ✓\n**${copy.headline}**\n${copy.body}` });
@@ -796,9 +1085,26 @@ export default function InlineAdAgent({
   async function uploadImageForCreative(idx, newUrl) {
     const updated = creatives.map((cr, i) => i === idx ? { ...cr, imageUrl: newUrl } : cr);
     setCreatives(updated);
+    syncCreativesMessage(updated);
     onCreativesGenerated?.({ images: updated.map(c => c.imageUrl).filter(Boolean), creativeSet: updated, creativeTestCount: updated.length });
     await saveCreativeDraft(adminClientId, { creativeSet: updated, images: updated.map(c => c.imageUrl).filter(Boolean), savedAt: Date.now(), status: "draft" });
     push({ role: "assistant", content: `Ad ${idx + 1} image updated with your upload ✓` });
+    scroll();
+  }
+
+  // Manual copy edit — updates local state, patches the rendered card immediately,
+  // syncs into CampaignSetup via onCreativesGenerated, AND persists to the backend
+  // draft. The backend save matters: InlineAdAgent unmounts on tab switch and
+  // re-hydrates from the backend draft on remount, so a save that only touched
+  // local/localStorage state would get silently reverted on the next mount.
+  async function saveCreativeEditIdx(idx, fields) {
+    if (idx < 0 || idx >= creatives.length) return;
+    const updated = creatives.map((cr, i) => i === idx ? { ...cr, ...fields } : cr);
+    setCreatives(updated);
+    syncCreativesMessage(updated);
+    onCreativesGenerated?.({ images: updated.map(c => c.imageUrl).filter(Boolean), creativeSet: updated, creativeTestCount: updated.length });
+    await saveCreativeDraft(adminClientId, { creativeSet: updated, images: updated.map(c => c.imageUrl).filter(Boolean), savedAt: Date.now(), status: "draft" });
+    push({ role: "assistant", content: `Ad ${idx + 1} copy updated ✓` });
     scroll();
   }
 
@@ -815,7 +1121,7 @@ export default function InlineAdAgent({
 
     if (it.type === "confirm" && pendingN) { startGeneration(pendingN); return; }
     if (it.type === "count")               { askConfirm(it.n); return; }
-    if (it.type === "create")              { respondWithStrategy(); return; }
+    if (it.type === "create")              { offerCreativeMethodChoice(); return; }
     if (it.type === "strategy")            { respondWithStrategy(); return; }
     if (it.type === "clear")               { clearDrafts(); return; }
     if (it.type === "regen")               { askHowMany(); return; }
@@ -1174,7 +1480,18 @@ export default function InlineAdAgent({
                 onRegenImage={regenCreativeImage}
                 onRegenCopy={regenCreativeCopy}
                 onUploadImage={uploadImageForCreative}
+                onEditCopy={saveCreativeEditIdx}
+                onEnlarge={(src, title) => setAbLightbox({ src, title })}
                 regenning={regenning}
+              />
+            </div>
+          )}
+          {m.type === "upload-form" && (
+            <div style={{ width: "100%", marginTop: 4 }}>
+              <UploadCreativesForm
+                count={m.uploadCount}
+                answers={buildIntakeAnswers(clientRef.current, ctx || {})}
+                onSubmit={handleUploadSubmit}
               />
             </div>
           )}
