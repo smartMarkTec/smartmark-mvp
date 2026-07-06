@@ -885,6 +885,95 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
       });
     }
 
+    // Backfill creatives directly from Meta for campaigns that already belong to this
+    // client (they're already in `campaigns`, built above strictly from records scoped
+    // to `ownerKey`) but have no local creative content yet — e.g. launched before a
+    // campaign_creatives record was written for them. This only ever looks up campaign
+    // IDs already attributed to this client; it never scans the ad account for other
+    // campaigns, so it cannot pull in another client's data.
+    if (clientToken) {
+      let creativesBackfilled = false;
+      for (const camp of campaigns) {
+        if (camp.smArchived) continue;
+        const hasCreative = (camp.images?.length > 0) || (camp.launchedCreativeSet?.length > 0);
+        if (hasCreative) continue;
+
+        try {
+          const adsRes = await axios.get(
+            `https://graph.facebook.com/${META_API_VERSION}/${camp.id}/ads`,
+            {
+              params: {
+                access_token: clientToken,
+                fields: 'id,name,status,effective_status,creative{object_story_spec,thumbnail_url,image_url}',
+                limit: 10,
+              },
+              timeout: 10000,
+            }
+          );
+          const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+          if (!ads.length) continue;
+
+          const launchedCreativeSet = ads.map((ad, i) => {
+            const linkData = ad.creative?.object_story_spec?.link_data || {};
+            return {
+              id: ad.id,
+              angleLabel: `Ad ${i + 1}`,
+              headline: linkData.name || '',
+              body: linkData.message || '',
+              cta: linkData.call_to_action?.type || '',
+              imageUrl: ad.creative?.thumbnail_url || ad.creative?.image_url || linkData.picture || '',
+              link: linkData.link || '',
+              metaAdId: ad.id,
+              status: String(ad.effective_status || ad.status || '').toUpperCase() === 'PAUSED' ? 'paused' : 'active',
+            };
+          });
+
+          const nowIso = new Date().toISOString();
+          const ccIdx = db.data.campaign_creatives.findIndex(
+            (r) => String(r.campaignId || '') === camp.id && String(r.ownerKey || '') === ownerKey
+          );
+          const ccRecord = {
+            ownerKey,
+            campaignId: camp.id,
+            metaCampaignId: camp.id,
+            accountId: camp.accountId,
+            name: camp.name,
+            status: camp.status,
+            effective_status: camp.status,
+            currentStatus: camp.status,
+            mediaSelection: 'image',
+            mediaType: 'image',
+            images: launchedCreativeSet.map((c) => c.imageUrl).filter(Boolean),
+            launchedCreativeSet,
+            launchComplete: true,
+            isDraft: false,
+            smArchived: false,
+            hiddenFromHistory: false,
+            meta: {
+              headline: launchedCreativeSet[0]?.headline || '',
+              body: launchedCreativeSet[0]?.body || '',
+              link: launchedCreativeSet[0]?.link || '',
+            },
+            updatedAt: nowIso,
+            ...(ccIdx === -1 ? { createdAt: nowIso } : {}),
+          };
+          if (ccIdx === -1) db.data.campaign_creatives.push(ccRecord);
+          else db.data.campaign_creatives[ccIdx] = { ...db.data.campaign_creatives[ccIdx], ...ccRecord };
+          creativesBackfilled = true;
+
+          // Reflect immediately in this response too, not just on the next load.
+          camp.images = ccRecord.images;
+          camp.launchedCreativeSet = launchedCreativeSet;
+          camp.meta = ccRecord.meta;
+
+          console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL]', { ownerKey, campaignId: camp.id, adCount: ads.length });
+        } catch (backfillErr) {
+          console.error('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL_ERROR]', camp.id, backfillErr?.response?.data?.error?.message || backfillErr?.message);
+        }
+      }
+      if (creativesBackfilled) await db.write();
+    }
+
     return res.json({ ok: true, campaigns, ownerKey });
   } catch (err) {
     console.error('[Admin] client campaigns error:', err?.message || err);
