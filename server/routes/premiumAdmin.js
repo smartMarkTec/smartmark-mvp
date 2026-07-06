@@ -905,40 +905,67 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         if (hasCreative && !wasAutoBackfilled) continue;
 
         try {
-          const adsRes = await axios.get(
-            `https://graph.facebook.com/${META_API_VERSION}/${camp.id}/ads`,
-            {
-              params: {
-                access_token: clientToken,
-                fields: 'id,name,status,effective_status,creative{object_story_spec,thumbnail_url,image_url}',
-                // Meta's default thumbnail is a small preview (~64-192px) meant for lists,
-                // not a full card — request a much larger one so it isn't the blurry fallback.
-                thumbnail_width: 960,
-                thumbnail_height: 960,
-                limit: 10,
-              },
-              timeout: 10000,
-            }
+          // Prefer our own originally-generated image (saved on the campaign_drafts record
+          // at "Create Draft for Review" time) over asking Meta for the ad's image. Meta
+          // stores/serves its own re-encoded copy of an uploaded picture, which is routinely
+          // lower quality than the source — using our own original avoids that entirely.
+          const draftRecord = (db.data.campaign_drafts || []).find(
+            (d) => String(d?.metaCampaignId || '') === camp.id && String(d?.ownerKey || '') === ownerKey
           );
-          const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
-          if (!ads.length) continue;
 
-          const launchedCreativeSet = ads.map((ad, i) => {
-            const linkData = ad.creative?.object_story_spec?.link_data || {};
-            // Prefer the actual full-resolution image used in the ad; only fall back to
-            // Meta's thumbnail (even at the larger requested size) if neither is present.
-            return {
-              id: ad.id,
-              angleLabel: `Ad ${i + 1}`,
-              headline: linkData.name || '',
-              body: linkData.message || '',
-              cta: linkData.call_to_action?.type || '',
-              imageUrl: linkData.picture || ad.creative?.image_url || ad.creative?.thumbnail_url || '',
-              link: linkData.link || '',
-              metaAdId: ad.id,
-              status: String(ad.effective_status || ad.status || '').toUpperCase() === 'PAUSED' ? 'paused' : 'active',
-            };
-          });
+          let launchedCreativeSet = null;
+
+          if (Array.isArray(draftRecord?.creativeSet) && draftRecord.creativeSet.length > 0) {
+            const adIdsForSet = Array.isArray(draftRecord.metaAdIds) && draftRecord.metaAdIds.length > 0
+              ? draftRecord.metaAdIds
+              : [draftRecord.metaAdId].filter(Boolean);
+            launchedCreativeSet = draftRecord.creativeSet.map((c, i) => ({
+              id: c.id || `draft-${i}`,
+              angleLabel: c.angleLabel || `Ad ${i + 1}`,
+              headline: c.headline || '',
+              body: c.body || '',
+              cta: c.cta || '',
+              imageUrl: c.imageUrl || '',
+              link: c.link || '',
+              metaAdId: adIdsForSet[i] || null,
+              status: 'active',
+            }));
+          } else {
+            const adsRes = await axios.get(
+              `https://graph.facebook.com/${META_API_VERSION}/${camp.id}/ads`,
+              {
+                params: {
+                  access_token: clientToken,
+                  fields: 'id,name,status,effective_status,creative{object_story_spec,thumbnail_url,image_url}',
+                  // Meta's default thumbnail is a small preview (~64-192px) meant for lists,
+                  // not a full card — request a much larger one so it isn't the blurry fallback.
+                  thumbnail_width: 960,
+                  thumbnail_height: 960,
+                  limit: 10,
+                },
+                timeout: 10000,
+              }
+            );
+            const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+            if (!ads.length) continue;
+
+            launchedCreativeSet = ads.map((ad, i) => {
+              const linkData = ad.creative?.object_story_spec?.link_data || {};
+              // Prefer the actual full-resolution image used in the ad; only fall back to
+              // Meta's thumbnail (even at the larger requested size) if neither is present.
+              return {
+                id: ad.id,
+                angleLabel: `Ad ${i + 1}`,
+                headline: linkData.name || '',
+                body: linkData.message || '',
+                cta: linkData.call_to_action?.type || '',
+                imageUrl: linkData.picture || ad.creative?.image_url || ad.creative?.thumbnail_url || '',
+                link: linkData.link || '',
+                metaAdId: ad.id,
+                status: String(ad.effective_status || ad.status || '').toUpperCase() === 'PAUSED' ? 'paused' : 'active',
+              };
+            });
+          }
 
           const nowIso = new Date().toISOString();
           const ccIdx = db.data.campaign_creatives.findIndex(
@@ -981,7 +1008,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
           camp.launchedCreativeSet = launchedCreativeSet;
           camp.meta = ccRecord.meta;
 
-          console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL]', { ownerKey, campaignId: camp.id, adCount: ads.length });
+          console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL]', {
+            ownerKey, campaignId: camp.id, adCount: launchedCreativeSet.length,
+            source: draftRecord ? 'campaign_drafts' : 'meta',
+          });
         } catch (backfillErr) {
           console.error('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL_ERROR]', camp.id, backfillErr?.response?.data?.error?.message || backfillErr?.message);
         }
