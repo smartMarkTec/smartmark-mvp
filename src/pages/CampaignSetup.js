@@ -4196,6 +4196,7 @@ useEffect(() => {
   const [expandedId, setExpandedId] = useState(null);
   const [setupTab, setSetupTab] = useState("connect");
   const [campaignSubtab, setCampaignSubtab] = useState("overview");
+  const abAutoSwitchedRef = useRef(null);
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
@@ -5483,8 +5484,31 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [adminClientId, selectedCampaignId]);
 
-// Reset campaign subtab to overview when selection changes
-useEffect(() => { setCampaignSubtab("overview"); }, [selectedCampaignId]);
+// Reset campaign subtab to overview when selection changes, and allow the
+// auto-switch-to-A/B-Test effect below to re-evaluate for the newly selected campaign.
+useEffect(() => {
+  setCampaignSubtab("overview");
+  abAutoSwitchedRef.current = null;
+}, [selectedCampaignId]);
+
+// Auto-open the A/B Test subtab when the selected campaign has more than one
+// active launched ad — that's the only place per-ad metrics are shown. Only
+// switches once per campaign selection so it doesn't fight a manual click back
+// to Overview whenever campaignCreativesMap updates afterward (e.g. metrics polling).
+useEffect(() => {
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return;
+  if (abAutoSwitchedRef.current === selectedCampaignId) return;
+  const launched = campaignCreativesMap[selectedCampaignId]?.launchedCreativeSet;
+  const activeCount = Array.isArray(launched)
+    ? launched.filter(
+        (c) => String(c.status || "").toLowerCase() !== "replaced" && !isArchivedOrDeletedCreative(c)
+      ).length
+    : 0;
+  if (activeCount > 1) {
+    setCampaignSubtab("abtest");
+    abAutoSwitchedRef.current = selectedCampaignId;
+  }
+}, [selectedCampaignId, campaignCreativesMap]);
 
 // Load AI settings when campaign selection or account changes
 useEffect(() => {
