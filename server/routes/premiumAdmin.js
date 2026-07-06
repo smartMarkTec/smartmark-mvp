@@ -902,7 +902,17 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         // written by the normal create-draft/launch-draft flow are left alone.
         const existingRow = creativeRecords.find((r) => String(r?.campaignId || '') === camp.id);
         const wasAutoBackfilled = !!existingRow?.backfilledFromMeta;
-        if (hasCreative && !wasAutoBackfilled) continue;
+        if (hasCreative && !wasAutoBackfilled) {
+          // Debug: this campaign's images came from the normal create-draft/launch-draft
+          // write, not this backfill — if the image still looks blurry, the problem is in
+          // that write path (or the original generated image itself), not here.
+          console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL_SKIPPED]', {
+            ownerKey, campaignId: camp.id,
+            reason: 'already has non-backfilled creative content',
+            imageUrls: (camp.launchedCreativeSet || []).map((c) => ({ adId: c.metaAdId, imageUrl: c.imageUrl })),
+          });
+          continue;
+        }
 
         try {
           // Prefer our own originally-generated image (saved on the campaign_drafts record
@@ -1011,6 +1021,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
           console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL]', {
             ownerKey, campaignId: camp.id, adCount: launchedCreativeSet.length,
             source: draftRecord ? 'campaign_drafts' : 'meta',
+            // Debug: exact image URL picked per ad, so we can tell from Render logs
+            // whether it's our own /api/media/ original or a facebook/scontent CDN URL
+            // (Meta's own re-encoded copy), without needing DB access.
+            imageUrls: launchedCreativeSet.map((c) => ({ adId: c.metaAdId, imageUrl: c.imageUrl })),
           });
         } catch (backfillErr) {
           console.error('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL_ERROR]', camp.id, backfillErr?.response?.data?.error?.message || backfillErr?.message);

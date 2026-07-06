@@ -3186,6 +3186,16 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
             const badgeBd    = isPaused ? "#fde68a" : "#bbf7d0";
             const imgUrl = creative.imageUrl ? toAbsoluteMedia(creative.imageUrl) : "";
             const label  = creative.angleLabel || creative.angle || `Ad ${idx + 1}`;
+            // Debug: shows exactly which URL is being rendered for each ad card, and
+            // whether it's our own /api/media/ original or a facebook.com/scontent CDN
+            // URL (Meta's own re-encoded copy) — check the browser console + Network tab
+            // (open the URL directly) to see its actual pixel dimensions.
+            console.debug("[AD_CARD_IMAGE_DEBUG]", {
+              campaignId, adId: creative.metaAdId, label,
+              rawImageUrl: creative.imageUrl, resolvedUrl: imgUrl,
+              isMetaCdn: /fbcdn\.net|scontent|facebook\.com/i.test(String(creative.imageUrl || "")),
+              isOwnMedia: /\/api\/media\//.test(String(creative.imageUrl || "")),
+            });
             return (
               <div
                 key={creative.id || idx}
@@ -3429,7 +3439,11 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
           title="Original Ad"
           badge={null}
           accentColor="rgba(93,89,234,0.16)"
-          imageUrl={testMetrics?.original?.thumbnailUrl ? toAbsoluteMedia(testMetrics.original.thumbnailUrl) : controlImageUrl}
+          // Prefer our own already-resolved high-res image (controlImageUrl) over
+          // testMetrics' thumbnailUrl — that field is Meta's own tiny creative.thumbnail_url
+          // (a small list-preview image, not the actual ad), which looks blurry stretched
+          // into this card. Only fall back to it if we have nothing else at all.
+          imageUrl={controlImageUrl || (testMetrics?.original?.thumbnailUrl ? toAbsoluteMedia(testMetrics.original.thumbnailUrl) : "")}
           headline={testMetrics?.original?.headline || controlHeadline}
           body={testMetrics?.original?.body || controlBody}
           metrics={originalMetrics}
@@ -3440,7 +3454,7 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
           title="AI Challenger"
           badge={{ label: "AI Generated", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" }}
           accentColor="rgba(22,163,74,0.18)"
-          imageUrl={testMetrics?.challenger?.thumbnailUrl ? toAbsoluteMedia(testMetrics.challenger.thumbnailUrl) : challengerImageUrl}
+          imageUrl={challengerImageUrl || (testMetrics?.challenger?.thumbnailUrl ? toAbsoluteMedia(testMetrics.challenger.thumbnailUrl) : "")}
           headline={testMetrics?.challenger?.headline || controlHeadline}
           body={testMetrics?.challenger?.body || (controlBody ? "Same messaging as original — challenger tests a new visual." : "")}
           metrics={challengerMetrics}
