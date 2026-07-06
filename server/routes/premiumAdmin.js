@@ -905,6 +905,10 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
               params: {
                 access_token: clientToken,
                 fields: 'id,name,status,effective_status,creative{object_story_spec,thumbnail_url,image_url}',
+                // Meta's default thumbnail is a small preview (~64-192px) meant for lists,
+                // not a full card — request a much larger one so it isn't the blurry fallback.
+                thumbnail_width: 960,
+                thumbnail_height: 960,
                 limit: 10,
               },
               timeout: 10000,
@@ -915,13 +919,15 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
 
           const launchedCreativeSet = ads.map((ad, i) => {
             const linkData = ad.creative?.object_story_spec?.link_data || {};
+            // Prefer the actual full-resolution image used in the ad; only fall back to
+            // Meta's thumbnail (even at the larger requested size) if neither is present.
             return {
               id: ad.id,
               angleLabel: `Ad ${i + 1}`,
               headline: linkData.name || '',
               body: linkData.message || '',
               cta: linkData.call_to_action?.type || '',
-              imageUrl: ad.creative?.thumbnail_url || ad.creative?.image_url || linkData.picture || '',
+              imageUrl: linkData.picture || ad.creative?.image_url || ad.creative?.thumbnail_url || '',
               link: linkData.link || '',
               metaAdId: ad.id,
               status: String(ad.effective_status || ad.status || '').toUpperCase() === 'PAUSED' ? 'paused' : 'active',

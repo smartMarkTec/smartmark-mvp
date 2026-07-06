@@ -3245,9 +3245,15 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
                       ...(m.conversions > 0  ? [["Conversions", String(m.conversions)]] : []),
                     ];
 
-                    // Metric mapping warnings
+                    // Metric mapping warnings — Meta's "clicks" and "link clicks" fields are
+                    // computed via different attribution/de-dup windows, so they routinely
+                    // differ by a point or two even when mapped correctly. Only flag it when
+                    // the gap is large enough to actually suggest a swapped-field bug rather
+                    // than normal Meta reporting noise.
                     const warnings = [];
-                    if (lc > cl && cl > 0) warnings.push("Metric mapping warning: Link clicks are higher than clicks. Verify Meta fields/actions mapping.");
+                    if (lc > cl && cl > 0 && (lc - cl) >= 3 && lc > cl * 1.15) {
+                      warnings.push("Metric mapping warning: Link clicks are higher than clicks. Verify Meta fields/actions mapping.");
+                    }
                     if (lpv === 0 && lc > 5) warnings.push("Traffic tracking warning: Ads are getting link clicks but landing page views are missing or not mapped.");
 
                     return (
