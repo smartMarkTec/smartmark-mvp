@@ -2791,18 +2791,21 @@ router.get('/admin/clients/:clientId/campaign/:campaignId/conversion-summary', l
     const sinceDays     = Math.min(Math.max(Number(req.query.sinceDays || 90), 1), 365);
     const sinceDate     = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
 
-    // Determine which page slugs to include
-    const knownSlugs = new Set(Object.keys(LANDING_PAGE_CONFIGS));
-    const pageSlugsToInclude = pageSlugParam
-      ? new Set([pageSlugParam])
-      : knownSlugs;
+    // IMPORTANT: never default to "every known landing page slug" when no pageSlug is
+    // given. LANDING_PAGE_CONFIGS is a small hardcoded list (currently just Joe/Aspen's
+    // page) with no per-client ownership mapping — falling back to "all of them" meant
+    // ANY client with no configured slug of their own (e.g. a client with no entry here
+    // at all) silently showed Joe's real landing page traffic and call data instead of
+    // their own. Only use an explicit, caller-provided pageSlug; otherwise rely solely
+    // on campaignId matching (events only — calls have no campaignId, see below).
+    const pageSlugsToInclude = pageSlugParam ? new Set([pageSlugParam]) : null;
 
     // ── Landing events ────────────────────────────────────────────────────────
     const allEvents = Array.isArray(db.data.landing_events) ? db.data.landing_events : [];
     const events = allEvents.filter((e) => {
       if ((e.createdAt || '') < sinceDate) return false;
-      // Match by campaignId first; fall back to pageSlug / clientSlug
       if (e.campaignId && e.campaignId === campaignId) return true;
+      if (!pageSlugsToInclude) return false; // no explicit slug — campaignId match only
       if (pageSlugsToInclude.has(e.pageSlug)) return true;
       // clientSlug "aspen" also maps to aspen-ac — accept either
       return [...pageSlugsToInclude].some((slug) => {
@@ -2832,11 +2835,14 @@ router.get('/admin/clients/:clientId/campaign/:campaignId/conversion-summary', l
     }
 
     // ── Call tracking events (real Twilio calls) ──────────────────────────────
+    // Calls carry no campaignId at all (they're tied to a shared tracking phone
+    // number per landing page, not per campaign) — so without an explicit pageSlug
+    // there is no safe way to attribute them to this specific client. Return none
+    // rather than guessing, which is what let another client's real calls show up here.
     const allCalls = Array.isArray(db.data.call_tracking_events) ? db.data.call_tracking_events : [];
-    const calls = allCalls.filter((c) => {
-      if ((c.createdAt || '') < sinceDate) return false;
-      return pageSlugsToInclude.has(c.landingPageSlug);
-    });
+    const calls = pageSlugsToInclude
+      ? allCalls.filter((c) => (c.createdAt || '') >= sinceDate && pageSlugsToInclude.has(c.landingPageSlug))
+      : [];
 
     let answeredCalls = 0, missedCalls = 0, totalCallDurationSec = 0;
     for (const c of calls) {

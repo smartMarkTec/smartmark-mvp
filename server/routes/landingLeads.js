@@ -152,13 +152,17 @@ router.get('/landing-events/summary', async (req, res) => {
       if ((e.createdAt || '') < sinceDate) return false;
       if (metaAdId   && e.metaAdId    !== metaAdId)   return false;
       if (utmContent && e.utm_content !== utmContent)  return false;
-      if (campaignId) {
-        if (e.campaignId === campaignId) return true;
-        // fall through to slug check if no campaignId match
-      }
-      if (clientSlug && e.clientSlug !== clientSlug) return false;
-      if (pageSlug   && e.pageSlug   !== pageSlug)   return false;
-      return true;
+
+      // Must positively match at least one of the provided identity filters —
+      // never fall through to "no filter excluded it" as a reason to include.
+      // That's exactly what let another client's events leak through when only
+      // campaignId was given and this event's campaignId simply didn't match:
+      // clientSlug/pageSlug were both empty, so neither exclusion fired, and the
+      // event was included by default even though it belonged to someone else.
+      if (campaignId && e.campaignId === campaignId) return true;
+      if (clientSlug && e.clientSlug === clientSlug) return true;
+      if (pageSlug   && e.pageSlug   === pageSlug)   return true;
+      return false;
     });
 
     const TRACKED = ['page_view', 'call_click', 'cta_click', 'lead_submit'];
