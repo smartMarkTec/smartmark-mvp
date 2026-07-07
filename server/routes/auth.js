@@ -4288,6 +4288,58 @@ router.post('/facebook/adaccount/:accountId/update-adset', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /facebook/adaccount/:accountId/campaign/:campaignId/adset-settings
+// Returns the campaign's real, current budget and duration straight from Meta —
+// not from any locally-cached state — so Campaign Details always reflects what's
+// actually live, regardless of how the campaign was launched (direct or draft).
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/adset-settings', async (req, res) => {
+  const { campaignId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  if (!normalizedCampaignId) return res.status(400).json({ ok: false, error: 'campaignId is required' });
+
+  const { userToken } = await resolveFacebookTokenFromReq(req, { campaignId: normalizedCampaignId });
+  if (!userToken) {
+    return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook' });
+  }
+
+  try {
+    const [campaignRes, adsetsRes] = await Promise.all([
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}`, {
+        params: { access_token: userToken, fields: 'id,start_time,stop_time' },
+        timeout: 10000,
+      }),
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/adsets`, {
+        params: { access_token: userToken, fields: 'id,daily_budget,start_time,end_time', limit: 1 },
+        timeout: 10000,
+      }),
+    ]);
+
+    const campaign = campaignRes.data || {};
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const toDateStr = (v) => {
+      if (!v) return null;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    };
+
+    return res.json({
+      ok: true,
+      adsetId: adset.id,
+      dailyBudget: adset.daily_budget ? (Number(adset.daily_budget) / 100) : null,
+      startDate: toDateStr(adset.start_time || campaign.start_time),
+      endDate: toDateStr(adset.end_time || campaign.stop_time),
+    });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[adset-settings] error:', fbErr?.message || err?.message || err);
+    return res.json({ ok: false, error: fbErr?.message || 'Could not fetch campaign settings from Meta.' });
+  }
+});
+
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;

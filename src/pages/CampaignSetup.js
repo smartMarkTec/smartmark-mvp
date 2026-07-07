@@ -4257,6 +4257,13 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
     startDate: "",
     endDate: "",
   });
+  // Live budget/duration + adset ID fetched directly from Meta for the selected
+  // campaign — this is the source of truth for Campaign Details, since
+  // campaignSettingsMap is only ever seeded at direct-launch time and doesn't
+  // exist at all for campaigns launched via the draft flow or loaded in bulk.
+  const [liveAdsetSettings, setLiveAdsetSettings] = useState(null); // { adsetId, dailyBudget, startDate, endDate }
+  const [liveAdsetSettingsLoading, setLiveAdsetSettingsLoading] = useState(false);
+  const [liveAdsetSettingsError, setLiveAdsetSettingsError] = useState(null);
   const [includeInstagram, setIncludeInstagram] = useState(false);
   // Top-level state for expanded creative card in Creatives tab multi-card section.
   // Must live here — cannot be inside an IIFE/conditional render (Rules of Hooks).
@@ -5530,6 +5537,42 @@ useEffect(() => {
   }
 }, [selectedCampaignId, campaignCreativesMap]);
 
+// Fetch the campaign's real budget/duration/adset ID straight from Meta whenever
+// a real campaign is selected. This is what actually populates Campaign Details —
+// campaignSettingsMap alone is not enough since it's only seeded at direct-launch
+// time and stays empty for campaigns launched via the draft flow.
+useEffect(() => {
+  setLiveAdsetSettings(null);
+  setLiveAdsetSettingsError(null);
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return;
+  if (!adminClientId && !selectedAccount) return;
+
+  let cancelled = false;
+  setLiveAdsetSettingsLoading(true);
+
+  (async () => {
+    try {
+      const r = adminClientId
+        ? await adminAdsetSettingsFetch(adminClientId, selectedCampaignId)
+        : await authFetch(`/facebook/adaccount/${String(selectedAccount).trim().replace(/^act_/, "")}/campaign/${selectedCampaignId}/adset-settings`);
+      const j = await r.json().catch(() => ({}));
+      if (cancelled) return;
+      if (j?.ok) {
+        setLiveAdsetSettings({ adsetId: j.adsetId, dailyBudget: j.dailyBudget, startDate: j.startDate, endDate: j.endDate });
+      } else {
+        setLiveAdsetSettingsError(j?.error || "Could not load campaign settings from Meta.");
+      }
+    } catch (err) {
+      if (!cancelled) setLiveAdsetSettingsError(err?.message || "Could not load campaign settings from Meta.");
+    } finally {
+      if (!cancelled) setLiveAdsetSettingsLoading(false);
+    }
+  })();
+
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [selectedCampaignId, selectedAccount, adminClientId]);
+
 // Load AI settings when campaign selection or account changes
 useEffect(() => {
   if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
@@ -6339,6 +6382,23 @@ async function adminCampaignControlFetch(adminClientId, campaignId, action, acco
     headers,
     body: JSON.stringify({ accountId }),
   });
+}
+
+// Live budget/duration lookup + update — always resolves the CLIENT's FB token
+// (never TheBoss's), and reflects Meta's actual current state rather than any
+// locally-cached value.
+async function adminAdsetSettingsFetch(adminClientId, campaignId) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = sid ? { "x-sm-sid": sid } : {};
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/adset-settings`;
+  return fetch(url, { credentials: "include", headers });
+}
+async function adminUpdateAdsetFetch(adminClientId, campaignId, body) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (sid) headers["x-sm-sid"] = sid;
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/update-adset`;
+  return fetch(url, { method: "POST", credentials: "include", headers, body: JSON.stringify(body) });
 }
 
 // Business Info form state — top-level to avoid React hook-in-IIFE crash (#310).
@@ -8506,9 +8566,13 @@ const selectedCampaignCreatives =
   const displayedCampaignSettings =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
       ? {
-          budget: String(selectedCampaignSettings?.budget || "—").trim(),
-          startDate: String(selectedCampaignSettings?.startDate || "—").trim(),
-          endDate: String(selectedCampaignSettings?.endDate || "—").trim(),
+          // liveAdsetSettings (fetched fresh from Meta) is authoritative; fall back to
+          // the locally-cached value only while that fetch is still in flight/failed.
+          budget: liveAdsetSettings?.dailyBudget != null
+            ? `$${Number(liveAdsetSettings.dailyBudget).toFixed(2)}`
+            : String(selectedCampaignSettings?.budget || (liveAdsetSettingsLoading ? "Loading…" : "—")).trim(),
+          startDate: liveAdsetSettings?.startDate || String(selectedCampaignSettings?.startDate || (liveAdsetSettingsLoading ? "Loading…" : "—")).trim(),
+          endDate: liveAdsetSettings?.endDate || String(selectedCampaignSettings?.endDate || (liveAdsetSettingsLoading ? "Loading…" : "No end date")).trim(),
         }
       : {
           budget: String(budget || "—").trim(),
@@ -8664,10 +8728,14 @@ ${pendingTest ? `
     const id = String(selectedLiveCampaign.id || "").trim();
     const saved = campaignSettingsMap[id] || {};
 
+    // Prefer the value fetched live from Meta — falls back to the local cache only
+    // if that fetch hasn't resolved yet.
     setEditCampaignForm({
-      budget: String(saved?.budget || "").trim(),
-      startDate: String(saved?.startDate || "").trim(),
-      endDate: String(saved?.endDate || "").trim(),
+      budget: liveAdsetSettings?.dailyBudget != null
+        ? String(liveAdsetSettings.dailyBudget)
+        : String(saved?.budget || "").trim(),
+      startDate: liveAdsetSettings?.startDate || String(saved?.startDate || "").trim(),
+      endDate: liveAdsetSettings?.endDate || String(saved?.endDate || "").trim(),
     });
 
     setShowCampaignMenu(false);
@@ -8680,9 +8748,15 @@ ${pendingTest ? `
     const id = String(selectedLiveCampaign.id || "").trim();
     const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
 
-    // Retrieve the stored adset ID for this campaign (written at launch time).
-    const creativeMapEntry = readCreativeMap(resolvedUser, acctId)[id] || {};
-    const adsetId = String(creativeMapEntry.adsetId || "").trim();
+    // The adset ID resolved live from Meta (via liveAdsetSettings) is authoritative and
+    // works regardless of how/when the campaign was launched. Fall back to the legacy
+    // localStorage cache (only ever populated by the direct-launch flow) if that
+    // lookup hasn't completed for some reason.
+    let adsetId = liveAdsetSettings?.adsetId || "";
+    if (!adsetId) {
+      const creativeMapEntry = readCreativeMap(resolvedUser, acctId)[id] || {};
+      adsetId = String(creativeMapEntry.adsetId || "").trim();
+    }
 
     // Persist to local state first so the UI reflects the change immediately.
     setCampaignSettingsMap((prev) => ({
@@ -8697,43 +8771,52 @@ ${pendingTest ? `
     setShowEditCampaignModal(false);
 
     if (!adsetId) {
-      // No adset ID on record — likely a campaign launched before this feature.
-      // Local state is already updated; we cannot sync to Meta without the adset ID.
-      console.warn("[CampaignSetup] No adset ID on record for campaign", id, "— cannot sync to Meta.");
+      alert("Could not find this campaign's ad set on Meta. Please reopen Campaign Details and try again.");
+      console.warn("[CampaignSetup] No adset ID resolved for campaign", id, "— cannot sync to Meta.");
       return;
     }
 
-    // Build the update payload — only include fields the user actually filled in.
-    const updateBody = { adsetId };
-
     const budgetVal = Number(editCampaignForm?.budget || 0);
-    if (budgetVal > 0) updateBody.daily_budget = budgetVal;
-
     const endDateVal = String(editCampaignForm?.endDate || "").trim();
-    if (endDateVal) {
-      try {
-        const d = new Date(`${endDateVal}T18:00:00`);
-        if (!isNaN(d.getTime())) updateBody.end_time = d.toISOString();
-      } catch {}
-    }
-
-    if (!updateBody.daily_budget && !updateBody.end_time) return; // nothing to sync
+    if (!(budgetVal > 0) && !endDateVal) return; // nothing to sync
 
     try {
       setLoading(true);
-      const res = await authFetch(`/facebook/adaccount/${acctId}/update-adset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateBody),
-      });
+      let res;
+      if (adminClientId) {
+        res = await adminUpdateAdsetFetch(adminClientId, id, {
+          adsetId,
+          ...(budgetVal > 0 ? { dailyBudget: budgetVal } : {}),
+          ...(endDateVal ? { endDate: endDateVal } : {}),
+        });
+      } else {
+        const updateBody = { adsetId };
+        if (budgetVal > 0) updateBody.daily_budget = budgetVal;
+        if (endDateVal) {
+          const d = new Date(`${endDateVal}T18:00:00`);
+          if (!isNaN(d.getTime())) updateBody.end_time = d.toISOString();
+        }
+        res = await authFetch(`/facebook/adaccount/${acctId}/update-adset`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updateBody),
+        });
+      }
 
       const json = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
+      if (!res.ok || json?.ok === false) {
         const msg = json?.error || `HTTP ${res.status}`;
         alert(`Could not update campaign on Facebook: ${msg}`);
       } else {
         console.log("[CampaignSetup] ad set updated on Meta", json);
+        // Reflect the confirmed values immediately rather than waiting for the next poll.
+        setLiveAdsetSettings((prev) => ({
+          adsetId,
+          dailyBudget: budgetVal > 0 ? budgetVal : (prev?.dailyBudget ?? null),
+          startDate: prev?.startDate ?? null,
+          endDate: endDateVal || (prev?.endDate ?? null),
+        }));
       }
     } catch (err) {
       alert(`Could not update campaign on Facebook: ${err?.message || "Unknown error"}`);
@@ -11318,12 +11401,19 @@ ${pendingTest ? `
 {showCampaignDetails && selectedLiveCampaign && (() => {
   const detId = String(selectedLiveCampaign.id || "").trim();
   const det = campaignSettingsMap[detId] || {};
-  const fmtBudget = (v) => v && v !== "—" ? `$${v}/day` : "—";
-  const fmtDate = (v) => v && v !== "—" ? v : "—";
+  // liveAdsetSettings (fetched fresh from Meta for the selected campaign) is
+  // authoritative — campaignSettingsMap alone is empty for any campaign launched
+  // via the draft flow or loaded in bulk, which is why this panel used to show
+  // nothing for those campaigns.
+  const liveBudget = liveAdsetSettings?.dailyBudget != null ? String(liveAdsetSettings.dailyBudget) : det.budget;
+  const liveStart = liveAdsetSettings?.startDate || det.startDate;
+  const liveEnd = liveAdsetSettings?.endDate || det.endDate;
+  const fmtBudget = (v) => v && v !== "—" ? `$${v}/day` : (liveAdsetSettingsLoading ? "Loading…" : "—");
+  const fmtDate = (v) => v && v !== "—" ? v : (liveAdsetSettingsLoading ? "Loading…" : "—");
   const rows = [
-    { label: "Budget", value: fmtBudget(det.budget) },
-    { label: "Start date", value: fmtDate(det.startDate) },
-    { label: "End date", value: fmtDate(det.endDate) },
+    { label: "Budget", value: fmtBudget(liveBudget) },
+    { label: "Start date", value: fmtDate(liveStart) },
+    { label: "End date", value: liveEnd ? fmtDate(liveEnd) : "No end date" },
   ];
   return (
     <div

@@ -1297,6 +1297,109 @@ router.get('/admin/clients/:id/campaign/:campaignId/metrics', limitAdmin, requir
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/clients/:id/campaign/:campaignId/adset-settings
+// Returns the campaign's real, current budget and duration straight from Meta —
+// not from any locally-cached state — so Campaign Details always reflects what's
+// actually live, regardless of how the campaign was launched (direct or draft).
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:id/campaign/:campaignId/adset-settings', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required.' });
+
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const token = getFbUserToken(ownerKey);
+    if (!token) return res.status(401).json({ ok: false, error: 'Facebook is not connected for this client.' });
+
+    const [campaignRes, adsetsRes] = await Promise.all([
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}`, {
+        params: { access_token: token, fields: 'id,start_time,stop_time' },
+        timeout: 10000,
+      }),
+      axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/adsets`, {
+        params: { access_token: token, fields: 'id,daily_budget,start_time,end_time', limit: 1 },
+        timeout: 10000,
+      }),
+    ]);
+
+    const campaign = campaignRes.data || {};
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const toDateStr = (v) => {
+      if (!v) return null;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    };
+
+    return res.json({
+      ok: true,
+      adsetId: adset.id,
+      dailyBudget: adset.daily_budget ? (Number(adset.daily_budget) / 100) : null,
+      startDate: toDateStr(adset.start_time || campaign.start_time),
+      endDate: toDateStr(adset.end_time || campaign.stop_time),
+    });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[Admin] adset-settings error:', fbErr?.message || err?.message || err);
+    return res.json({ ok: false, error: fbErr?.message || 'Could not fetch campaign settings from Meta.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:id/campaign/:campaignId/update-adset
+// Updates the ad set's daily budget and/or end date on Meta, using the client's
+// own token — never the admin's. Body: { adsetId, dailyBudget?, endDate? }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/campaign/:campaignId/update-adset', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const token = getFbUserToken(ownerKey);
+    if (!token) return res.status(401).json({ ok: false, error: 'Facebook is not connected for this client.' });
+
+    const adsetId = String(req.body?.adsetId || '').trim();
+    if (!adsetId) return res.status(400).json({ ok: false, error: 'adsetId is required.' });
+
+    const update = {};
+    const rawBudget = req.body?.dailyBudget;
+    if (rawBudget !== undefined && rawBudget !== null && rawBudget !== '') {
+      const cents = Math.max(100, Math.round(Number(rawBudget) * 100));
+      if (!isNaN(cents)) update.daily_budget = cents;
+    }
+    const rawEndDate = req.body?.endDate;
+    if (rawEndDate) {
+      const d = new Date(`${rawEndDate}T18:00:00`);
+      if (!isNaN(d.getTime())) update.end_time = Math.floor(d.getTime() / 1000);
+    }
+
+    if (!Object.keys(update).length) {
+      return res.status(400).json({ ok: false, error: 'No updatable fields provided (dailyBudget, endDate).' });
+    }
+
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adsetId}`,
+      update,
+      { params: { access_token: token }, timeout: 10000 }
+    );
+
+    console.log('[Admin] update-adset success', { ownerKey, adsetId, update });
+    return res.json({ ok: true, adsetId, updated: update });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[Admin] update-adset error:', fbErr?.message || err?.message || err);
+    return res.status(500).json({ ok: false, error: fbErr?.message || err?.message || 'Update failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/clients/:id/creative-test-metrics
 // Per-ad insights for original vs AI challenger (reads client's FB token).
 // Returns optimizerCreativeTest: { status, original, challenger, conclusion }
