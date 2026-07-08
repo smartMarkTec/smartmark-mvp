@@ -10,6 +10,7 @@ const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { META_API_VERSION } = require('../metaConfig');
 const { upsertOptimizerCampaignState } = require('../optimizerCampaignState');
+const { resolveLocationsToGeoTargeting } = require('../metaGeoTargeting');
 // Same multi-alias token resolver the working /facebook/adaccount/:id/launch-campaign
 // route uses — a bare ownerKey lookup here misses tokens stored under a different
 // session/username alias, which was causing draft creation to 401 for users the
@@ -174,7 +175,7 @@ router.post('/facebook/create-draft', async (req, res) => {
     adAccountId, pageId, imageUrl,
     primaryText, headline, destinationUrl,
     dailyBudget, campaignName, adminClientId,
-    creativeSet,
+    creativeSet, targetingLocations,
   } = req.body || {};
 
   if (!adAccountId) return res.status(400).json({ ok: false, error: 'adAccountId required' });
@@ -219,6 +220,24 @@ router.post('/facebook/create-draft', async (req, res) => {
   const draftCreativeIds = [];
   const draftAdIds = [];
 
+  // Resolve any explicit zip codes/cities BEFORE creating anything on Meta, so a
+  // location that fails to resolve is reported back rather than the campaign
+  // silently launching nationwide (the previous hardcoded countries:['US']
+  // default with no way to target specific areas at all).
+  let targetingResolution = { geoLocations: null, resolved: [], failed: [] };
+  if (Array.isArray(targetingLocations) && targetingLocations.length > 0) {
+    const r = await resolveLocationsToGeoTargeting(targetingLocations, userToken);
+    targetingResolution = { geoLocations: Object.keys(r.geoLocations).length ? r.geoLocations : null, resolved: r.resolved, failed: r.failed };
+    if (!targetingResolution.geoLocations) {
+      return res.json({
+        ok: false,
+        error: 'None of the provided zip codes/cities could be matched on Meta.',
+        resolved: targetingResolution.resolved,
+        failed: targetingResolution.failed,
+      });
+    }
+  }
+
   try {
     // 1. Create PAUSED campaign
     // is_adset_budget_sharing_enabled: false tells Meta budgets live on adsets, not campaign.
@@ -251,7 +270,10 @@ router.post('/facebook/create-draft', async (req, res) => {
       status: 'PAUSED',
       is_adset_budget_sharing_enabled: false,
       targeting: {
-        geo_locations: { countries: ['US'] },
+        // Only specific zip/city targeting when the caller provided (and Meta
+        // resolved) real locations — otherwise fall back to the previous
+        // whole-US default so campaigns without explicit targeting still launch.
+        geo_locations: targetingResolution.geoLocations || { countries: ['US'] },
         age_min: 18,
         age_max: 65,
       },
@@ -338,6 +360,8 @@ router.post('/facebook/create-draft', async (req, res) => {
         imageUrl: a.imageUrlFinal,
         link: a.destUrl,
       })),
+      targetingResolved: targetingResolution.resolved,
+      targetingFailed: targetingResolution.failed,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -346,9 +370,11 @@ router.post('/facebook/create-draft', async (req, res) => {
 
     console.log('[facebook/create-draft] created PAUSED draft:', {
       ownerKey, accountId, draftCampaignId, draftAdSetId, adCount: draftAdIds.length,
+      targetingResolvedCount: targetingResolution.resolved.length,
+      targetingFailedCount: targetingResolution.failed.length,
     });
 
-    return res.json({ ok: true, draft });
+    return res.json({ ok: true, draft, targetingFailed: targetingResolution.failed });
   } catch (err) {
     const metaErr = err?.response?.data?.error;
     console.error('[facebook/create-draft] error:', metaErr || err.message);

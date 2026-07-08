@@ -28,6 +28,11 @@ const {
   syncCampaignMetricsToOptimizerState,
 } = require('../optimizerMetricsSync');
 const { META_API_VERSION } = require('../metaConfig');
+const {
+  resolveLocationsToGeoTargeting,
+  describeGeoLocations,
+  applyGeoLocationsToAdset,
+} = require('../metaGeoTargeting');
 const { buildDiagnosisAsync } = require('../optimizerDiagnosis');
 const { buildDecisionAsync } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
@@ -3401,10 +3406,37 @@ if (isNoWebsiteLaunch && !normalizedPhone) {
   });
 }
 
+// ---- Explicit multi-location targeting (zip codes / cities) ----
+// Takes priority over the single city/state block below. Lets a launch specify
+// exactly which areas to target instead of only ever resolving one city + a
+// fixed 50-mile radius (or silently defaulting to the whole country).
+const explicitTargetingLocations = Array.isArray(req.body.targetingLocations)
+  ? req.body.targetingLocations
+  : [];
+let explicitTargetingResolved = [];
+let explicitTargetingFailed = [];
+if (explicitTargetingLocations.length > 0) {
+  try {
+    const r = await resolveLocationsToGeoTargeting(explicitTargetingLocations, userToken);
+    explicitTargetingResolved = r.resolved;
+    explicitTargetingFailed = r.failed;
+    if (Object.keys(r.geoLocations).length > 0) {
+      targeting.geo_locations = r.geoLocations;
+      console.log('[LAUNCH][geo] explicit targetingLocations resolved', {
+        resolvedCount: r.resolved.length, failedCount: r.failed.length,
+      });
+    }
+  } catch (geoErr) {
+    console.warn('[LAUNCH][geo] explicit targetingLocations lookup failed', geoErr?.message);
+  }
+}
+// ---- End explicit multi-location targeting ----
+
 const rawCity = String(bodyAnswers.city || '').trim();
 const rawState = String(bodyAnswers.state || '').trim();
 
-if (rawCity && rawState) {
+// Skip the single city/state fallback entirely if explicit targeting already resolved.
+if (rawCity && rawState && explicitTargetingResolved.length === 0) {
   try {
     // Map 2-letter US state abbreviation to full name for reliable region matching.
     // Meta's API returns region as the full state name (e.g. "Texas"), not the abbreviation.
@@ -4179,6 +4211,9 @@ const optimizerPayload = {
       accountId: String(accountId || ''),
       validateOnly: VALIDATE_ONLY,
       resolvedPageId: pageIdFinal,
+      ...(explicitTargetingLocations.length > 0
+        ? { targetingResolved: explicitTargetingResolved, targetingFailed: explicitTargetingFailed }
+        : {}),
     });
   } catch (err) {
     // If the Meta campaign object was created before the failure, delete it so it
@@ -4337,6 +4372,96 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/adset-settings',
     const fbErr = err?.response?.data?.error;
     console.error('[adset-settings] error:', fbErr?.message || err?.message || err);
     return res.json({ ok: false, error: fbErr?.message || 'Could not fetch campaign settings from Meta.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /facebook/adaccount/:accountId/campaign/:campaignId/targeting
+// Returns the ad set's real, current geo targeting straight from Meta, plus a
+// human-readable summary — so the UI can show exactly what's actually live
+// rather than trusting anything cached locally.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/targeting', async (req, res) => {
+  const { campaignId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  if (!normalizedCampaignId) return res.status(400).json({ ok: false, error: 'campaignId is required' });
+
+  const { userToken } = await resolveFacebookTokenFromReq(req, { campaignId: normalizedCampaignId });
+  if (!userToken) return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook' });
+
+  try {
+    const adsetsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/adsets`, {
+      params: { access_token: userToken, fields: 'id,targeting', limit: 1 },
+      timeout: 10000,
+    });
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const geo = adset.targeting?.geo_locations || {};
+    return res.json({
+      ok: true,
+      adsetId: adset.id,
+      geoLocations: geo,
+      summary: describeGeoLocations(geo),
+    });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[targeting] fetch error:', fbErr?.message || err?.message || err);
+    return res.json({ ok: false, error: fbErr?.message || 'Could not fetch campaign targeting from Meta.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /facebook/adaccount/:accountId/campaign/:campaignId/update-targeting
+// Body: { locations: string[] } — each entry a zip code or city ("City, ST").
+// Resolves every entry against Meta's geo location search, applies only the
+// ones that resolved to the ad set (preserving age range / interests / etc via
+// applyGeoLocationsToAdset's merge), and reports back exactly which inputs
+// failed to resolve so nothing is silently dropped.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/update-targeting', async (req, res) => {
+  const { campaignId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  if (!normalizedCampaignId) return res.status(400).json({ ok: false, error: 'campaignId is required' });
+
+  const locations = Array.isArray(req.body?.locations) ? req.body.locations : [];
+  if (!locations.length) return res.status(400).json({ ok: false, error: 'locations must be a non-empty array.' });
+
+  const { userToken } = await resolveFacebookTokenFromReq(req, { campaignId: normalizedCampaignId });
+  if (!userToken) return res.status(401).json({ ok: false, error: 'Not authenticated with Facebook' });
+
+  try {
+    const adsetsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${normalizedCampaignId}/adsets`, {
+      params: { access_token: userToken, fields: 'id', limit: 1 },
+      timeout: 10000,
+    });
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const { geoLocations, resolved, failed } = await resolveLocationsToGeoTargeting(locations, userToken);
+
+    if (!resolved.length) {
+      return res.json({
+        ok: false,
+        error: 'None of the provided zip codes/cities could be matched on Meta.',
+        resolved, failed,
+      });
+    }
+
+    await applyGeoLocationsToAdset(adset.id, geoLocations, userToken);
+
+    console.log('[update-targeting] applied', { adsetId: adset.id, resolvedCount: resolved.length, failedCount: failed.length });
+    return res.json({
+      ok: true,
+      adsetId: adset.id,
+      summary: describeGeoLocations(geoLocations),
+      resolved,
+      failed,
+    });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[update-targeting] error:', fbErr?.message || err?.message || err);
+    return res.status(500).json({ ok: false, error: fbErr?.message || err?.message || 'Could not update targeting on Meta.' });
   }
 });
 

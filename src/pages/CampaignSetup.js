@@ -4264,6 +4264,13 @@ const [pendingLaunchAfterCheckout, setPendingLaunchAfterCheckout] = useState(fal
   const [liveAdsetSettings, setLiveAdsetSettings] = useState(null); // { adsetId, dailyBudget, startDate, endDate }
   const [liveAdsetSettingsLoading, setLiveAdsetSettingsLoading] = useState(false);
   const [liveAdsetSettingsError, setLiveAdsetSettingsError] = useState(null);
+  // Live geo targeting fetched directly from Meta for the selected campaign —
+  // same "ask Meta, don't trust a local cache" approach as liveAdsetSettings.
+  const [liveTargeting, setLiveTargeting] = useState(null); // { adsetId, geoLocations, summary }
+  const [liveTargetingLoading, setLiveTargetingLoading] = useState(false);
+  const [targetingInput, setTargetingInput] = useState("");
+  const [targetingSaving, setTargetingSaving] = useState(false);
+  const [targetingResult, setTargetingResult] = useState(null); // { summary, failed } | { error } | null
   const [includeInstagram, setIncludeInstagram] = useState(false);
   // Top-level state for expanded creative card in Creatives tab multi-card section.
   // Must live here — cannot be inside an IIFE/conditional render (Rules of Hooks).
@@ -5573,6 +5580,38 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [selectedCampaignId, selectedAccount, adminClientId]);
 
+// Fetch the campaign's real current geo targeting straight from Meta whenever a
+// real campaign is selected — same rationale as the adset-settings fetch above.
+useEffect(() => {
+  setLiveTargeting(null);
+  setTargetingResult(null);
+  if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return;
+  if (!adminClientId && !selectedAccount) return;
+
+  let cancelled = false;
+  setLiveTargetingLoading(true);
+
+  (async () => {
+    try {
+      const r = adminClientId
+        ? await adminTargetingFetch(adminClientId, selectedCampaignId)
+        : await authFetch(`/facebook/adaccount/${String(selectedAccount).trim().replace(/^act_/, "")}/campaign/${selectedCampaignId}/targeting`);
+      const j = await r.json().catch(() => ({}));
+      if (cancelled) return;
+      if (j?.ok) {
+        setLiveTargeting({ adsetId: j.adsetId, geoLocations: j.geoLocations, summary: j.summary });
+      }
+    } catch {
+      // Non-fatal — Campaign Details just won't show a targeting summary this load.
+    } finally {
+      if (!cancelled) setLiveTargetingLoading(false);
+    }
+  })();
+
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [selectedCampaignId, selectedAccount, adminClientId]);
+
 // Load AI settings when campaign selection or account changes
 useEffect(() => {
   if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
@@ -6399,6 +6438,19 @@ async function adminUpdateAdsetFetch(adminClientId, campaignId, body) {
   if (sid) headers["x-sm-sid"] = sid;
   const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/update-adset`;
   return fetch(url, { method: "POST", credentials: "include", headers, body: JSON.stringify(body) });
+}
+async function adminTargetingFetch(adminClientId, campaignId) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = sid ? { "x-sm-sid": sid } : {};
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/targeting`;
+  return fetch(url, { credentials: "include", headers });
+}
+async function adminUpdateTargetingFetch(adminClientId, campaignId, locations) {
+  const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (sid) headers["x-sm-sid"] = sid;
+  const url = `/api/admin/clients/${encodeURIComponent(adminClientId)}/campaign/${encodeURIComponent(campaignId)}/update-targeting`;
+  return fetch(url, { method: "POST", credentials: "include", headers, body: JSON.stringify({ locations }) });
 }
 
 // Business Info form state — top-level to avoid React hook-in-IIFE crash (#310).
@@ -8822,6 +8874,55 @@ ${pendingTest ? `
       alert(`Could not update campaign on Facebook: ${err?.message || "Unknown error"}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Applies a fresh list of zip codes/cities as this campaign's real Meta geo
+  // targeting — replaces whatever it currently targets. Reports back exactly
+  // which entries didn't resolve rather than silently dropping them.
+  const saveTargeting = async () => {
+    if (!selectedLiveCampaign) return;
+    const id = String(selectedLiveCampaign.id || "").trim();
+    const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
+
+    const locations = String(targetingInput || "")
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (!locations.length) {
+      setTargetingResult({ error: "Enter at least one zip code or city first." });
+      return;
+    }
+
+    setTargetingSaving(true);
+    setTargetingResult(null);
+
+    try {
+      let res;
+      if (adminClientId) {
+        res = await adminUpdateTargetingFetch(adminClientId, id, locations);
+      } else {
+        res = await authFetch(`/facebook/adaccount/${acctId}/campaign/${id}/update-targeting`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ locations }),
+        });
+      }
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || json?.ok === false) {
+        setTargetingResult({ error: json?.error || `HTTP ${res.status}`, failed: json?.failed || [] });
+        return;
+      }
+
+      setLiveTargeting({ adsetId: json.adsetId, geoLocations: null, summary: json.summary });
+      setTargetingResult({ summary: json.summary, failed: json.failed || [] });
+      setTargetingInput("");
+    } catch (err) {
+      setTargetingResult({ error: err?.message || "Unknown error updating targeting." });
+    } finally {
+      setTargetingSaving(false);
     }
   };
   /* ================================ UI ================================ */
@@ -11415,6 +11516,7 @@ ${pendingTest ? `
     { label: "Start date", value: fmtDate(liveStart) },
     { label: "End date", value: liveEnd ? fmtDate(liveEnd) : "No end date" },
   ];
+  const targetingSummary = liveTargeting?.summary || (liveTargetingLoading ? "Loading…" : "—");
   return (
     <div
       style={{
@@ -11438,6 +11540,10 @@ ${pendingTest ? `
             <span style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>{value}</span>
           </div>
         ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingTop: 4, borderTop: "1px dashed #dbe4ff", marginTop: 2 }}>
+          <span style={{ color: "#98a2b3", fontWeight: 700, fontSize: 11 }}>Location targeting</span>
+          <span style={{ color: "#111827", fontWeight: 800, fontSize: 13, lineHeight: 1.4 }}>{targetingSummary}</span>
+        </div>
       </div>
     </div>
   );
@@ -12899,6 +13005,64 @@ ${pendingTest ? `
                   }}
                 />
               </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4, borderTop: "1px solid #f1f5f9" }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Location Targeting</label>
+              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12 }}>
+                Currently targeting: {liveTargeting?.summary || (liveTargetingLoading ? "Loading…" : "—")}
+              </div>
+              <textarea
+                value={targetingInput}
+                onChange={(e) => setTargetingInput(e.target.value)}
+                placeholder="Enter zip codes and/or cities to target, one per line or comma-separated (e.g. 78701, 78702, Round Rock, TX). This replaces the current targeting."
+                rows={3}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid #dbe4ff",
+                  background: "#ffffff",
+                  color: "#111827",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  outline: "none",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                }}
+              />
+              <button
+                type="button"
+                onClick={saveTargeting}
+                disabled={targetingSaving || !targetingInput.trim()}
+                style={{
+                  alignSelf: "flex-start",
+                  background: targetingSaving || !targetingInput.trim() ? "#e5e7eb" : "#5b5cf0",
+                  color: targetingSaving || !targetingInput.trim() ? "#9ca3af" : "#ffffff",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "8px 14px",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  cursor: targetingSaving || !targetingInput.trim() ? "not-allowed" : "pointer",
+                }}
+              >
+                {targetingSaving ? "Applying to Meta…" : "Update Targeting"}
+              </button>
+              {targetingResult?.error && (
+                <div style={{ background: "#fff1f2", border: "1px solid #ffd6d6", borderRadius: 10, padding: "8px 12px", color: "#b42318", fontWeight: 700, fontSize: 12 }}>
+                  {targetingResult.error}
+                </div>
+              )}
+              {targetingResult?.summary && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "8px 12px", color: "#15803d", fontWeight: 700, fontSize: 12 }}>
+                  Now targeting: {targetingResult.summary}
+                  {Array.isArray(targetingResult.failed) && targetingResult.failed.length > 0 && (
+                    <div style={{ color: "#b45309", fontWeight: 700, marginTop: 4 }}>
+                      ⚠ Could not match: {targetingResult.failed.map((f) => f.input).join(", ")}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>

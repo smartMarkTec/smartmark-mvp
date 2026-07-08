@@ -17,6 +17,11 @@ const {
 } = require('../optimizerCampaignState');
 const { executeAction } = require('../optimizerAction');
 const { getEffectiveAiControlSettings } = require('../aiControlSettings');
+const {
+  resolveLocationsToGeoTargeting,
+  describeGeoLocations,
+  applyGeoLocationsToAdset,
+} = require('../metaGeoTargeting');
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -26,7 +31,8 @@ const AD_AGENT_SYSTEM =
   "You are Smartemark's AI Ad Agent — a marketing operator embedded in the client's campaign dashboard. " +
   "You have real tools available to check and manage the client's Meta (Facebook) ads account: fetching or creating the Meta Pixel, " +
   "checking Pixel event activity, pulling a live Meta Ads Manager summary, creating challenger (A/B test) ads, generating a " +
-  "replacement AI challenger, pointing the user to saved drafts, publishing drafts live, and guiding challenger removal. " +
+  "replacement AI challenger, pointing the user to saved drafts, publishing drafts live, guiding challenger removal, and setting " +
+  "a campaign's geographic targeting to an explicit list of zip codes/cities on Meta. " +
   "Call the matching tool whenever the user's message maps to one of those capabilities — including short, informal follow-ups " +
   "like 'just give me the pixel' or 'no, the one you made' that refer back to something earlier in the conversation. Use the " +
   "conversation history to resolve what 'it', 'that', or 'the one you generated' refers to, rather than asking the user to repeat themselves. " +
@@ -1056,6 +1062,30 @@ const AD_AGENT_TOOLS = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_campaign_targeting',
+      description:
+        'Set the selected campaign\'s geographic ad targeting on Meta to an explicit list of zip codes and/or cities, ' +
+        'replacing whatever it currently targets (e.g. nationwide). Use whenever the user gives specific zip codes ' +
+        'or city names to target/restrict to — e.g. "only target these zip codes: 78701, 78702" or "restrict to ' +
+        'Austin and Round Rock, TX". Extract every individual zip code or city the user listed into the locations ' +
+        'array, one entry per zip/city ("City, ST" format for cities when a state is given). Requires a campaign to ' +
+        'be selected.',
+      parameters: {
+        type: 'object',
+        properties: {
+          locations: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Every zip code or city the user wants to target, e.g. ["78701", "78702", "Round Rock, TX"].',
+          },
+        },
+        required: ['locations'],
+      },
+    },
+  },
 ];
 
 async function runFetchMetaPixelTool({ effectiveOwnerKey }) {
@@ -1349,6 +1379,57 @@ async function runGenerateReplacementChallengerTool({ safeCampaignId, effectiveO
   return { ok: true, reply: buildGenerateChallengerReply(actionResult) };
 }
 
+async function runUpdateCampaignTargetingTool({ args, safeCampaignId, effectiveOwnerKey }) {
+  if (!safeCampaignId) {
+    return { ok: true, reply: 'Select a campaign first (use the campaign dropdown), then tell me which zip codes or cities to target.' };
+  }
+
+  const locations = Array.isArray(args?.locations) ? args.locations.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  if (!locations.length) {
+    return { ok: true, reply: 'Give me the specific zip codes or city names you want to target — e.g. "78701, 78702" or "Austin, TX and Round Rock, TX".' };
+  }
+
+  const userToken = getFbUserToken(effectiveOwnerKey);
+  if (!userToken) {
+    return { ok: true, reply: 'No Meta access token found for this account. Please reconnect Facebook and try again.' };
+  }
+
+  try {
+    const adsetsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${safeCampaignId}/adsets`, {
+      params: { access_token: userToken, fields: 'id', limit: 1 },
+      timeout: 10000,
+    });
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) {
+      return { ok: true, reply: 'I could not find an ad set for this campaign on Meta. Please check the campaign is selected correctly and try again.' };
+    }
+
+    const { geoLocations, resolved, failed } = await resolveLocationsToGeoTargeting(locations, userToken);
+
+    if (!resolved.length) {
+      const failedList = failed.map((f) => f.input).join(', ');
+      return { ok: true, reply: `I couldn't match any of those on Meta: ${failedList}. Double-check the spelling or zip codes and try again.` };
+    }
+
+    await applyGeoLocationsToAdset(adset.id, geoLocations, userToken);
+
+    const summary = describeGeoLocations(geoLocations);
+    const failedNote = failed.length
+      ? `\n\n⚠️ Could not match and skipped: ${failed.map((f) => f.input).join(', ')}.`
+      : '';
+    console.log('[AD_AGENT_TARGETING_UPDATED]', { campaignId: safeCampaignId, adsetId: adset.id, resolvedCount: resolved.length, failedCount: failed.length });
+
+    return {
+      ok: true,
+      reply: `Done — this campaign now targets: **${summary}**.${failedNote}`,
+    };
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[AdAgent] update_campaign_targeting error:', fbErr?.message || err?.message);
+    return { ok: true, reply: `Could not update targeting on Meta: ${fbErr?.message || err?.message || 'unknown error'}.` };
+  }
+}
+
 const AD_AGENT_TOOL_RUNNERS = {
   fetch_meta_pixel: runFetchMetaPixelTool,
   create_meta_pixel: runCreateMetaPixelTool,
@@ -1359,6 +1440,7 @@ const AD_AGENT_TOOL_RUNNERS = {
   show_challenger_drafts: runShowChallengerDraftsTool,
   publish_challenger_drafts: runPublishChallengerDraftsTool,
   remove_challenger_instructions: runRemoveChallengerInstructionsTool,
+  update_campaign_targeting: runUpdateCampaignTargetingTool,
 };
 
 const PIXEL_PLAN_TOOLS = new Set([

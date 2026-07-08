@@ -9,6 +9,11 @@ const path = require('path');
 const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
+const {
+  resolveLocationsToGeoTargeting,
+  describeGeoLocations,
+  applyGeoLocationsToAdset,
+} = require('../metaGeoTargeting');
 const { secureHeaders, basicRateLimit, basicAuth } = require('../middleware/security');
 const { META_API_VERSION } = require('../metaConfig');
 const { CALL_CONFIGS } = require('./twilio');
@@ -1396,6 +1401,90 @@ router.post('/admin/clients/:id/campaign/:campaignId/update-adset', limitAdmin, 
     const fbErr = err?.response?.data?.error;
     console.error('[Admin] update-adset error:', fbErr?.message || err?.message || err);
     return res.status(500).json({ ok: false, error: fbErr?.message || err?.message || 'Update failed.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/clients/:id/campaign/:campaignId/targeting
+// Returns the ad set's real, current geo targeting straight from Meta, using
+// the client's own token — not TheBoss's.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/clients/:id/campaign/:campaignId/targeting', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required.' });
+
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const token = getFbUserToken(ownerKey);
+    if (!token) return res.status(401).json({ ok: false, error: 'Facebook is not connected for this client.' });
+
+    const adsetsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/adsets`, {
+      params: { access_token: token, fields: 'id,targeting', limit: 1 },
+      timeout: 10000,
+    });
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const geo = adset.targeting?.geo_locations || {};
+    return res.json({ ok: true, adsetId: adset.id, geoLocations: geo, summary: describeGeoLocations(geo) });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[Admin] targeting fetch error:', fbErr?.message || err?.message || err);
+    return res.json({ ok: false, error: fbErr?.message || 'Could not fetch campaign targeting from Meta.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /admin/clients/:id/campaign/:campaignId/update-targeting
+// Body: { locations: string[] } — zip codes and/or "City, ST" entries. Resolves
+// each against Meta, applies only what resolved, and reports failures — using
+// the client's own token, never TheBoss's.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:id/campaign/:campaignId/update-targeting', limitAdmin, requireAdmin, async (req, res) => {
+  try {
+    const username = decodeURIComponent(req.params.id);
+    const user = await findUserByUsername(username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Client not found.' });
+
+    const campaignId = String(req.params.campaignId || '').trim();
+    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required.' });
+
+    const locations = Array.isArray(req.body?.locations) ? req.body.locations : [];
+    if (!locations.length) return res.status(400).json({ ok: false, error: 'locations must be a non-empty array.' });
+
+    const ownerKey = `user:${String(user.username || '').trim()}`;
+    const token = getFbUserToken(ownerKey);
+    if (!token) return res.status(401).json({ ok: false, error: 'Facebook is not connected for this client.' });
+
+    const adsetsRes = await axios.get(`https://graph.facebook.com/${META_API_VERSION}/${campaignId}/adsets`, {
+      params: { access_token: token, fields: 'id', limit: 1 },
+      timeout: 10000,
+    });
+    const adset = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data[0] : null;
+    if (!adset) return res.json({ ok: false, error: 'No ad set found for this campaign.' });
+
+    const { geoLocations, resolved, failed } = await resolveLocationsToGeoTargeting(locations, token);
+
+    if (!resolved.length) {
+      return res.json({
+        ok: false,
+        error: 'None of the provided zip codes/cities could be matched on Meta.',
+        resolved, failed,
+      });
+    }
+
+    await applyGeoLocationsToAdset(adset.id, geoLocations, token);
+
+    console.log('[Admin] update-targeting applied', { ownerKey, adsetId: adset.id, resolvedCount: resolved.length, failedCount: failed.length });
+    return res.json({ ok: true, adsetId: adset.id, summary: describeGeoLocations(geoLocations), resolved, failed });
+  } catch (err) {
+    const fbErr = err?.response?.data?.error;
+    console.error('[Admin] update-targeting error:', fbErr?.message || err?.message || err);
+    return res.status(500).json({ ok: false, error: fbErr?.message || err?.message || 'Could not update targeting on Meta.' });
   }
 });
 
