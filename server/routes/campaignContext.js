@@ -897,6 +897,18 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
   for (const challenger of challengers) {
     const newLinkData = { ...linkData };
 
+    // The control ad's link_data, as read back via GET, can carry BOTH `picture`
+    // (a derived preview URL Meta includes for convenience) and `image_hash` (the
+    // original stored reference) even though the ad itself only used one of them
+    // at creation time. A headline-test challenger never touches the image at all
+    // and just inherits this spread as-is — so without stripping the redundant
+    // field here, Meta rejects the POST with "ObjectStorySpecRedundant" even
+    // though nothing about the image was meant to change. Keep image_hash (the
+    // durable reference) when both are present.
+    if (newLinkData.image_hash && newLinkData.picture) {
+      delete newLinkData.picture;
+    }
+
     if (challenger.testType === 'headline') {
       if (!challenger.headline) throw new Error(`Challenger "${challenger.name}" has no headline specified.`);
       newLinkData.name = challenger.headline;  // headline lives in link_data.name
