@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import InlineAdAgent from "./InlineAdAgent";
+import { fetchAdImage, buildIntakeAnswers } from "../lib/creativeGeneration";
 import {
   FaPause,
   FaPlay,
@@ -5979,9 +5980,16 @@ useEffect(() => {
               .filter(Boolean)
               .slice(0, 2);
 
+      // This endpoint also returns the full per-ad launchedCreativeSet (and any
+      // archivedMetaAdIds overrides) — previously discarded here, which wiped out
+      // the multi-ad Creatives/Campaign tab card data (and their images) the
+      // moment this effect ran, unless a stale localStorage copy happened to
+      // paper over it. Merge via mergeCreativeRecordPreservingArchive, the same
+      // helper the sibling list-preload effect and admin refresh path already use,
+      // instead of replacing the map entry wholesale.
       setCampaignCreativesMap((m) => ({
         ...m,
-        [campaignId]: {
+        [campaignId]: mergeCreativeRecordPreservingArchive(m[campaignId] || {}, {
           images: nextImages,
           mediaSelection: "image",
           meta: {
@@ -5989,7 +5997,9 @@ useEffect(() => {
             body: nextBody,
             link: nextLink,
           },
-        },
+          launchedCreativeSet: Array.isArray(data?.launchedCreativeSet) ? data.launchedCreativeSet : undefined,
+          archivedMetaAdIds: (data?.archivedMetaAdIds && typeof data.archivedMetaAdIds === "object") ? data.archivedMetaAdIds : undefined,
+        }),
       }));
 
       existingMap[campaignId] = {
@@ -6459,14 +6469,20 @@ const [bizSaving, setBizSaving] = useState(false);
 const [bizSaved, setBizSaved]   = useState(false);
 
 // Edit Creative: edit copy/image for a single launched ad, then create replacement on Meta.
-const [editCreativeIdx, setEditCreativeIdx] = React.useState(null);  // index in launchedCreativeSet
+// Keyed by metaAdId (not array index) — the card grid renders a filtered/reordered
+// `visibleSet` derived from launchedCreativeSet, so a raw index would point at the
+// wrong ad the moment any card is archived or reordered.
+const [editCreativeAdId, setEditCreativeAdId] = React.useState(null);
 const [editCreativeForm, setEditCreativeForm] = React.useState({ headline: "", body: "", cta: "", imageUrl: "", imageDataUrl: null });
 const [editCreativeSaving, setEditCreativeSaving] = React.useState(false);
+const [editCreativeGenerating, setEditCreativeGenerating] = React.useState(false);
+const [creativeMenuOpenId, setCreativeMenuOpenId] = React.useState(null); // metaAdId whose ⋮ menu is open
 const editCreativeFileRef = React.useRef(null);
 
-const openEditCreative = (c, idx) => {
-  setEditCreativeIdx(idx);
+const openEditCreative = (c) => {
+  setEditCreativeAdId(c.metaAdId);
   setEditCreativeForm({ headline: c.headline || "", body: c.body || "", cta: c.cta || "", imageUrl: c.imageUrl || "", imageDataUrl: null });
+  setCreativeMenuOpenId(null);
 };
 
 const handleEditCreativeImageFile = (e) => {
@@ -6474,39 +6490,69 @@ const handleEditCreativeImageFile = (e) => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
-    setEditCreativeForm((p) => ({ ...p, imageDataUrl: ev.target?.result || null }));
+    setEditCreativeForm((p) => ({ ...p, imageDataUrl: ev.target?.result || null, imageUrl: "" }));
   };
   reader.readAsDataURL(file);
   e.target.value = "";
 };
 
+// Generate a brand-new AI image for the replacement, reusing the current
+// headline/body/cta as copy so the visual changes without breaking the message.
+const generateEditCreativeImage = async () => {
+  setEditCreativeGenerating(true);
+  try {
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const ctxUrl = adminClientId
+      ? `/api/campaign-context?adminClientId=${encodeURIComponent(adminClientId)}`
+      : `/api/campaign-context`;
+    const ctxRes = await fetch(ctxUrl, { credentials: "include", headers: sid ? { "x-sm-sid": sid } : {} });
+    const ctxJson = await ctxRes.json().catch(() => ({}));
+    const answers = buildIntakeAnswers(adminClientInfo, ctxJson?.context || {});
+    const copy = { headline: editCreativeForm.headline, body: editCreativeForm.body, cta: editCreativeForm.cta || "Learn more" };
+    const newUrl = await fetchAdImage(answers, copy, `replace-${Date.now()}`);
+    if (newUrl) {
+      setEditCreativeForm((p) => ({ ...p, imageUrl: newUrl, imageDataUrl: null }));
+    } else {
+      alert("AI image generation failed. Try again or upload your own photo instead.");
+    }
+  } catch (e) {
+    alert(`AI image generation failed: ${e?.message}`);
+  } finally {
+    setEditCreativeGenerating(false);
+  }
+};
+
 const submitEditCreative = async () => {
-  if (editCreativeIdx === null) return;
-  const launchedSet = selectedCampaignCreatives?.launchedCreativeSet;
-  if (!launchedSet?.[editCreativeIdx]) return;
-  const c = launchedSet[editCreativeIdx];
-  if (!c.metaAdId) { alert("No Meta Ad ID found for this creative."); return; }
+  if (!editCreativeAdId) return;
+  const launchedSet = selectedCampaignCreatives?.launchedCreativeSet || [];
+  const idx = launchedSet.findIndex((cr) => cr.metaAdId === editCreativeAdId);
+  if (idx === -1) { alert("Could not find this ad in the current creative set. Try refreshing the page."); return; }
+  const c = launchedSet[idx];
 
   const acctId = String(selectedAccount || "").trim();
   const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
-  const link = editCreativeForm.imageUrl || c.link || previewCopy?.link || inferredLink || "";
+  const link = c.link || previewCopy?.link || inferredLink || "";
   setEditCreativeSaving(true);
   try {
-    const r = await fetch(`/auth/facebook/adaccount/${acctId}/ad/${c.metaAdId}/replace`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) },
-      body: JSON.stringify({
-        headline:      editCreativeForm.headline,
-        body:          editCreativeForm.body,
-        cta:           editCreativeForm.cta || "LEARN_MORE",
-        imageUrl:      editCreativeForm.imageUrl || c.imageUrl,
-        imageDataUrl:  editCreativeForm.imageDataUrl || null,
-        destinationUrl: link,
-        adName:        c.angleLabel || `Ad ${editCreativeIdx + 1}`,
-      }),
+    const payload = JSON.stringify({
+      headline:      editCreativeForm.headline,
+      body:          editCreativeForm.body,
+      cta:           editCreativeForm.cta || "LEARN_MORE",
+      imageUrl:      editCreativeForm.imageUrl || c.imageUrl,
+      imageDataUrl:  editCreativeForm.imageDataUrl || null,
+      destinationUrl: link,
+      adName:        c.angleLabel || `Ad`,
     });
+    const headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+    const r = adminClientId
+      ? await fetch(`/api/admin/clients/${encodeURIComponent(adminClientId)}/ad/${encodeURIComponent(editCreativeAdId)}/replace`, {
+          method: "POST", credentials: "include", headers, body: payload,
+        })
+      : await fetch(`/auth/facebook/adaccount/${acctId}/ad/${editCreativeAdId}/replace`, {
+          method: "POST", credentials: "include", headers, body: payload,
+        });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { alert(`Edit creative failed: ${j.error || "unknown error"}`); return; }
+    if (!r.ok) { alert(`Replace ad failed: ${j.error || "unknown error"}`); return; }
 
     // Update local campaignCreativesMap with new metaAdId + updated copy
     const newEntry = {
@@ -6516,18 +6562,18 @@ const submitEditCreative = async () => {
       headline:       editCreativeForm.headline,
       body:           editCreativeForm.body,
       cta:            editCreativeForm.cta,
-      imageUrl:       editCreativeForm.imageDataUrl ? c.imageUrl : (editCreativeForm.imageUrl || c.imageUrl),
+      imageUrl:       editCreativeForm.imageDataUrl || editCreativeForm.imageUrl || c.imageUrl,
       status:         "active",
       replacedMetaAdId: c.metaAdId,
     };
     setCampaignCreativesMap((prev) => {
       const rec = prev[selectedCampaignId] || {};
-      const updated = (rec.launchedCreativeSet || []).map((cr, i) => i === editCreativeIdx ? newEntry : cr);
+      const updated = (rec.launchedCreativeSet || []).map((cr, i) => i === idx ? newEntry : cr);
       return { ...prev, [selectedCampaignId]: { ...rec, launchedCreativeSet: updated } };
     });
-    setEditCreativeIdx(null);
+    setEditCreativeAdId(null);
   } catch (e) {
-    alert(`Edit creative failed: ${e?.message}`);
+    alert(`Replace ad failed: ${e?.message}`);
   } finally {
     setEditCreativeSaving(false);
   }
@@ -10285,7 +10331,7 @@ ${pendingTest ? `
                                   onClick={() => setExpandedCreativeCardIdx(isExpanded ? null : idx)}
                                   style={{
                                     flex: "1 1 200px", minWidth: 160, maxWidth: 280,
-                                    background: "#fff", cursor: "pointer",
+                                    background: "#fff", cursor: "pointer", position: "relative",
                                     border: isExpanded ? "2px solid #5d59ea" : "1px solid #dbe4ff",
                                     borderRadius: 14, padding: "10px 12px",
                                     boxShadow: "0 2px 8px rgba(93,89,234,0.08)", transition: "border 0.15s",
@@ -10303,8 +10349,48 @@ ${pendingTest ? `
                                         {label}
                                       </span>
                                     </div>
-                                    <span style={{ fontSize: 10, color: "#94a3b8" }}>{isExpanded ? "▲" : "▼"}</span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      {c.metaAdId && !isDeleted && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setCreativeMenuOpenId(creativeMenuOpenId === c.metaAdId ? null : c.metaAdId); }}
+                                          title="Ad options"
+                                          style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 2, display: "flex", alignItems: "center" }}
+                                        >
+                                          <FaEllipsisV size={12} />
+                                        </button>
+                                      )}
+                                      <span style={{ fontSize: 10, color: "#94a3b8" }}>{isExpanded ? "▲" : "▼"}</span>
+                                    </div>
                                   </div>
+                                  {creativeMenuOpenId === c.metaAdId && (
+                                    <>
+                                      <div
+                                        onClick={(e) => { e.stopPropagation(); setCreativeMenuOpenId(null); }}
+                                        style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                                      />
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{
+                                          position: "absolute", top: 34, right: 10, zIndex: 21,
+                                          background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10,
+                                          boxShadow: "0 8px 24px rgba(15,23,42,0.14)", overflow: "hidden", minWidth: 160,
+                                        }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditCreative(c)}
+                                          style={{
+                                            display: "block", width: "100%", textAlign: "left", background: "none",
+                                            border: "none", padding: "9px 14px", fontSize: 12, fontWeight: 700,
+                                            color: "#111827", cursor: "pointer",
+                                          }}
+                                        >
+                                          Replace ad (upload/AI)
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
                                   {c.metaAdId && (
                                     <div style={{ fontSize: 10, color: "#94a3b8", marginTop: -2 }}>
                                       Ad ID: {c.metaAdId}
@@ -13098,6 +13184,153 @@ ${pendingTest ? `
                 }}
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editCreativeAdId && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 1008,
+            background: "rgba(15,23,42,0.35)", backdropFilter: "blur(6px)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}
+          onClick={() => { if (!editCreativeSaving) setEditCreativeAdId(null); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(480px, 94vw)", maxHeight: "90vh", overflowY: "auto",
+              background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 24,
+              padding: 22, boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
+              display: "flex", flexDirection: "column", gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 20, marginBottom: 6 }}>
+                Replace Ad
+              </div>
+              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.6 }}>
+                Creates a new ad in the same ad set with a fresh image and pauses this one. Budget and targeting stay the same — this is how you A/B test a new creative against the others.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Image</label>
+              {(editCreativeForm.imageDataUrl || editCreativeForm.imageUrl) && (
+                <img
+                  src={editCreativeForm.imageDataUrl || toAbsoluteMedia(editCreativeForm.imageUrl)}
+                  alt="new creative"
+                  style={{ width: "100%", borderRadius: 10, aspectRatio: "1/1", objectFit: "cover" }}
+                />
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => editCreativeFileRef.current?.click()}
+                  style={{
+                    flex: 1, background: "#f8fafc", color: "#111827", border: "1px solid #dbe4ff",
+                    borderRadius: 10, padding: "9px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer",
+                  }}
+                >
+                  Upload Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={generateEditCreativeImage}
+                  disabled={editCreativeGenerating}
+                  style={{
+                    flex: 1, background: editCreativeGenerating ? "#e5e7eb" : "#eef2ff",
+                    color: editCreativeGenerating ? "#9ca3af" : "#4f46e5",
+                    border: "1px solid #dbe4ff", borderRadius: 10, padding: "9px 10px",
+                    fontWeight: 800, fontSize: 12, cursor: editCreativeGenerating ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {editCreativeGenerating ? "Generating…" : "Generate with AI"}
+                </button>
+              </div>
+              <input
+                ref={editCreativeFileRef}
+                type="file"
+                accept="image/*"
+                onChange={handleEditCreativeImageFile}
+                style={{ display: "none" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Headline</label>
+              <input
+                type="text"
+                value={editCreativeForm.headline}
+                onChange={(e) => setEditCreativeForm((p) => ({ ...p, headline: e.target.value }))}
+                style={{
+                  padding: "10px 12px", borderRadius: 10, border: "1px solid #dbe4ff",
+                  background: "#ffffff", color: "#111827", fontWeight: 700, fontSize: 13, outline: "none",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Body</label>
+              <textarea
+                value={editCreativeForm.body}
+                onChange={(e) => setEditCreativeForm((p) => ({ ...p, body: e.target.value }))}
+                rows={3}
+                style={{
+                  padding: "10px 12px", borderRadius: 10, border: "1px solid #dbe4ff",
+                  background: "#ffffff", color: "#111827", fontWeight: 600, fontSize: 13,
+                  outline: "none", resize: "vertical", fontFamily: "inherit",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Call to Action</label>
+              <select
+                value={editCreativeForm.cta || "LEARN_MORE"}
+                onChange={(e) => setEditCreativeForm((p) => ({ ...p, cta: e.target.value }))}
+                style={{
+                  padding: "10px 12px", borderRadius: 10, border: "1px solid #dbe4ff",
+                  background: "#ffffff", color: "#111827", fontWeight: 700, fontSize: 13, outline: "none",
+                }}
+              >
+                <option value="LEARN_MORE">Learn More</option>
+                <option value="SHOP_NOW">Shop Now</option>
+                <option value="SIGN_UP">Sign Up</option>
+                <option value="CALL_NOW">Call Now</option>
+                <option value="GET_QUOTE">Get Quote</option>
+                <option value="CONTACT_US">Contact Us</option>
+                <option value="BOOK_TRAVEL">Book Now</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => setEditCreativeAdId(null)}
+                disabled={editCreativeSaving}
+                style={{
+                  background: "#f8fafc", color: "#111827", border: "1px solid #e5e7eb",
+                  borderRadius: 10, padding: "10px 14px", fontWeight: 900, fontSize: 12,
+                  cursor: editCreativeSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitEditCreative}
+                disabled={editCreativeSaving}
+                style={{
+                  background: editCreativeSaving ? "#c7c8f5" : "#5b5cf0", color: "#ffffff", border: "none",
+                  borderRadius: 10, padding: "10px 14px", fontWeight: 900, fontSize: 12,
+                  cursor: editCreativeSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                {editCreativeSaving ? "Publishing to Meta…" : "Save & Replace on Meta"}
               </button>
             </div>
           </div>

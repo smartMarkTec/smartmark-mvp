@@ -3009,6 +3009,164 @@ router.get('/admin/clients/:clientId/campaign/:campaignId/conversion-summary', l
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/clients/:clientId/ad/:adId/replace
+//
+// Admin-client twin of /auth/facebook/adaccount/:accountId/ad/:adId/replace —
+// always resolves the CLIENT's own FB token (never TheBoss's session token).
+// Registered ahead of the generic /ad/:adId/:action dispatcher below so Express
+// matches this specific route first instead of falling into the pause/resume/
+// delete-only dispatcher.
+// Safe Meta flow: create new creative → create new ad → pause old ad → update DB.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/clients/:clientId/ad/:adId/replace', limitAdmin, requireAdmin, async (req, res) => {
+  const clientId = decodeURIComponent(req.params.clientId || '').trim();
+  const adId     = String(req.params.adId || '').trim();
+  if (!clientId) return res.status(400).json({ ok: false, error: 'clientId is required.' });
+  if (!adId)     return res.status(400).json({ ok: false, error: 'adId is required.' });
+
+  const ownerKey  = `user:${clientId}`;
+  const userToken = getFbUserToken(ownerKey);
+  if (!userToken) {
+    return res.status(401).json({ ok: false, error: `Client ${clientId} does not have Facebook connected.`, ownerKey, adId });
+  }
+
+  const {
+    headline   = '',
+    body       = '',
+    cta        = 'LEARN_MORE',
+    imageUrl   = '',
+    imageDataUrl = '',
+    destinationUrl = '',
+    adName     = 'Replacement Ad',
+  } = req.body || {};
+
+  try {
+    // 1) Fetch the old ad to get its adset_id, page_id, and account id
+    const oldAdRes = await axios.get(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { params: { access_token: userToken, fields: 'id,name,account_id,adset_id,creative{id,object_story_spec}' } }
+    );
+    const oldAd = oldAdRes.data || {};
+    const adSetId = String(oldAd.adset_id || '').trim();
+    const normalizedAccountId = String(oldAd.account_id || '').replace(/^act_/, '').trim();
+    if (!adSetId) return res.status(400).json({ ok: false, error: 'Could not read adset_id from old ad.' });
+    if (!normalizedAccountId) return res.status(400).json({ ok: false, error: 'Could not read account_id from old ad.' });
+
+    const pageId =
+      oldAd.creative?.object_story_spec?.page_id ||
+      (await (async () => {
+        await db.read();
+        const rec = (db.data.campaign_creatives || []).find(
+          (r) => r.ownerKey === ownerKey && Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+        );
+        return rec?.pageId || null;
+      })());
+    if (!pageId) return res.status(400).json({ ok: false, error: 'Could not resolve page_id for replacement ad.' });
+
+    // 2) Upload image to Meta
+    let imageHash = null;
+    const rawBase64 = imageDataUrl ? imageDataUrl.replace(/^data:image\/[^;]+;base64,/, '') : null;
+
+    if (rawBase64) {
+      const imgRes = await axios.post(
+        `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adimages`,
+        new URLSearchParams({ bytes: rawBase64 }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
+      );
+      const imgData = imgRes.data?.images || {};
+      imageHash = Object.values(imgData)[0]?.hash || null;
+    } else if (imageUrl) {
+      try {
+        const imgFetch = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 15000 });
+        const b64 = Buffer.from(imgFetch.data).toString('base64');
+        const imgRes = await axios.post(
+          `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adimages`,
+          new URLSearchParams({ bytes: b64 }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
+        );
+        const imgData = imgRes.data?.images || {};
+        imageHash = Object.values(imgData)[0]?.hash || null;
+      } catch (imgErr) {
+        console.warn('[admin/ad/replace] image upload failed, proceeding without image:', imgErr?.message);
+      }
+    }
+
+    if (!imageHash) return res.status(400).json({ ok: false, error: 'Image upload failed — provide imageUrl or imageDataUrl.' });
+
+    // 3) Create new ad creative
+    const ctaType = String(cta || 'LEARN_MORE').toUpperCase().replace(/ /g, '_');
+    const creativePayload = {
+      name: `${adName} (replacement)`,
+      object_story_spec: {
+        page_id: String(pageId),
+        link_data: {
+          link: destinationUrl || 'https://smartemark.com',
+          message: String(body || '').trim(),
+          name:    String(headline || '').trim(),
+          image_hash: imageHash,
+          call_to_action: { type: ctaType, value: { link: destinationUrl || 'https://smartemark.com' } },
+        },
+      },
+    };
+    const crRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/adcreatives`,
+      creativePayload,
+      { params: { access_token: userToken } }
+    );
+    const newCreativeId = crRes.data?.id;
+    if (!newCreativeId) return res.status(500).json({ ok: false, error: 'Failed to create replacement creative on Meta.' });
+
+    // 4) Create new ad in same ad set
+    const newAdRes = await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/act_${normalizedAccountId}/ads`,
+      { name: `${adName} (replacement)`, adset_id: adSetId, creative: { creative_id: newCreativeId }, status: 'ACTIVE' },
+      { params: { access_token: userToken } }
+    );
+    const newAdId = newAdRes.data?.id;
+    if (!newAdId) return res.status(500).json({ ok: false, error: 'Failed to create replacement ad on Meta.' });
+
+    // 5) Pause the old ad
+    await axios.post(
+      `https://graph.facebook.com/${META_API_VERSION}/${adId}`,
+      { status: 'PAUSED' },
+      { params: { access_token: userToken } }
+    ).catch((e) => console.warn('[admin/ad/replace] old ad pause failed (non-critical):', e?.message));
+
+    // 6) Update DB — patch launchedCreativeSet entry for this adId
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find(
+      (r) => r.ownerKey === ownerKey && Array.isArray(r.launchedCreativeSet) && r.launchedCreativeSet.some((c) => c.metaAdId === adId)
+    );
+    if (rec) {
+      rec.launchedCreativeSet = rec.launchedCreativeSet.map((c) =>
+        c.metaAdId === adId
+          ? {
+              ...c,
+              metaAdId:         newAdId,
+              metaCreativeId:   newCreativeId,
+              headline:         String(headline || c.headline || '').trim(),
+              body:             String(body     || c.body     || '').trim(),
+              cta:              String(cta      || c.cta      || 'Learn more').trim(),
+              imageUrl:         imageUrl || c.imageUrl,
+              status:           'active',
+              replacedMetaAdId: adId,
+              replacedAt:       new Date().toISOString(),
+            }
+          : c
+      );
+      await db.write();
+    }
+
+    console.log('[admin/ad/replace] success', { clientId, ownerKey, oldAdId: adId, newAdId, newCreativeId });
+    return res.json({ ok: true, oldAdId: adId, newAdId, newCreativeId, adSetId });
+  } catch (err) {
+    const msg = err?.response?.data?.error?.message || err.message || 'Replacement failed';
+    console.error('[admin/ad/replace] error:', msg);
+    return res.status(500).json({ ok: false, error: msg });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/admin/clients/:clientId/ad/:adId/pause
 // POST /api/admin/clients/:clientId/ad/:adId/resume
 // POST /api/admin/clients/:clientId/ad/:adId/delete
