@@ -904,10 +904,16 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
         // Re-run for anything this same backfill wrote previously — earlier versions of
         // this code prioritized Meta's small thumbnail over the real ad image, so records
         // it already created need to be re-fetched to pick up the corrected image. Records
-        // written by the normal create-draft/launch-draft flow are left alone.
+        // written by the normal create-draft/launch-draft flow are left alone — UNLESS
+        // the stored image is a raw Meta CDN link (fbcdn.net/scontent). Those are signed,
+        // short-lived ad-preview URLs that eventually 403 once they expire; a campaign
+        // stuck on one needs its image replaced regardless of which flow originally wrote it.
         const existingRow = creativeRecords.find((r) => String(r?.campaignId || '') === camp.id);
         const wasAutoBackfilled = !!existingRow?.backfilledFromMeta;
-        if (hasCreative && !wasAutoBackfilled) {
+        const hasMetaCdnImage = (camp.launchedCreativeSet || []).some(
+          (c) => /fbcdn\.net|scontent[.-]|facebook\.com\/ads\/image/i.test(String(c?.imageUrl || ''))
+        );
+        if (hasCreative && !wasAutoBackfilled && !hasMetaCdnImage) {
           // Debug: this campaign's images came from the normal create-draft/launch-draft
           // write, not this backfill — if the image still looks blurry, the problem is in
           // that write path (or the original generated image itself), not here.
@@ -917,6 +923,20 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
             imageUrls: (camp.launchedCreativeSet || []).map((c) => ({ adId: c.metaAdId, imageUrl: c.imageUrl })),
           });
           continue;
+        }
+        if (hasMetaCdnImage) {
+          console.log('[ADMIN_CAMPAIGNS_CREATIVE_BACKFILL_FORCED]', {
+            ownerKey, campaignId: camp.id,
+            reason: 'stored image is a Meta CDN link (fbcdn.net/scontent) — these expire and 403; replacing with our own original',
+          });
+        }
+        // Preserve each ad's actual current lifecycle (paused/active/status fields) across
+        // the backfill rewrite below — both the campaign_drafts path and the live-Meta-fetch
+        // path build a fresh launchedCreativeSet from scratch and must not silently flip a
+        // paused ad back to "active" just because it's rebuilding the image URL.
+        const existingStatusByAdId = {};
+        for (const c of (camp.launchedCreativeSet || [])) {
+          if (c?.metaAdId) existingStatusByAdId[c.metaAdId] = c;
         }
 
         try {
@@ -934,17 +954,28 @@ router.get('/admin/clients/:id/campaigns', limitAdmin, requireAdmin, async (req,
             const adIdsForSet = Array.isArray(draftRecord.metaAdIds) && draftRecord.metaAdIds.length > 0
               ? draftRecord.metaAdIds
               : [draftRecord.metaAdId].filter(Boolean);
-            launchedCreativeSet = draftRecord.creativeSet.map((c, i) => ({
-              id: c.id || `draft-${i}`,
-              angleLabel: c.angleLabel || `Ad ${i + 1}`,
-              headline: c.headline || '',
-              body: c.body || '',
-              cta: c.cta || '',
-              imageUrl: c.imageUrl || '',
-              link: c.link || '',
-              metaAdId: adIdsForSet[i] || null,
-              status: 'active',
-            }));
+            launchedCreativeSet = draftRecord.creativeSet.map((c, i) => {
+              const adId = adIdsForSet[i] || null;
+              const prior = adId ? existingStatusByAdId[adId] : null;
+              return {
+                id: c.id || `draft-${i}`,
+                angleLabel: c.angleLabel || `Ad ${i + 1}`,
+                headline: c.headline || '',
+                body: c.body || '',
+                cta: c.cta || '',
+                imageUrl: c.imageUrl || '',
+                link: c.link || '',
+                metaAdId: adId,
+                // Preserve the ad's actual current lifecycle instead of assuming active —
+                // this rewrite is only replacing the image URL, not the ad's real state.
+                status:           prior?.status           || 'active',
+                uiStatus:         prior?.uiStatus,
+                configuredStatus: prior?.configuredStatus,
+                effectiveStatus:  prior?.effectiveStatus,
+                lastAction:       prior?.lastAction,
+                lastActionAt:     prior?.lastActionAt,
+              };
+            });
           } else {
             const adsRes = await axios.get(
               `https://graph.facebook.com/${META_API_VERSION}/${camp.id}/ads`,
