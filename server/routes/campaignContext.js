@@ -902,11 +902,20 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
       newLinkData.name = challenger.headline;  // headline lives in link_data.name
 
     } else if (challenger.testType === 'image') {
+      // The image-test challenger's headline defaults to the control's own, but the
+      // user can edit it via the preview card's edit button — apply it if present so
+      // that edit isn't silently dropped just because this card's testType is "image".
+      if (challenger.headline) newLinkData.name = challenger.headline;
       if (!challenger.imageUrl && !challenger.imageHash) {
         throw new Error(`Challenger "${challenger.name}" has no imageUrl or imageHash specified.`);
       }
       if (challenger.imageHash) {
         newLinkData.image_hash = challenger.imageHash;
+        // newLinkData was spread from the control ad's link_data, which may already
+        // carry a `picture` (or `image_url`) field — Meta rejects a creative that
+        // specifies both picture and image_hash ("ObjectStorySpecRedundant").
+        delete newLinkData.picture;
+        delete newLinkData.image_url;
       } else {
         // Use the same bytes-based upload path as auth.js / normal campaign launch.
         // Meta's url= query-param upload requires a capability most apps don't have.
@@ -956,10 +965,21 @@ async function createChallengerAds({ clientOwnerKey, campaignId, controlAdId, ch
         }
         console.log('[AB_IMAGE_UPLOAD_SUCCESS]', { challengerName: challenger.name, imgHash });
         newLinkData.image_hash = imgHash;
+        delete newLinkData.picture;
         delete newLinkData.image_url;
       }
     } else {
       throw new Error(`Unknown testType "${challenger.testType}" for challenger "${challenger.name}".`);
+    }
+
+    // Body/CTA are always populated on the challenger (defaulted to the control ad's
+    // own copy by buildChallengerDraftPreviews, or overwritten by the user via the
+    // preview card's edit button) — apply them regardless of testType so an edit to
+    // either field actually reaches Meta instead of being silently dropped.
+    if (challenger.body) newLinkData.message = challenger.body;
+    if (challenger.cta) {
+      const ctaType = String(challenger.cta).toUpperCase().trim().replace(/[\s-]+/g, '_');
+      newLinkData.call_to_action = { type: ctaType, value: { link: newLinkData.link || linkData.link || '' } };
     }
 
     // 3. Create new ad creative (90s — Meta can be slow, especially right after image upload)
@@ -1735,6 +1755,49 @@ router.post('/campaign-context/update-ab-preview-image', async (req, res) => {
   } catch (err) {
     console.error('[update-ab-preview-image]', err?.message);
     return res.status(500).json({ ok: false, error: err?.message || 'Failed to update preview image.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/update-ab-preview-copy
+// Lets the user edit the headline/body/CTA of a staged A/B test preview card
+// before publishing — previously these cards were read-only.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/update-ab-preview-copy', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId, previewId, headline, body, cta } = req.body || {};
+    if (!campaignId || !previewId) {
+      return res.status(400).json({ ok: false, error: 'campaignId and previewId are required.' });
+    }
+
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+    );
+    if (recIdx < 0) return res.status(404).json({ ok: false, error: 'Campaign creative record not found.' });
+
+    const drafts = db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [];
+    const dIdx = drafts.findIndex((d) => d.id === previewId);
+    if (dIdx < 0) return res.status(404).json({ ok: false, error: 'Preview not found. It may have already been published.' });
+
+    drafts[dIdx] = {
+      ...drafts[dIdx],
+      ...(headline !== undefined ? { headline: String(headline).trim() } : {}),
+      ...(body     !== undefined ? { body:     String(body).trim()     } : {}),
+      ...(cta      !== undefined ? { cta:      String(cta).trim()      } : {}),
+    };
+    db.data.campaign_creatives[recIdx].pendingChallengerDrafts = drafts;
+    await db.write();
+
+    console.log('[AB_PREVIEW_COPY_EDITED]', { campaignId, previewId });
+    return res.json({ ok: true, preview: drafts[dIdx] });
+  } catch (err) {
+    console.error('[update-ab-preview-copy]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to update preview copy.' });
   }
 });
 

@@ -501,6 +501,8 @@ export default function InlineAdAgent({
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState([]);
   const [abLightbox, setAbLightbox]  = useState(null); // { src, title } for fullscreen
+  const [abEditKey, setAbEditKey]    = useState(null); // `${msgKey}:${previewIdx}` of the card currently being edited
+  const [abEditBuf, setAbEditBuf]    = useState({ headline: "", body: "", cta: "" });
 
   const bottomRef = useRef(null);
   const timerRef  = useRef(null);
@@ -1150,6 +1152,41 @@ export default function InlineAdAgent({
     }
   }
 
+  function startAbEdit(msgKey, previewIdx, preview) {
+    setAbEditBuf({ headline: preview.headline || "", body: preview.body || "", cta: preview.cta || "" });
+    setAbEditKey(`${msgKey}:${previewIdx}`);
+  }
+
+  function cancelAbEdit() {
+    setAbEditKey(null);
+  }
+
+  async function saveAbEdit(msgKey, previewIdx, preview, campaignId) {
+    const fields = {
+      headline: abEditBuf.headline.trim() || preview.headline,
+      body:     abEditBuf.body.trim(),
+      cta:      abEditBuf.cta.trim() || preview.cta || "Learn more",
+    };
+    setAbEditKey(null);
+
+    // Patch local message state immediately so Publish uses the edited copy.
+    setMsgs((prev) => prev.map((m) => {
+      if (m._k !== msgKey || !Array.isArray(m.previews)) return m;
+      const updatedPreviews = m.previews.map((p, i) => i === previewIdx ? { ...p, ...fields } : p);
+      return { ...m, previews: updatedPreviews };
+    }));
+
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+    fetch("/api/campaign-context/update-ab-preview-copy", {
+      method: "POST", credentials: "include", headers,
+      body: JSON.stringify({ campaignId, previewId: preview.id, ...fields }),
+    }).catch(() => {});
+
+    push({ role: "assistant", content: `${preview.name || "Challenger"} copy updated ✓` });
+    scroll();
+  }
+
   // Manual copy edit — updates local state, patches the rendered card immediately,
   // syncs into CampaignSetup via onCreativesGenerated, AND persists to the backend
   // draft. The backend save matters: InlineAdAgent unmounts on tab switch and
@@ -1478,19 +1515,67 @@ export default function InlineAdAgent({
                       Control image is low-resolution from Meta.
                     </div>
                   )}
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>{preview.headline}</div>
-                  {preview.body && (
-                    <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
-                      {preview.body.slice(0, 100)}{preview.body.length > 100 ? "…" : ""}
-                    </div>
-                  )}
-                  <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                    CTA: {preview.cta || "—"}
-                    {preview.link && <> · <a href={preview.link} target="_blank" rel="noreferrer" style={{ color: "#7c3aed" }}>Landing page ↗</a></>}
-                  </div>
-                  <div style={{ fontSize: 10, color: "#7c3aed", fontStyle: "italic" }}>
-                    Changes: {(preview.changes || []).join(", ")}
-                  </div>
+                  {(() => {
+                    const cardKey = `${m._k}:${pi}`;
+                    const isEditingThis = abEditKey === cardKey;
+                    if (isEditingThis) {
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <input
+                            value={abEditBuf.headline}
+                            onChange={(e) => setAbEditBuf((b) => ({ ...b, headline: e.target.value }))}
+                            placeholder="Headline"
+                            style={{ fontSize: 12, fontWeight: 800, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box" }}
+                          />
+                          <textarea
+                            value={abEditBuf.body}
+                            onChange={(e) => setAbEditBuf((b) => ({ ...b, body: e.target.value }))}
+                            placeholder="Body copy" rows={3}
+                            style={{ fontSize: 11, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: FONT }}
+                          />
+                          <input
+                            value={abEditBuf.cta}
+                            onChange={(e) => setAbEditBuf((b) => ({ ...b, cta: e.target.value }))}
+                            placeholder="CTA (e.g. Learn more)"
+                            style={{ fontSize: 11, fontWeight: 700, padding: "6px 8px", border: "1px solid " + BORDER, borderRadius: 6, width: "100%", boxSizing: "border-box" }}
+                          />
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                            <button
+                              onClick={cancelAbEdit}
+                              style={{ background: "#fff", border: "1px solid " + BORDER, borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: SOFT, cursor: "pointer" }}
+                            >Cancel</button>
+                            <button
+                              onClick={() => saveAbEdit(m._k, pi, preview, m.campaignId)}
+                              style={{ background: ACCENT, border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+                            >Save</button>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#3b0764", lineHeight: 1.3 }}>{preview.headline}</div>
+                          <button title="Edit copy" onClick={() => startAbEdit(m._k, pi, preview)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#7c3aed", fontSize: 12, padding: 0, lineHeight: 1, flexShrink: 0 }}>
+                            ✏️
+                          </button>
+                        </div>
+                        {preview.body && (
+                          <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+                            {preview.body.slice(0, 100)}{preview.body.length > 100 ? "…" : ""}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                          CTA: {preview.cta || "—"}
+                          {preview.link && <> · <a href={preview.link} target="_blank" rel="noreferrer" style={{ color: "#7c3aed" }}>Landing page ↗</a></>}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#7c3aed", fontStyle: "italic" }}>
+                          Changes: {(preview.changes || []).join(", ")}
+                        </div>
+                      </>
+                    );
+                  })()}
                   {/* Per-card publish button */}
                   {(() => {
                     const ps = (m.previewStates || {})[preview.id];
