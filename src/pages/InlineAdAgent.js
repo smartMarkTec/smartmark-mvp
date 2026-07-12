@@ -1097,6 +1097,59 @@ export default function InlineAdAgent({
     scroll();
   }
 
+  // Let the user swap in their own photo for an A/B test preview card before
+  // publishing — create_challenger_ads always auto-generates the challenger
+  // image server-side with no way to supply one, which is what this replaces.
+  function triggerAbPreviewUpload(msgKey, previewIdx, preview, campaignId) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result;
+        if (dataUrl) uploadAbPreviewImage(msgKey, previewIdx, preview, campaignId, dataUrl);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+
+  async function uploadAbPreviewImage(msgKey, previewIdx, preview, campaignId, dataUrl) {
+    const sid = (localStorage.getItem("sm_sid_v1") || "").trim();
+    const headers = { "Content-Type": "application/json", ...(sid ? { "x-sm-sid": sid } : {}) };
+    try {
+      const r = await fetch("/api/media/upload", {
+        method: "POST", credentials: "include", headers,
+        body: JSON.stringify({ dataUrl }),
+      });
+      const j = await r.json().catch(() => ({}));
+      const url = j?.urls?.[0] || null;
+      if (!url) { push({ role: "assistant", content: "Upload failed. Try again." }); return; }
+
+      // Persist to the staged draft server-side so it survives a reload/tab switch.
+      fetch("/api/campaign-context/update-ab-preview-image", {
+        method: "POST", credentials: "include", headers,
+        body: JSON.stringify({ campaignId, previewId: preview.id, imageUrl: url }),
+      }).catch(() => {});
+
+      // Patch local message state so the card + Publish button use the new image immediately.
+      setMsgs((prev) => prev.map((m) => {
+        if (m._k !== msgKey || !Array.isArray(m.previews)) return m;
+        const updatedPreviews = m.previews.map((p, i) => i === previewIdx
+          ? { ...p, imageUrl: url, fullImageUrl: url, imagePublicUrl: url, imageFailed: false }
+          : p);
+        return { ...m, previews: updatedPreviews };
+      }));
+      push({ role: "assistant", content: `${preview.name || "Challenger"} image updated with your upload ✓` });
+      scroll();
+    } catch (e) {
+      push({ role: "assistant", content: `Upload failed: ${e?.message}` });
+    }
+  }
+
   // Manual copy edit — updates local state, patches the rendered card immediately,
   // syncs into CampaignSetup via onCreativesGenerated, AND persists to the backend
   // draft. The backend save matters: InlineAdAgent unmounts on tab switch and
@@ -1409,6 +1462,17 @@ export default function InlineAdAgent({
                       Image missing — regenerate required before publishing
                     </div>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => triggerAbPreviewUpload(m._k, pi, preview, m.campaignId)}
+                    style={{
+                      alignSelf: "flex-start", fontSize: 10, fontWeight: 700, color: "#7c3aed",
+                      background: "#fff", border: "1px solid #ddd6fe", borderRadius: 6,
+                      padding: "3px 9px", cursor: "pointer",
+                    }}
+                  >
+                    Upload your own photo
+                  </button>
                   {preview.controlImageLowRes && preview.testType === "headline" && (
                     <div style={{ fontSize: 10, color: "#92400e", background: "#fffbeb", borderRadius: 6, padding: "5px 8px", border: "1px solid #fcd34d" }}>
                       Control image is low-resolution from Meta.

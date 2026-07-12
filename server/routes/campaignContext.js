@@ -1686,6 +1686,59 @@ router.get('/campaign-context/ab-previews', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/campaign-context/update-ab-preview-image
+// Lets the user swap in their own uploaded photo for a staged A/B test preview
+// card before publishing — the AI Agent's create-challenger-drafts flow always
+// auto-generates the challenger image, with no way to supply one. The uploaded
+// file is written by /api/media/upload into the same GENERATED_DIR this reads
+// from, so no public URL round-trip is needed at publish time (see
+// uploadAbImageBytes, which reads the file straight off disk by filename).
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/campaign-context/update-ab-preview-image', async (req, res) => {
+  try {
+    await ensureData();
+    const ownerKey = ownerKeyFromReq(req);
+    if (!ownerKey) return res.status(401).json({ ok: false, error: 'Not authenticated.' });
+
+    const { campaignId, previewId, imageUrl } = req.body || {};
+    if (!campaignId || !previewId || !imageUrl) {
+      return res.status(400).json({ ok: false, error: 'campaignId, previewId, and imageUrl are required.' });
+    }
+
+    await db.read();
+    const recIdx = (db.data.campaign_creatives || []).findIndex(
+      (r) => String(r.campaignId || '').trim() === String(campaignId).trim()
+    );
+    if (recIdx < 0) return res.status(404).json({ ok: false, error: 'Campaign creative record not found.' });
+
+    const drafts = db.data.campaign_creatives[recIdx].pendingChallengerDrafts || [];
+    const dIdx = drafts.findIndex((d) => d.id === previewId);
+    if (dIdx < 0) return res.status(404).json({ ok: false, error: 'Preview not found. It may have already been published.' });
+
+    const renderBase = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+    const fname = String(imageUrl).replace(/^.*\/api\/media\//, '').replace(/^.*\/media\//, '');
+    const imagePublicUrl = renderBase ? `${renderBase}/api/media/${fname}` : imageUrl;
+
+    drafts[dIdx] = {
+      ...drafts[dIdx],
+      imageUrl,
+      imagePublicUrl,
+      fullImageUrl:  imageUrl,
+      imageFailed:   false,
+      publishStatus: 'needs_review',
+    };
+    db.data.campaign_creatives[recIdx].pendingChallengerDrafts = drafts;
+    await db.write();
+
+    console.log('[AB_PREVIEW_IMAGE_REPLACED]', { campaignId, previewId, imageUrl });
+    return res.json({ ok: true, preview: drafts[dIdx] });
+  } catch (err) {
+    console.error('[update-ab-preview-image]', err?.message);
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to update preview image.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /api/campaign-context/publish-ab-preview  (singular — one card at a time)
 // Publishes a single A/B preview to Meta, marks it published in DB.
 // ─────────────────────────────────────────────────────────────────────────────
