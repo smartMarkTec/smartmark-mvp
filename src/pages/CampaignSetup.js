@@ -1025,16 +1025,25 @@ function toAbsoluteMedia(u) {
   const base = basePart.trim();
   const suffix = suffixPart || "";
 
-  // ✅ absolute URL:
-  // if it’s a /api/media URL, ALWAYS force Render origin (smartemark.com does NOT serve /api/media)
+  // ✅ Always normalize to /api/media/:filename — regardless of host or which
+  // legacy path shape the URL is in (/generated/<f>, /media/<f>, a bare Render
+  // absolute URL, etc). /api/media/:filename (server.js) is the ONLY route that
+  // serves a graceful Sharp-rendered placeholder when the underlying file is
+  // missing from Render's ephemeral disk (wiped on every restart/deploy). The
+  // raw /generated and /media static routes just 404 with a JSON body, which a
+  // browser <img> tag renders as a broken-image icon — this was the cause of
+  // ads showing blank/broken images on the Creatives and Campaign tabs even
+  // though the app itself was working fine.
+  const genMediaMatch = base.match(/\/(?:api\/media|generated|media)\/([^/]+)$/i);
+  if (genMediaMatch) {
+    return `${MEDIA_ORIGIN}/api/media/${genMediaMatch[1]}${suffix}`;
+  }
+
+  // ✅ absolute URL not matching the media patterns above (e.g. Meta/Facebook
+  // CDN scontent URLs) — leave host untouched, just normalize to a full URL.
   if (/^https?:\/\//i.test(base)) {
     try {
       const url = new URL(base + suffix);
-      const idx = url.pathname.indexOf("/api/media/");
-      if (idx >= 0) {
-        const path = url.pathname.slice(idx);
-        return MEDIA_ORIGIN + path + (url.search || "");
-      }
       return url.toString();
     } catch {
       return base + suffix;
@@ -1045,10 +1054,6 @@ function toAbsoluteMedia(u) {
   if (!base.startsWith("/") && /\.(png|jpg|jpeg|webp)$/i.test(base)) {
     return `${MEDIA_ORIGIN}/api/media/${base}${suffix}`;
   }
-
-  // ✅ relative media paths must go to Render too
-  if (base.startsWith("/api/media/")) return MEDIA_ORIGIN + base + suffix;
-  if (base.startsWith("api/media/")) return `${MEDIA_ORIGIN}/${base}${suffix}`;
 
   // other relative paths -> Render
   if (base.startsWith("/")) return MEDIA_ORIGIN + base + suffix;
@@ -3220,7 +3225,7 @@ function CreativeABTestPanel({ optimizerState, campaignId, accountId, adminClien
                 </div>
 
                 {imgUrl ? (
-                  <img src={imgUrl} alt={label} style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                  <img src={imgUrl} alt={label} style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }} onError={(e) => { e.target.style.display = "none"; }} />
                 ) : (
                   <div style={{ height: 80, background: "#f8fafc", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 11, border: "1px dashed #e2e8f0" }}>
                     No image
